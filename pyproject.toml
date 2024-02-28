@@ -12,6 +12,7 @@ dependencies = [
     "jax>=0.4.24",
     "jaxlib>=0.4.24",
     "pytest",
+    "sentencepiece",
     "tensorflow",
     "torch",
     # torch_xla2
