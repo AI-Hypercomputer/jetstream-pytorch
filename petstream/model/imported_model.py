@@ -11,8 +11,8 @@ import numpy as np
 import torch
 from torch.utils import _pytree as pytree
 from torch_xla2.export import exported_program_to_jax
-from .llama2 import model as llama2_model
-from .llama2 import model_exportable
+from llama2 import model as llama2_model
+from llama2 import model_exportable
 import tokenizer
 from tensorflow.compiler.tf2xla.python import xla as tfxla  # pylint: disable=g-direct-tensorflow-import
 from pathlib import Path
