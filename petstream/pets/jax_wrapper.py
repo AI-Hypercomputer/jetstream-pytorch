@@ -12,8 +12,8 @@ import tensorflow as tf
 from torch.fx import _pytree as fx_pytree
 from torch.utils import _pytree as pytree
 
-from .github.imported_model import Llama2ImportedModel
-from .github.model import ModelArgs
+from model.imported_model import Llama2ImportedModel
+from model.llama2.model import ModelArgs
 
 P = jsharding.PartitionSpec
 
