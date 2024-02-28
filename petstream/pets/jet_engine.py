@@ -1,4 +1,4 @@
-"""Implementation of Jet Engine API."""
+"""Implement Jet Engine API."""
 
 import copy
 from typing import Any, List, Optional, Tuple, Union
@@ -8,13 +8,12 @@ import jax
 from jax import numpy as jnp
 from jax.experimental import mesh_utils
 import jax.sharding as jsharding
-from torch_xla2 import tensor  # pylint: disable=unused-import
 
-from google3.learning.gemini.deployment.disaggregation.engine import engine_api
-from google3.learning.gemini.deployment.disaggregation.engine import tokenizer_pb2
-import google3.learning.infra.mira.experimental.pytorch.llama2.jax_wrapper as jw
-from .github.imported_model import Llama2ImportedModel  # pylint: disable=g-importing-member
-from .github.model import ModelArgs  # pylint: disable=g-importing-member
+# from import engine_api
+# from import tokenizer_pb2
+import jax_wrapper as jw
+from .model.imported_model import Llama2ImportedModel
+from .model.llama2.model import ModelArgs
 
 
 DecodeState = jw.LoopState
