@@ -1,4 +1,4 @@
-"""Generate SavedModel from Pytorch XLA compiled llama2 model."""
+"""Run script of the Jet Stream API."""
 
 from typing import Any, Sequence
 
@@ -9,15 +9,15 @@ import jax
 from jax import lax
 from jax import numpy as jnp
 
-from google3.learning.gemini.deployment.disaggregation.engine import engine_api
-import google3.learning.infra.mira.experimental.pytorch.llama2.jax_wrapper as jw
-import google3.learning.infra.mira.experimental.pytorch.llama2.jet_engine as je
+# from import engine_api
+import jax_wrapper as jw
+import jet_engine as je
 
 FLAGS = flags.FLAGS
 
 _TOKENIZER_PATH = flags.DEFINE_string(
     'tokenizer_path',
-    '/var/tmp/models/tokenizer.model',
+    '../model/tokenizer.model',
     'The tokenizer model path',
     required=False,
 )
