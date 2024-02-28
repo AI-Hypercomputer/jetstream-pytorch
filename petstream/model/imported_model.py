@@ -1,4 +1,3 @@
-# pylint: disable-all
 """Import llama2 model."""
 import os
 from typing import Any
@@ -12,13 +11,11 @@ import numpy as np
 import torch
 from torch.utils import _pytree as pytree
 from torch_xla2.export import exported_program_to_jax
-from google3.learning.infra.mira.experimental.pytorch.llama2.github import model as llama2_model
-from google3.learning.infra.mira.experimental.pytorch.llama2.github import model_exportable
-from google3.learning.infra.mira.experimental.pytorch.llama2.github import tokenizer
-# from google3.pyglib.contrib.gpathlib import gpath
-from google3.pyglib import gfile
-from google3.third_party.tensorflow.compiler.tf2xla.python import xla as tfxla  # pylint: disable=g-direct-tensorflow-import
-
+from .llama2 import model as llama2_model
+from .llama2 import model_exportable
+import tokenizer
+from tensorflow.compiler.tf2xla.python import xla as tfxla  # pylint: disable=g-direct-tensorflow-import
+from pathlib import Path
 
 CONTEXT_LENGTH = 2048
 max_input_seq_length = CONTEXT_LENGTH + 256
@@ -167,16 +164,10 @@ def make_decode_input(caches, tokens, position):
 
 def load_checkpoint(checkpoint_dir: str) -> Any:
   if checkpoint_dir:
-    logging.info("Loading checkpoint from %s", checkpoint_dir)
-    # TODO(lancewang): The glob stooped working for me somehow. Switch it back later.
-    # checkpoints = sorted(gpath.GPath(checkpoint_dir).glob("*.pth", mode=gpath.GlobMode.NON_RECURSIVE))
-    # assert len(checkpoints) == 1, f"currently only support one file but get {len(checkpoints)}"
-
-    # For 13 and 70 B models, the checkpoint file are merged into one
-    with gfile.Open(
-        os.path.join(checkpoint_dir, "consolidated.00.pth"), "rb"
-    ) as f:
-      checkpoint = torch.load(f)
+    checkpoints = sorted(Path(checkpoint_dir).glob("*.pth"))
+    assert len(checkpoints) == 1, 'currently only support one file'
+    # Need to merge the checkpoint to 1 file.
+    checkpoint = torch.load(checkpoints[0])
     return checkpoint
   return None
 
