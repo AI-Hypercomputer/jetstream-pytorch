@@ -1,4 +1,4 @@
-"""Generate SavedModel from Pytorch XLA compiled llama2 model."""
+"""Generate Jax wrapper of the imported LLM model."""
 
 from typing import Any, Optional
 
@@ -12,11 +12,8 @@ import tensorflow as tf
 from torch.fx import _pytree as fx_pytree
 from torch.utils import _pytree as pytree
 
-from google3.learning.brain.contrib.tpu_modeling.inference_converter_v2 import converter_options_v2_pb2 as tpu_converter_options_pb2
-from google3.learning.brain.contrib.tpu_modeling.inference_converter_v2.python import converter as tpu_converter
-
-from .github.imported_model import Llama2ImportedModel  # pylint: disable=g-importing-member
-from .github.model import ModelArgs  # pylint: disable=g-importing-member
+from .github.imported_model import Llama2ImportedModel
+from .github.model import ModelArgs
 
 P = jsharding.PartitionSpec
 
@@ -428,68 +425,3 @@ def shard_weights(keys, values, num_of_partitions: int):
         % (name, w.shape, w.dtype, sharding)
     )
   return jax.lax.with_sharding_constraint(values, weight_sharding)
-
-
-# For non LLM
-def _shard_weights(name_to_pos, weight_size, input_size, num_of_partitions):
-  weight_sharding = _variables_sharding_spec(
-      name_to_pos, weight_size, num_of_partitions
-  )
-  input_sharding = _input_sharding_spec(input_size, num_of_partitions)
-  all_sharding = [weight_sharding, input_sharding]
-  sharding = jax.tree_util.tree_map(lambda x: x, all_sharding)
-  print('Jax generate: weight sharding %s, ' % sharding)
-  return sharding
-
-
-def create_tf_module(weights: Any, f_tf: Any) -> tf.Module:
-  """Creates a tf.Module."""
-  tfm = tf.Module()
-  weights_var = tf.nest.map_structure(tf.Variable, weights)
-  prediction_f = lambda inputs: f_tf(weights_var, inputs)
-  tfm._variables = tf.nest.flatten(weights_var)  # pylint: disable=protected-access
-  tfm.inference = tf.function(prediction_f, jit_compile=True, autograph=False)
-  return tfm
-
-
-def convert_to_tpu(
-    export_dir_cpu: str,
-    export_dir_tpu: str,
-    enable_spmd_xla_partitioning: bool = False,
-    num_cores_per_replica: int = -1,
-    topology: bytes = b'',
-    device_assignment: Optional[list[int]] = None,
-):
-  """Converts the model in `export_dir_cpu` to TPU, and writes it to `export_dir_tpu`."""
-  converter_options = tpu_converter_options_pb2.ConverterOptionsV2(
-      disable_default_optimizations=True
-  )
-  converter_options.tpu_functions.add().jit_compile_functions = True
-  if enable_spmd_xla_partitioning:
-    xla_sharding_options = converter_options.xla_sharding_options
-    xla_sharding_options.num_cores_per_replica = num_cores_per_replica
-    xla_sharding_options.topology = topology
-    if device_assignment is not None:
-      xla_sharding_options.device_assignment.extend(device_assignment)
-  tpu_converter.ConvertSavedModel(
-      export_dir_cpu, export_dir_tpu, options=converter_options
-  )
-
-
-def apply_spmd(
-    enable_spmd: bool,
-    jax_func: Any,
-    mapping: Any,
-    weights: Any,
-    num_of_partitions: int,
-) -> Any:
-  """Applied SPMD."""
-  if enable_spmd:
-    input_sharding = _shard_weights(mapping, len(weights), 1, num_of_partitions)
-    fun_jax = pjit.pjit(
-        jax_func, in_shardings=input_sharding, out_shardings=None
-    )
-    return fun_jax
-  else:
-    fun_jax = pjit.pjit(jax_func)
-    return fun_jax
