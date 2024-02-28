@@ -10,8 +10,8 @@ from jax import lax
 from jax import numpy as jnp
 
 # from import engine_api
-import jax_wrapper as jw
-import jet_engine as je
+import pets.jax_wrapper as jw
+import pets.jet_engine as je
 
 FLAGS = flags.FLAGS
 
