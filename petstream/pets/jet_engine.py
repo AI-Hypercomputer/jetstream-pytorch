@@ -9,9 +9,8 @@ from jax import numpy as jnp
 from jax.experimental import mesh_utils
 import jax.sharding as jsharding
 
-# from import engine_api
-# from import tokenizer_pb2
-import pets.jax_wrapper as jw
+from disaggregation.inference_engine import engine_api, tokenizer_pb2
+import jax_wrapper as jw
 from model.imported_model import Llama2ImportedModel
 from model.llama2.model import ModelArgs
 

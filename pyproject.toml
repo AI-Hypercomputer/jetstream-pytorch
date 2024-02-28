@@ -8,6 +8,7 @@ version = "0.0.1"
 name = "petstream"
 dependencies = [
     "absl-py",
+    "disaggregation",
     "flatbuffers",
     "jax>=0.4.24",
     "jaxlib>=0.4.24",
