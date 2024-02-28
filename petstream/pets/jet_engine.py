@@ -11,9 +11,9 @@ import jax.sharding as jsharding
 
 # from import engine_api
 # from import tokenizer_pb2
-import jax_wrapper as jw
-from .model.imported_model import Llama2ImportedModel
-from .model.llama2.model import ModelArgs
+import pets.jax_wrapper as jw
+from model.imported_model import Llama2ImportedModel
+from model.llama2.model import ModelArgs
 
 
 DecodeState = jw.LoopState
