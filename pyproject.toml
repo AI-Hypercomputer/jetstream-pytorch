@@ -29,7 +29,6 @@ dependencies = [
     "sentencepiece",
     "tensorflow",
     "torch",
-    "xla",
     #"torch_xla2",
 ]
 
