@@ -3,6 +3,18 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 
+[tool.poetry]
+name = "petstream-package"
+version = "0.1.0"
+description = "The Pet Stream."
+authors = ["Han Qi <qihan.dev@gmail.com>", "Lance Wang <lancelot.wing@gmail.com>"]
+
+
+[tool.poetry.dependencies]
+python = "^3.9"
+flax = { git = "https://github.com/google/flax.git", branch = "main" }
+
+
 [project]
 version = "0.0.1"
 name = "petstream"
@@ -10,13 +22,15 @@ dependencies = [
     "absl-py",
     "disaggregation",
     "flatbuffers",
+    "flax",
     "jax>=0.4.24",
     "jaxlib>=0.4.24",
     "pytest",
     "sentencepiece",
     "tensorflow",
     "torch",
-    # torch_xla2
+    "xla",
+    #"torch_xla2",
 ]
 
 requires-python = ">=3.10"

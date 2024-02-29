@@ -8,7 +8,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from google3.learning.infra.mira.experimental.pytorch.llama2.github import model as llama_model
+from petstream.model.llama2 import model as llama_model
 
 
 class RMSNorm(torch.nn.Module):

@@ -9,15 +9,14 @@ from jax import numpy as jnp
 from jax.experimental import mesh_utils
 import jax.sharding as jsharding
 
-from disaggregation.inference_engine import engine_api, tokenizer_pb2
-import jax_wrapper as jw
-from model.imported_model import Llama2ImportedModel
-from model.llama2.model import ModelArgs
+from petstream.external import engine_api, tokenizer_pb2
+import petstream.pets.jax_wrapper as jw
+from petstream.model.imported_model import Llama2ImportedModel
+from petstream.model.llama2.model import ModelArgs
 
 
 DecodeState = jw.LoopState
 
-PerRequestHyperparams = Any
 
 Mesh = jax.sharding.Mesh
 P = jax.sharding.PartitionSpec
@@ -25,7 +24,7 @@ P = jax.sharding.PartitionSpec
 Params = jax.Array
 
 Prefix = jw.Prefix
-
+PrefillInputs = jax.Array
 
 class PyTorchEngine(engine_api.Engine):
   """Wraps functions to the Jet Engine API format."""
@@ -68,20 +67,20 @@ class PyTorchEngine(engine_api.Engine):
       *,
       params: Any,  # Weights
       existing_prefix: Optional[Prefix] = None,
-      prefill_inputs: engine_api.PrefillInputs,  # PrefillInputs[jax.Array],
-      per_request_hyperparams: PerRequestHyperparams,
-  ) -> Tuple[Prefix, engine_api.PrefillResult]:
+      prefill_inputs: PrefillInputs,  # PrefillInputs[jax.Array],
+      true_length: int
+  ) -> Prefix:
     # ) -> Prefix:
     model_args = copy.deepcopy(self.param)
     # Prefill generates 1 cache entry a time
     model_args.max_batch_size = 1
 
-    if isinstance(prefill_inputs.discrete_tokens, jax.Array):
-      batched_token = prefill_inputs.discrete_tokens.reshape(1, -1)
+    if isinstance(prefill_inputs, jax.Array):
+      batched_token = prefill_inputs.reshape(1, -1)
     else:
       raise TypeError(
           'Input tokens should be of type Jax Array, but receiving:'
-          ' {prefill_inputs.discrete_tokens}'
+          ' {prefill_inputs}'
       )
 
     # Pytorch model needs the whole decode state.
@@ -93,17 +92,7 @@ class PyTorchEngine(engine_api.Engine):
     prefix, prefill_results = jw.prefill(
         init_decode_state, self.imported_model, model_args, params
     )
-    return (
-        prefix,
-        engine_api.PrefillResult(
-            data=prefill_results.res,
-            embeddings=None,
-            token_scores_idx=(
-                0,
-                0,
-            ),  # Doesn't matter here, the actual index is in DecodeState
-        ),
-    )
+    return prefix
 
   def shrink_prefix(
       self,
@@ -128,7 +117,6 @@ class PyTorchEngine(engine_api.Engine):
       prefix: Prefix,
       decode_state: DecodeState,
       slot: int,
-      per_request_hyperparams: engine_api.PerRequestHyperparams,
   ) -> DecodeState:
     logging.info(
         'Jet input prefix: %s, decode state before insert: %s',
@@ -182,12 +170,9 @@ class PyTorchEngine(engine_api.Engine):
     length = next_token.shape[1]
     result_tokens = engine_api.ResultTokens(
         data=data,
-        # TODO(lancewang): store logits
-        float_data=next_token,
         tokens_idx=(0, length),
         valid_idx=(length, 2 * length),
         length_idx=(2 * length, 2 * length + 1),
-        scores_idx=(0, length),
         samples_per_slot=1,
     )
 
@@ -245,6 +230,9 @@ class PyTorchEngine(engine_api.Engine):
   def load_params(self) -> Params:
     weights = self.imported_model.load_weights()
     return self.imported_model.place_weights(weights)
+
+  def colocated_cpus(self) -> Union[list[engine_api.CpuDevices], None]:
+    return jax.devices()[0]
 
   @property
   def replicated_sharding(self) -> jax.sharding.NamedSharding:

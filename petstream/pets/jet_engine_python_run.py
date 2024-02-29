@@ -9,15 +9,15 @@ import jax
 from jax import lax
 from jax import numpy as jnp
 
-# from import engine_api
-import pets.jax_wrapper as jw
-import pets.jet_engine as je
+from petstream.external import engine_api
+from petstream.pets import jax_wrapper as jw
+from petstream.pets import jet_engine as je
 
 FLAGS = flags.FLAGS
 
 _TOKENIZER_PATH = flags.DEFINE_string(
     'tokenizer_path',
-    '../model/tokenizer.model',
+    'petstream/model/tokenizer.model',
     'The tokenizer model path',
     required=False,
 )
@@ -73,20 +73,16 @@ class JetEngineWrapper:
   ) -> jw.LoopState:
     """Prefills and inserts a slot."""
 
-    prefix, _ = self.engine.prefill(
+    prefix = self.engine.prefill(
         params=weights,
-        prefill_inputs=engine_api.PrefillInputs(
-            discrete_tokens=input_tokens,
-            true_length=jnp.array(len(input_tokens)),
-        ),
-        per_request_hyperparams=None,
+        prefill_inputs=input_tokens,
+        true_length=jnp.array(len(input_tokens)),
     )
     print(f'Prefix: {prefix}, decode_state: {decode_state}')
     return self.engine.insert(
         prefix,
         decode_state,
         jnp.int32(slot),
-        engine_api.PerRequestHyperparams(),
     )
 
   def wrap_for_loop(self) -> Any:
