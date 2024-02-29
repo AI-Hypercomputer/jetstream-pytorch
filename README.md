@@ -24,5 +24,5 @@ Switch to your Cloud top, run:
 export profiling_result = Some google generated folder in your gcs bucket
 petstream/gcs_to_cns.sh {{profiling_result}}
 
-Load to Xprof/Offeline/Xplane
+The dump will always be in this directory: /cns/pi-d/home/{USER}/tensorboard/multislice/, load to Xprof/Offeline/Xplane
 ```
