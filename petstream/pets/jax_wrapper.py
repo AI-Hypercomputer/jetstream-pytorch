@@ -8,7 +8,6 @@ from jax import numpy as jnp
 from jax.experimental import mesh_utils
 from jax.experimental import pjit
 import jax.sharding as jsharding
-import tensorflow as tf
 from torch.fx import _pytree as fx_pytree
 from torch.utils import _pytree as pytree
 
