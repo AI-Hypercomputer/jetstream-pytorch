@@ -14,7 +14,6 @@ from torch_xla2.export import exported_program_to_jax
 from ..model.llama2 import model as llama2_model
 from ..model.llama2 import model_exportable
 from ..model import tokenizer
-from tensorflow.compiler.tf2xla.python import xla as tfxla  # pylint: disable=g-direct-tensorflow-import
 from pathlib import Path
 
 CONTEXT_LENGTH = 2048
@@ -102,27 +101,6 @@ def flatten_state_dict(state_dict):
     name_to_pos[name] = i
     i += 1
   return res, name_to_pos
-
-
-def wrap_as_jax_func(func, mappings):
-  """Wraps a function as a JAX function."""
-
-  touts = [sig.dtype for sig in func.meta.output_signature]
-  souts = [sig.shape for sig in func.meta.output_signature]
-
-  def inner(weights, args):
-    full_args = (weights, args)  # (296), (1)
-    call_args = [full_args[type_][index] for type_, index in mappings]
-    return tfxla.call_module(
-        tuple(call_args),
-        version=5,
-        Tout=touts,  # dtype information
-        Sout=souts,  # Shape information
-        function_list=[],
-        module=func.bytecode,
-    )
-
-  return jax2tf.call_tf(inner)
 
 
 def tensor_to_jax_array(tensor):
