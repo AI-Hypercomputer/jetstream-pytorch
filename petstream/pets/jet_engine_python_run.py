@@ -12,6 +12,7 @@ from jax import numpy as jnp
 from petstream.external import engine_api
 from petstream.pets import jax_wrapper as jw
 from petstream.pets import jet_engine as je
+import os
 
 FLAGS = flags.FLAGS
 
@@ -33,7 +34,12 @@ _CONTEXT_LENGTH = flags.DEFINE_integer(
 _BATCH_SIZE = flags.DEFINE_integer(
     'batch_size', 1, 'The batch size', required=False
 )
-
+_PROFILING_OUTPUT =flags.DEFINE_string(
+    'profiling_output',
+    '',
+    'The profiling output',
+    required=False,
+)
 
 class JetEngineWrapper:
   """Wraps a JetEngine."""
@@ -120,6 +126,8 @@ class JetEngineWrapper:
 
 def main(argv: Sequence[str]) -> None:
   """Produces SavedModel from PytorchXLA compiled model."""
+  os.environ["TF_CPP_MIN_LOG_LEVEL"] = "0"
+
   for flag in FLAGS.flags_by_module_dict()[argv[0]]:
     logging.info('flag.name=%s, flag.value=%r', flag.name, flag.value)
   del argv
@@ -151,7 +159,11 @@ def main(argv: Sequence[str]) -> None:
       batch_size,
       imported.model_args.max_seq_len,
   ))
-  jax_model(weights, input_tokens)
+  if _PROFILING_OUTPUT.value:
+   jax.profiler.start_trace(_PROFILING_OUTPUT.value)
+  jax.block_until_ready(jax_model(weights, input_tokens))
+  if _PROFILING_OUTPUT.value:
+   jax.profiler.stop_trace()
   return
 
 

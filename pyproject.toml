@@ -25,9 +25,9 @@ dependencies = [
     "flax",
     "jax>=0.4.24",
     "jaxlib>=0.4.24",
-    "pytest",
     "sentencepiece",
     "torch",
+    "pytest",
     #"torch_xla2",
 ]
 
