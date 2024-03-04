@@ -10,15 +10,15 @@ from jax import lax
 from jax import numpy as jnp
 
 from petstream.external import engine_api
-from petstream.pets import jax_wrapper as jw
-from petstream.pets import jet_engine as je
+from petstream import jax_wrapper as jw
+from petstream import jet_engine as je
 import os
 
 FLAGS = flags.FLAGS
 
 _TOKENIZER_PATH = flags.DEFINE_string(
     'tokenizer_path',
-    'petstream/model/tokenizer.model',
+    'petstream/pets/tokenizer.model',
     'The tokenizer model path',
     required=False,
 )

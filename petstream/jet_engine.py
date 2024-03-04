@@ -10,9 +10,9 @@ from jax.experimental import mesh_utils
 import jax.sharding as jsharding
 
 from petstream.external import engine_api, tokenizer_pb2
-import petstream.pets.jax_wrapper as jw
-from petstream.model.imported_model import Llama2ImportedModel
-from petstream.model.llama2.model import ModelArgs
+import petstream.jax_wrapper as jw
+from petstream.pets.imported_model import Llama2ImportedModel
+from petstream.pets.llama2.model_args import ModelArgs
 
 
 DecodeState = jw.LoopState

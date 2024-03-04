@@ -8,7 +8,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from petstream.model.llama2 import model as llama_model
+from . import model_args 
 
 
 class RMSNorm(torch.nn.Module):
@@ -77,7 +77,7 @@ def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
 class Attention(nn.Module):
   """Attention module."""
 
-  def __init__(self, args: llama_model.ModelArgs):
+  def __init__(self, args: model_args.ModelArgs):
     super().__init__()
 
     self.n_kv_heads = (
@@ -217,7 +217,7 @@ class TransformerBlock(nn.Module):
   def __init__(
       self,
       layer_id: int,
-      args: llama_model.ModelArgs,
+      args: model_args.ModelArgs,
       groups: Optional[List[Any]] = None,
   ):
     super().__init__()
@@ -269,7 +269,7 @@ class Transformer(nn.Module):
 
   def __init__(
       self,
-      params: llama_model.ModelArgs,
+      params: model_args.ModelArgs,
       world_size: Optional[int] = None,
       rank: Optional[int] = None,
       groups: Optional[List[Any]] = None,

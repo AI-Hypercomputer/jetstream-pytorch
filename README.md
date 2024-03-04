@@ -12,13 +12,13 @@ pip install -e .
 
 # Local run
 ```
-python -m petstream.pets.jet_engine_python_run --bf16_enable=True --context_length=8 --batch_size=2
+python -m petstream.jet_engine_python_run --bf16_enable=True --context_length=8 --batch_size=2
 ```
 
 # Profiling
 ```
 export profiling_output = Some gcs bucket
-python -m petstream.pets.jet_engine_python_run --bf16_enable=True --context_length=8 --batch_size=2 --profiling_output={{profiling_output}}
+python -m petstream.jet_engine_python_run --bf16_enable=True --context_length=8 --batch_size=2 --profiling_output={{profiling_output}}
 
 Switch to your Cloud top, run:
 export profiling_result = Some google generated folder in your gcs bucket

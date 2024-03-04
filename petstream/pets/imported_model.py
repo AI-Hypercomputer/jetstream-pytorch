@@ -11,16 +11,16 @@ import numpy as np
 import torch
 from torch.utils import _pytree as pytree
 from torch_xla2.export import exported_program_to_jax
-from ..model.llama2 import model as llama2_model
-from ..model.llama2 import model_exportable
-from ..model import tokenizer
+from .llama2 import model_args
+from .llama2 import model_exportable
+from . import tokenizer
 from pathlib import Path
 
 CONTEXT_LENGTH = 2048
 max_input_seq_length = CONTEXT_LENGTH + 256
 
 
-def make_cache(args: llama2_model.ModelArgs, batch_size: int | None = None):
+def make_cache(args: model_args.ModelArgs, batch_size: int | None = None):
   """Creates a cache for each layer."""
 
   head_dim = args.dim // args.n_heads
@@ -45,7 +45,7 @@ def get_arg(
     batch_size,
     vocab_size: int,
     bf16_enable: bool = False,
-) -> llama2_model.ModelArgs:
+) -> model_args.ModelArgs:
   """Gets model args."""
 
   data = {}
@@ -83,7 +83,7 @@ def get_arg(
         "n_layers": 80,
         "norm_eps": 1e-05,
     }
-  return llama2_model.ModelArgs(
+  return model_args.ModelArgs(
       max_seq_len=seqlen,
       max_batch_size=batch_size,
       vocab_size=vocab_size,

@@ -11,8 +11,8 @@ import jax.sharding as jsharding
 from torch.fx import _pytree as fx_pytree
 from torch.utils import _pytree as pytree
 
-from petstream.model.imported_model import Llama2ImportedModel
-from petstream.model.llama2.model import ModelArgs
+from petstream.pets.imported_model import Llama2ImportedModel
+from petstream.pets.llama2.model_args import ModelArgs
 
 P = jsharding.PartitionSpec
 
