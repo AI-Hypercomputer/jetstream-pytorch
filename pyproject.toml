@@ -28,6 +28,7 @@ dependencies = [
     "sentencepiece",
     "torch",
     "pytest",
+    "google-jetstream",
     #"torch_xla2",
 ]
 

@@ -9,10 +9,17 @@ from jax import numpy as jnp
 from jax.experimental import mesh_utils
 import jax.sharding as jsharding
 
+<<<<<<< HEAD:petstream/jet_engine.py
 from petstream.external import engine_api, tokenizer_pb2
 import petstream.jax_wrapper as jw
 from petstream.pets.imported_model import Llama2ImportedModel
 from petstream.pets.llama2.model_args import ModelArgs
+=======
+from jetstream.engine import engine_api, tokenizer_pb2
+import petstream.pets.jax_wrapper as jw
+from petstream.model.imported_model import Llama2ImportedModel
+from petstream.model.llama2.model import ModelArgs
+>>>>>>> 8eb7861 (Switch to the official JetStream github repo.):petstream/pets/jet_engine.py
 
 
 DecodeState = jw.LoopState
