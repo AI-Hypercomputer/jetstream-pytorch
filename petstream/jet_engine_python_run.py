@@ -9,15 +9,9 @@ import jax
 from jax import lax
 from jax import numpy as jnp
 
-<<<<<<< HEAD:petstream/jet_engine_python_run.py
-from petstream.external import engine_api
+from jetstream.engine import engine_api
 from petstream import jax_wrapper as jw
 from petstream import jet_engine as je
-=======
-from jetstream.engine import engine_api
-from petstream.pets import jax_wrapper as jw
-from petstream.pets import jet_engine as je
->>>>>>> 8eb7861 (Switch to the official JetStream github repo.):petstream/pets/jet_engine_python_run.py
 import os
 
 FLAGS = flags.FLAGS
