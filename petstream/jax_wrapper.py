@@ -11,8 +11,9 @@ import jax.sharding as jsharding
 from torch.fx import _pytree as fx_pytree
 from torch.utils import _pytree as pytree
 
-from petstream.pets.imported_model import Llama2ImportedModel
+from petstream.pets.imported_model import ImportedModel
 from petstream.pets.llama2.model_args import ModelArgs
+from petstream.pets.llama2.model_utils import input_output_spec
 
 P = jsharding.PartitionSpec
 
@@ -169,12 +170,12 @@ class PrefillResult:
 
 def prefill(
     prefill_states: LoopState,
-    model: Llama2ImportedModel,
+    model: ImportedModel,
     model_args: ModelArgs,
     weights: ...,
 ) -> tuple[Prefix, PrefillResult]:
   """Prefills the KV cache."""
-  in_spec, out_spec = model.input_output_spec()
+  in_spec, out_spec = input_output_spec(model_args)
   # in_spec = model.jax_program.exported_program.call_spec.in_spec
   # out_spec = model.jax_program.exported_program.call_spec.out_spec
   inputs = fx_pytree.tree_flatten_spec(
@@ -235,7 +236,7 @@ def update_pos(model_args: ModelArgs, pos: jnp.ndarray) -> jnp.ndarray:
 
 def generate_shlo(
     generate_states: LoopState,
-    model: Llama2ImportedModel,
+    model: ImportedModel,
     model_args: ModelArgs,
     weights: ...,
 ) -> tuple[jnp.ndarray, Any]:
@@ -254,7 +255,7 @@ def generate_shlo(
     The next token
     The updated kv cache
   """
-  in_spec, out_spec = model.input_output_spec()
+  in_spec, out_spec = input_output_spec(model_args)
   inputs = fx_pytree.tree_flatten_spec(
       (
           generate_states.tokens,
@@ -276,7 +277,7 @@ def generate_shlo(
 
 def generate(
     generate_states: LoopState,
-    model: Llama2ImportedModel,
+    model: ImportedModel,
     model_args: ModelArgs,
     weights: ...,
 ) -> LoopState:

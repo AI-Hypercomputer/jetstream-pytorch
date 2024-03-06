@@ -9,11 +9,12 @@ from jax import numpy as jnp
 from jax.experimental import mesh_utils
 import jax.sharding as jsharding
 
-from jetstream.engine import engine_api, tokenizer_pb2
+from jetstream.engine import engine_api, tokenizer_pb2, token_utils
 import petstream.jax_wrapper as jw
-from petstream.pets.imported_model import Llama2ImportedModel
-from petstream.pets.llama2.model_args import ModelArgs
-
+from .pets.imported_model import ImportedModel
+from .pets.llama2.model_args import ModelArgs
+from .pets.llama2 import model_exportable, model_utils
+from .pets import tokenizer
 
 DecodeState = jw.LoopState
 
@@ -32,8 +33,8 @@ class PyTorchEngine(engine_api.Engine):
   def __init__(
       self,
       devices: Union[List[Any], Mesh],
-      imported_model: Llama2ImportedModel,
-      tokenizer_path: str,
+      imported_model: ImportedModel,
+      tokenizer: Any,
       samples_per_slot: int,
       max_decode_length: int,
   ):
@@ -41,7 +42,7 @@ class PyTorchEngine(engine_api.Engine):
     self.num_of_partitions = len(devices)
     self.imported_model = imported_model
     self.param: ModelArgs = self.imported_model.model_args
-    self.tokenizer_path = tokenizer_path
+    self.tokenizer = tokenizer
     self.samples_per_slot_input = samples_per_slot
     self._max_decode_length = max_decode_length
 
@@ -305,6 +306,7 @@ def create_pytorch_engine(
     context_length: int = 1024,
     batch_size: int = 1,
     max_decode_length: int = 4096,
+    model_name = "llama"
 ) -> PyTorchEngine:
   """Returns: The pytorch engine."""
 
@@ -314,18 +316,36 @@ def create_pytorch_engine(
   jax.config.update('jax_enable_x64', True)
   jax.config.update('jax_traceback_filtering', 'off')
 
+  sample_input_prefill = None
+  sample_input_decode = None
+  tokenizer = token_utils.load_vocab(tokenizer_path)
+  pt_model = None
+  shard_weights_fn = None
+  if model_name == "llama":
+    model_args = model_utils.get_model_args(param_size, context_length, batch_size, tokenizer.vocab_size, bf16_enable)
+    pt_model = model_exportable.Transformer(model_args)
+    prefill_caches = model_utils.make_cache(model_args, 1)
+    decode_caches = model_utils.make_cache(model_args, batch_size)
+    sample_input_prefill =  model_utils.make_prefill_input(context_length, prefill_caches)
+    sample_input_decode = model_utils.make_decode_input(context_length, decode_caches, batch_size)
+    shard_weights_fn = model_utils.shard_weights
+
   return PyTorchEngine(
       devices=devices,
-      imported_model=Llama2ImportedModel(
+      imported_model=ImportedModel(
           param_size=param_size,
           context_length=context_length,
           ckpt_path=ckpt_path,
-          tokenizer_path=tokenizer_path,
           batch_size=batch_size,
           bf16_enable=bf16_enable,
           num_of_partitions=len(devices),
+          pt_model = pt_model,
+          input_prefill = sample_input_prefill,
+          input_decode = sample_input_decode,
+          model_args = model_args,
+          shard_weights_fn = shard_weights_fn,
       ),
-      tokenizer_path=tokenizer_path,
+      tokenizer=tokenizer,
       samples_per_slot=samples_per_slot,
       max_decode_length=max_decode_length,
   )
