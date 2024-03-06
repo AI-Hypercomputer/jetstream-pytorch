@@ -7,7 +7,7 @@ build-backend = "hatchling.build"
 name = "petstream-package"
 version = "0.1.0"
 description = "The Pet Stream."
-authors = ["Han Qi <qihan.dev@gmail.com>", "Lance Wang <lancelot.wing@gmail.com>"]
+authors = ["Han Qi <qihan.dev@gmail.com>", "Lance Wang <lancelot.wing@gmail.com>", "Fanhai Lu <fanhai@google.com>"]
 
 
 [tool.poetry.dependencies]
@@ -20,7 +20,6 @@ version = "0.0.1"
 name = "petstream"
 dependencies = [
     "absl-py",
-    "disaggregation",
     "flatbuffers",
     "flax",
     "jax>=0.4.24",
