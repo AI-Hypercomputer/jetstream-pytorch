@@ -4,7 +4,8 @@
 import torch
 import jax.numpy as jnp
 import numpy as np
-
+from pathlib import Path
+from typing import Any
 
 def p2n(t):
   if isinstance(t, torch.Tensor):
@@ -29,3 +30,13 @@ def n2jtype(t: np.ndarray):
   elif t.dtype == np.complex64:
     d = jnp.complex64
   return d
+
+
+def load_checkpoint(checkpoint_dir: str) -> Any:
+  if checkpoint_dir:
+    checkpoints = sorted(Path(checkpoint_dir).glob("*.pth"))
+    assert len(checkpoints) == 1, 'currently only support one file'
+    # Need to merge the checkpoint to 1 file.
+    checkpoint = torch.load(checkpoints[0])
+    return checkpoint
+  return None

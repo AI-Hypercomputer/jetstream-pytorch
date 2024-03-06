@@ -11,66 +11,7 @@ import torch
 from torch.utils import _pytree as pytree
 from torch_xla2.export import exported_program_to_jax
 from .llama2 import model_args
-from pathlib import Path
-
-
-def flatten_state_dict(state_dict):
-  i = 0
-  res = []
-  name_to_pos = {}
-  for name, val in state_dict.items():
-    res.append(val)
-    name_to_pos[name] = i
-    i += 1
-  return res, name_to_pos
-
-
-def tensor_to_jax_array(tensor):
-  if isinstance(tensor, torch.Tensor):
-    tensor = tensor.detach().cpu().numpy()
-  return tensor
-
-
-def _fill_freqs_cis(state_dict, model_args):
-  state_dict["L__fn___freqs_cis"] = llama2_model.precompute_freqs_cis(
-      model_args.dim // model_args.n_heads, model_args.max_seq_len * 2
-  )
-
-
-def load_checkpoint(checkpoint_dir: str) -> Any:
-  if checkpoint_dir:
-    checkpoints = sorted(Path(checkpoint_dir).glob("*.pth"))
-    assert len(checkpoints) == 1, 'currently only support one file'
-    # Need to merge the checkpoint to 1 file.
-    checkpoint = torch.load(checkpoints[0])
-    return checkpoint
-  return None
-
-
-def p2n(t):
-  if isinstance(t, torch.Tensor):
-    if t.dtype == torch.bfloat16:
-      # Numpy doesn't have bf16 support. Convert to f32 as intermediate step.
-      t = t.to(torch.float32).detach().cpu().numpy()
-    else:
-      t = t.detach().cpu().numpy()
-  return t
-
-
-def n2jtype(t: np.ndarray):
-  """Converts a numpy data type to jax data type."""
-
-  d = jnp.float32
-  if t.dtype == np.float32:
-    d = jnp.bfloat16
-  elif t.dtype == np.int32:
-    d = jnp.int32
-  elif t.dtype == np.int64:
-    d = jnp.int64
-  elif t.dtype == np.complex64:
-    d = jnp.complex64
-  return d
-
+from . import utils
 
 class ImportedModel:
   """Imported transformer model."""
@@ -127,7 +68,7 @@ class ImportedModel:
     )
 
   def load_weights(self) -> Any:
-    checkpoint = load_checkpoint(self.ckpt_path)
+    checkpoint = utils.load_checkpoint(self.ckpt_path)
     if checkpoint:
       self.pt_model.load_state_dict(checkpoint, strict=False)
       self.convert_to_jax_fn()
@@ -147,7 +88,7 @@ class ImportedModel:
 
   def place_weights(self, weights) -> Any:
     return jax.tree_map(
-        lambda x: jnp.asarray(x, dtype=n2jtype(x)),
+        lambda x: jnp.asarray(x, dtype=utils.n2jtype(x)),
         weights,
     )
 
