@@ -35,6 +35,7 @@ class PyTorchEngine(engine_api.Engine):
       devices: Union[List[Any], Mesh],
       imported_model: ImportedModel,
       tokenizer: Any,
+      tokenizer_path: str,
       samples_per_slot: int,
       max_decode_length: int,
   ):
@@ -43,6 +44,7 @@ class PyTorchEngine(engine_api.Engine):
     self.imported_model = imported_model
     self.param: ModelArgs = self.imported_model.model_args
     self.tokenizer = tokenizer
+    self.tokenizer_path = tokenizer_path
     self.samples_per_slot_input = samples_per_slot
     self._max_decode_length = max_decode_length
 
@@ -216,8 +218,7 @@ class PyTorchEngine(engine_api.Engine):
     )
 
   def get_tokenizer(self) -> tokenizer_pb2.TokenizerParameters:
-    tokenizer = tokenizer_pb2.TokenizerParameters(path=self.tokenizer_path)
-    return tokenizer
+    return tokenizer_pb2.TokenizerParameters(path=self.tokenizer_path)
 
   def join_prefixes(
       self,
@@ -346,6 +347,7 @@ def create_pytorch_engine(
           shard_weights_fn = shard_weights_fn,
       ),
       tokenizer=tokenizer,
+      tokenizer_path=tokenizer_path,
       samples_per_slot=samples_per_slot,
       max_decode_length=max_decode_length,
   )
