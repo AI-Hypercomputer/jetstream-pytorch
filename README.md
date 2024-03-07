@@ -19,6 +19,7 @@ python -m petstream.jet_engine_python_run --bf16_enable=True --context_length=8 
 ```
 python -m run_server
 By default it runs on 'tpu=4', add --platform='cpu=1' if you are running on CPU
+By default it runs with tiny model, add --param_size='7b' to run 7b model
 
 Firing the request with:
 python jetstream/core/tools/requester.py

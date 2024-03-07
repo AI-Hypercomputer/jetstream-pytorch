@@ -51,6 +51,12 @@ _PLATFORM =flags.DEFINE_string(
     'The platform that the engine runs on',
     required=False,
 )
+_PARAM_SIZE =flags.DEFINE_string(
+    'param_size',
+    '7b',
+    'The model size the server runs on.',
+    required=False,
+)
 
 def main(argv: Sequence[str]):
   del argv
@@ -61,7 +67,7 @@ def main(argv: Sequence[str]):
         tokenizer_path=_TOKENIZER_PATH.value,
         ckpt_path=_CKPT_PATH.value,
         bf16_enable=True,
-        param_size='7b',
+        param_size=_PARAM_SIZE.value,
         context_length=_CONTEXT_LENGTH.value,
         batch_size=_BATCH_SIZE.value,
         platform=_PLATFORM.value,

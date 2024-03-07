@@ -70,10 +70,11 @@ class PyTorchEngine(engine_api.Engine):
       *,
       params: Any,  # Weights
       existing_prefix: Optional[Prefix] = None,
-      prefill_inputs: PrefillInputs,  # PrefillInputs[jax.Array],
+      padded_tokens: PrefillInputs,  # PrefillInputs[jax.Array],
       true_length: int
   ) -> Prefix:
     # ) -> Prefix:
+    prefill_inputs = padded_tokens
     model_args = copy.deepcopy(self.param)
     # Prefill generates 1 cache entry a time
     model_args.max_batch_size = 1

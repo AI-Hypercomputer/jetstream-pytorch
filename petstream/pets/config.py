@@ -19,7 +19,7 @@ def create_config(
             tokenizer_path=tokenizer_path,
             ckpt_path=ckpt_path,
             bf16_enable=bf16_enable,
-            param_size='tiny',
+            param_size=param_size,
             context_length=context_length,
             batch_size=batch_size,
         )
