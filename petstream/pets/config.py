@@ -10,6 +10,7 @@ def create_config(
             param_size,
             context_length,
             batch_size,
+            platform,
 ):
     def func(a):
         from petstream.jet_engine import PyTorchEngine
@@ -25,6 +26,6 @@ def create_config(
 
 
     return ServerConfig(
-        interleaved_slices=('tpu=4', ),
+        interleaved_slices=(platform, ),
         interleaved_engine_create_fns=(func, ),
     )

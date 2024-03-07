@@ -15,6 +15,15 @@ pip install -e .
 python -m petstream.jet_engine_python_run --bf16_enable=True --context_length=8 --batch_size=2
 ```
 
+# Bring up server
+```
+python -m run_server
+By default it runs on 'tpu=4', add --platform='cpu=1' if you are running on CPU
+
+Firing the request with:
+python jetstream/core/tools/requester.py
+```
+
 # Profiling
 ```
 export profiling_output = Some gcs bucket

@@ -45,6 +45,12 @@ _PROFILING_OUTPUT =flags.DEFINE_string(
     'The profiling output',
     required=False,
 )
+_PLATFORM =flags.DEFINE_string(
+    'platform',
+    'tpu=4',
+    'The platform that the engine runs on',
+    required=False,
+)
 
 def main(argv: Sequence[str]):
   del argv
@@ -58,6 +64,7 @@ def main(argv: Sequence[str]):
         param_size='7b',
         context_length=_CONTEXT_LENGTH.value,
         batch_size=_BATCH_SIZE.value,
+        platform=_PLATFORM.value,
   )
 
   # We separate credential from run so that we can unit test it with local credentials.

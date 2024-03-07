@@ -313,7 +313,7 @@ def create_pytorch_engine(
   # See issue b/309529778 if it's turned on.
   jax.config.update('jax_dynamic_shapes', False)
   # Pytorch exports has int64 constants.
-  jax.config.update('jax_enable_x64', True)
+  # jax.config.update('jax_enable_x64', True)
   jax.config.update('jax_traceback_filtering', 'off')
 
   sample_input_prefill = None
