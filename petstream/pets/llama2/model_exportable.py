@@ -9,15 +9,30 @@ from torch import nn
 import torch.nn.functional as F
 
 from . import model_args 
+import jax.sharding as jsharding
+from jax.experimental import mesh_utils
+import jax
+
+hanq_flag = False
+
+def make_replicated_sharding():
+  P = jsharding.PartitionSpec
+  num_devices = len(jax.devices())
+  mesh = jsharding.Mesh(
+      mesh_utils.create_device_mesh((num_devices, 1)),
+      axis_names=("x", "y"),
+  )
+  replicated = jsharding.NamedSharding(mesh, P())
+  return replicated
 
 
 class RMSNorm(torch.nn.Module):
   """RMSNorm module."""
 
-  def __init__(self, dim: int, eps: float = 1e-6):
+  def __init__(self, dim: int, eps: float = 1e-6, device='meta'):
     super().__init__()
     self.eps = eps
-    self.weight = nn.Parameter(torch.ones(dim))
+    self.weight = nn.Parameter(torch.ones(dim, device=device))
 
   def _norm(self, x):
     return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
@@ -42,7 +57,7 @@ def reshape_for_broadcast(
 ) -> torch.Tensor:
   ndim = x.ndim
   assert 1 < ndim
-  assert freqs_cis.shape == (x.shape[-3], x.shape[-1])
+  assert freqs_cis.shape == (x.shape[-3], x.shape[-1]), x.shape
   shape = [d if i == 1 or i == ndim - 1 else 1 for i, d in enumerate(x.shape)]
   return freqs_cis.view(*shape)
 
@@ -94,21 +109,25 @@ class Attention(nn.Module):
         args.dim,
         args.n_heads * self.head_dim,
         bias=False,
+        device=args.device,
     )
     self.wk = nn.Linear(
         args.dim,
         self.n_kv_heads * self.head_dim,
         bias=False,
+        device=args.device,
     )
     self.wv = nn.Linear(
         args.dim,
         self.n_kv_heads * self.head_dim,
         bias=False,
+        device=args.device,
     )
     self.wo = nn.Linear(
         args.n_heads * self.head_dim,
         args.dim,
         bias=False,
+        device=args.device,
     )
 
   def forward(
@@ -124,6 +143,7 @@ class Attention(nn.Module):
   ):
     # bsz, seqlen, _ = x.shape
     bsz, seqlen = x.shape[0], x.shape[-2]
+    # qkv fuse
     xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
 
     xq = xq.view(bsz, seqlen, self.n_local_heads, self.head_dim)
@@ -135,7 +155,7 @@ class Attention(nn.Module):
 
     xk = xk.transpose(-3, -2)
     xv = xv.transpose(-3, -2)
-
+    ###
     if prefill:
       # Assumes prefill only
       cache_k = xk
@@ -151,6 +171,13 @@ class Attention(nn.Module):
           torch.arange(self.max_seq_len).reshape(1, 1, self.max_seq_len, 1)
           .expand(bsz, self.n_local_kv_heads, self.max_seq_len, self.head_dim)
       )
+      if hanq_flag:
+        iota = torch_xla2.call_jax(
+          jax.lax.with_sharding_constraint,
+          iota, 
+          make_replicated_sharding()
+        )
+
       cache_k = torch.where(iota == input_indexes.expand(self.max_seq_len).reshape(1, 1, self.max_seq_len, 1), xk, cache_k)
       cache_v = torch.where(iota == input_indexes.expand(self.max_seq_len).reshape(1, 1, self.max_seq_len, 1), xv, cache_v)
 
@@ -160,7 +187,7 @@ class Attention(nn.Module):
     values = repeat_kv(
         cache_v, self.n_rep
     )  # (bs, n_local_heads, seqlen, head_dim)
-
+    # (b, i, j) x (b, j, k) -> (b, i, k)
     scores = torch.einsum("ijkl,ikml->ikjm", xq, keys) / math.sqrt(
         self.head_dim
     )
@@ -183,6 +210,7 @@ class FeedForward(nn.Module):
       hidden_dim: int,
       multiple_of: int,
       ffn_dim_multiplier: Optional[float],
+      device = 'meta',
   ):
     super().__init__()
     hidden_dim = int(2 * hidden_dim / 3)
@@ -195,16 +223,19 @@ class FeedForward(nn.Module):
         dim,
         hidden_dim,
         bias=False,
+        device=device,
     )
     self.w2 = nn.Linear(
         hidden_dim,
         dim,
         bias=False,
+        device=device,
     )
     self.w3 = nn.Linear(
         dim,
         hidden_dim,
         bias=False,
+        device=device,
     )
 
   def forward(self, x):
@@ -233,10 +264,11 @@ class TransformerBlock(nn.Module):
         hidden_dim=4 * args.dim,
         multiple_of=args.multiple_of,
         ffn_dim_multiplier=args.ffn_dim_multiplier,
+        device=args.device
     )
     self.layer_id = layer_id
-    self.attention_norm = RMSNorm(args.dim, eps=args.norm_eps)
-    self.ffn_norm = RMSNorm(args.dim, eps=args.norm_eps)
+    self.attention_norm = RMSNorm(args.dim, eps=args.norm_eps, device=args.device)
+    self.ffn_norm = RMSNorm(args.dim, eps=args.norm_eps, device=args.device)
 
   def forward(
       self,
@@ -282,6 +314,7 @@ class Transformer(nn.Module):
     self.tok_embeddings = nn.Embedding(
         params.vocab_size,
         params.dim,
+        device=params.device,
     )
 
     self.layers = torch.nn.ModuleList()
@@ -293,24 +326,27 @@ class Transformer(nn.Module):
           )
       )
 
-    self.norm = RMSNorm(params.dim, eps=params.norm_eps)
+    self.norm = RMSNorm(params.dim, eps=params.norm_eps, device=params.device)
     self.output = nn.Linear(
         params.dim,
         params.vocab_size,
         bias=False,
+        device=params.device,
     )
 
+    # TODO what to do with this
     freqs_cis = precompute_freqs_cis(
         self.params.dim // self.params.n_heads, self.params.max_seq_len * 2
     )
-    # self.register_buffer("freqs_cis", freqs_cis)
-    self.freqs_cis = freqs_cis
+
+    self.register_buffer("freqs_cis", freqs_cis)
+
     mask = torch.full(
         (1, 1, self.params.max_seq_len, self.params.max_seq_len), float("-inf")
     ).to(torch.bfloat16 if self.params.bf16_enable else torch.float)
+
     mask = torch.triu(mask, diagonal=1)
-    self.mask = mask
-    # self.register_buffer("mask", mask)
+    self.register_buffer("mask", mask)
 
   @torch.no_grad()
   def forward(
@@ -324,12 +360,7 @@ class Transformer(nn.Module):
     seqlen = tokens.shape[-1]
     h = self.tok_embeddings(tokens)
     freqs_cis = self.freqs_cis.index_select(0, input_indexes)
-    mask = None
-    if prefill:
-      mask = torch.full((1, 1, seqlen, seqlen), float("-inf")).to(
-          torch.bfloat16 if self.params.bf16_enable else torch.float
-      )
-      mask = torch.triu(mask, diagonal=1)
+    mask = self.mask if prefill else None
 
     new_caches = []
     for layer, (cache_k, cache_v) in zip(self.layers, caches):

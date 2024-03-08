@@ -6,6 +6,8 @@ from torch.utils import _pytree as pytree
 import torch
 from typing import Any
 from .. import utils
+import numpy as np
+from jax import numpy as jnp
 
 def get_arg(
     param_size: str,
@@ -82,8 +84,9 @@ def make_cache(args: model_args.ModelArgs, batch_size: int | None = None):
 
   head_dim = args.dim // args.n_heads
   res = []
+  kv_heads = args.n_kv_heads if args.n_kv_heads is not None else args.n_heads
   for _ in range(args.n_layers):
-    k_size = (batch_size, args.n_kv_heads, args.max_seq_len, head_dim)
+    k_size = (batch_size, kv_heads, args.max_seq_len, head_dim)
     v_size = k_size
     res.append((
         torch.zeros(
@@ -97,6 +100,20 @@ def make_cache(args: model_args.ModelArgs, batch_size: int | None = None):
 
 
 P = jsharding.PartitionSpec
+
+def n2jtype(t: np.ndarray):
+  """Converts a numpy data type to jax data type."""
+
+  d = jnp.float32
+  if t.dtype == np.float32:
+    d = jnp.bfloat16
+  elif t.dtype == np.int32:
+    d = jnp.int32
+  elif t.dtype == np.int64:
+    d = jnp.int64
+  elif t.dtype == np.complex64:
+    d = jnp.complex64
+  return d
 
 # TODO: Consider take the mesh/topology instead of number of partitions.
 def shard_weights(names: Any, weights: Any, num_of_partitions: int) -> Any:
@@ -151,6 +168,10 @@ def shard_weights(names: Any, weights: Any, num_of_partitions: int) -> Any:
             "Name: %s Shape: %s dtype: %s sharding %s:"
             % (name, w.shape, w.dtype, sharding)
         )
+    weights = jax.tree_map(
+        lambda x, shard: jax.device_put(x, shard).astype(n2jtype(x)),
+        weights, weight_sharding 
+    )
     return jax.lax.with_sharding_constraint(weights, weight_sharding)
 
 

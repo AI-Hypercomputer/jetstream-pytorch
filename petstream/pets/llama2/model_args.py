@@ -31,4 +31,5 @@ class ModelArgs:
   bf16_enable: bool = False
   head_dim = -1
   infer_length = 0
+  device = 'cpu'
 

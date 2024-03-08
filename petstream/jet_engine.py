@@ -2,11 +2,13 @@
 
 import copy
 from typing import Any, List, Optional, Tuple, Union
+import functools
 
 from absl import logging
 import jax
 from jax import numpy as jnp
 from jax.experimental import mesh_utils
+import torch
 import jax.sharding as jsharding
 
 from jetstream.engine import engine_api, tokenizer_pb2, token_utils
@@ -151,16 +153,17 @@ class PyTorchEngine(engine_api.Engine):
         ),
     )
 
+  #@functools.partial(jax.jit, static_argnums=(0,), donate_argnums=(2, ))
   def generate(
       self, params: Any, decode_state: DecodeState
   ) -> tuple[DecodeState, engine_api.ResultTokens]:
-    logging.info('Jet decode state before generate: %s', decode_state)
+    #logging.info('Jet decode state before generate: %s', decode_state)
     next_token, caches_kv = jw.generate_shlo(
         decode_state, self.imported_model, self.param, params
     )
-    logging.info(
-        'Jet generate next_token: %s, \ncaches: %s', next_token, caches_kv
-    )
+    #logging.info(
+    #    'Jet generate next_token: %s, \ncaches: %s', next_token, caches_kv
+    #)
     data = jnp.concatenate(
         [
             next_token,
@@ -180,11 +183,12 @@ class PyTorchEngine(engine_api.Engine):
         samples_per_slot=1,
     )
 
-    logging.info(
-        'Jet decode state after generate: %s \nresult token: %s',
-        decode_state,
-        result_tokens,
-    )
+    
+    # logging.info(
+    #     'Jet decode state after generate: %s \nresult token: %s',
+    #     decode_state,
+    #     result_tokens,
+    # )
 
     def _update_result(results, new_result, pos):
       row_indices = jnp.arange(self.param.max_batch_size)[:, None]
@@ -231,8 +235,7 @@ class PyTorchEngine(engine_api.Engine):
     raise NotImplementedError('join_prefixes not supported')
 
   def load_params(self) -> Params:
-    weights = self.imported_model.load_weights()
-    return self.imported_model.place_weights(weights)
+    return self.imported_model.load_weights()
 
   def colocated_cpus(self) -> Union[list[engine_api.CpuDevices], None]:
     return jax.devices()[0]
@@ -318,6 +321,12 @@ def create_pytorch_engine(
   # jax.config.update('jax_enable_x64', True)
   jax.config.update('jax_traceback_filtering', 'off')
 
+  def init_weights(model):
+    state_dict = model.state_dict()
+    for k, v in state_dict.items():
+      state_dict[k] = torch.ones(v.shape, dtype=v.dtype)
+    model.load_state_dict(state_dict, strict=False, assign=True)
+
   sample_input_prefill = None
   sample_input_decode = None
   tokenizer = token_utils.load_vocab(tokenizer_path)
@@ -325,7 +334,10 @@ def create_pytorch_engine(
   shard_weights_fn = None
   if model_name == "llama":
     model_args = model_utils.get_model_args(param_size, context_length, batch_size, tokenizer.vocab_size, bf16_enable)
+    model_args.device = 'meta'
     pt_model = model_exportable.Transformer(model_args)
+    init_weights(pt_model)
+
     prefill_caches = model_utils.make_cache(model_args, 1)
     decode_caches = model_utils.make_cache(model_args, batch_size)
     sample_input_prefill =  model_utils.make_prefill_input(context_length, prefill_caches)
@@ -348,7 +360,7 @@ def create_pytorch_engine(
           shard_weights_fn = shard_weights_fn,
       ),
       tokenizer=tokenizer,
-      tokenizer_path=tokenizer_path,
       samples_per_slot=samples_per_slot,
       max_decode_length=max_decode_length,
+      tokenizer_path=tokenizer_path,
   )

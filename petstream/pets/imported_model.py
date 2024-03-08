@@ -1,5 +1,6 @@
 """Import llama2 model."""
 import os
+import copy
 from typing import Any
 from absl import logging
 import jax
@@ -53,6 +54,8 @@ class ImportedModel:
     self.decode_outputs = None
 
   def convert_to_jax_fn(self):
+    self.pt_model(*self.sample_input_prefill)
+    self.pt_model(*self.sample_input_decode)
     exported_prefill = torch.export.export(
         self.pt_model, self.sample_input_prefill
     )
@@ -83,10 +86,13 @@ class ImportedModel:
 
   def decode(self, weights: Any, inputs: Any) -> Any:
     self.decode_inputs = inputs
-    self.decode_outputs = self.decode_fn(weights, inputs)
+    # TODO
+    weights = copy.copy(weights)
+    # del weights['mask']
+    self.decode_outputs = self.decode_fn(weights[:-1], inputs)
     return self.decode_outputs
 
-  def place_weights(self, weights) -> Any:
+  def place_weights(self, weights, sharding) -> Any:
     return jax.tree_map(
         lambda x: jnp.asarray(x, dtype=utils.n2jtype(x)),
         weights,
