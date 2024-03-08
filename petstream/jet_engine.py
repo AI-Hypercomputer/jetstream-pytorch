@@ -1,8 +1,7 @@
 """Implement Jet Engine API."""
-
+import functools
 import copy
 from typing import Any, List, Optional, Tuple, Union
-import functools
 
 from absl import logging
 import jax
@@ -118,6 +117,7 @@ class PyTorchEngine(engine_api.Engine):
         update,
     )
 
+  @functools.partial(jax.jit, static_argnums=(0,), donate_argnums=(1,2, ))
   def insert(
       self,
       prefix: Prefix,
@@ -153,7 +153,7 @@ class PyTorchEngine(engine_api.Engine):
         ),
     )
 
-  #@functools.partial(jax.jit, static_argnums=(0,), donate_argnums=(2, ))
+  @functools.partial(jax.jit, static_argnums=(0,), donate_argnums=(2, ))
   def generate(
       self, params: Any, decode_state: DecodeState
   ) -> tuple[DecodeState, engine_api.ResultTokens]:
@@ -235,7 +235,8 @@ class PyTorchEngine(engine_api.Engine):
     raise NotImplementedError('join_prefixes not supported')
 
   def load_params(self) -> Params:
-    return self.imported_model.load_weights()
+    weights, shardings = self.imported_model.load_weights()
+    return self.imported_model.place_weights(weights, shardings)
 
   def colocated_cpus(self) -> Union[list[engine_api.CpuDevices], None]:
     return jax.devices()[0]

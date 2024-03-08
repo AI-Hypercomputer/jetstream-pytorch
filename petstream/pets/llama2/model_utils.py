@@ -158,22 +158,7 @@ def shard_weights(names: Any, weights: Any, num_of_partitions: int) -> Any:
             % (name, w.shape, w.dtype, sharding)
         )
     weights = pytree.tree_map(utils.p2n, weights)
-    print(
-        "After conversion, all the weights are converted to: %s",
-        type(weights[0]),
-        flush=True,
-    )
-    for name, w, sharding in zip(names, weights, weight_sharding):
-        print(
-            "Name: %s Shape: %s dtype: %s sharding %s:"
-            % (name, w.shape, w.dtype, sharding)
-        )
-    weights = jax.tree_map(
-        lambda x, shard: jax.device_put(x, shard).astype(n2jtype(x)),
-        weights, weight_sharding 
-    )
-    return jax.lax.with_sharding_constraint(weights, weight_sharding)
-
+    return weights, weight_sharding
 
 def make_prefill_input(context_length, caches):
   # NOTE prefill input size has to be same as context length

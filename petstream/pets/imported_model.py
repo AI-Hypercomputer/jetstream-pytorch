@@ -92,7 +92,7 @@ class ImportedModel:
 
   def place_weights(self, weights, sharding) -> Any:
     return jax.tree_map(
-        lambda x: jnp.asarray(x, dtype=utils.n2jtype(x)),
-        weights,
+        lambda x, shard: jax.device_put(x, shard).astype(utils.n2jtype(x)),
+        weights, sharding
     )
 
