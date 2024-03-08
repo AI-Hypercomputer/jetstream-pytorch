@@ -177,6 +177,7 @@ def main(argv):
     key, subkey = jax.random.split(key)
     start = time.perf_counter()
     tokens = jax.random.randint(subkey, (model_arg.max_batch_size, 1), 0, 32000)
+    #tokens = jax.device_put(tokens, x_sharding)
     args = (
       tokens, input_indexes, cache_indexes, caches, prefill
     )

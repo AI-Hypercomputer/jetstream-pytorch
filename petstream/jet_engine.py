@@ -157,13 +157,13 @@ class PyTorchEngine(engine_api.Engine):
   def generate(
       self, params: Any, decode_state: DecodeState
   ) -> tuple[DecodeState, engine_api.ResultTokens]:
-    #logging.info('Jet decode state before generate: %s', decode_state)
+    logging.info('Jet decode state before generate: %s', decode_state)
     next_token, caches_kv = jw.generate_shlo(
         decode_state, self.imported_model, self.param, params
     )
-    #logging.info(
-    #    'Jet generate next_token: %s, \ncaches: %s', next_token, caches_kv
-    #)
+    logging.info(
+       'Jet generate next_token: %s, \ncaches: %s', next_token, caches_kv
+    )
     data = jnp.concatenate(
         [
             next_token,

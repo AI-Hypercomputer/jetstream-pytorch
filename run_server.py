@@ -62,6 +62,7 @@ def main(argv: Sequence[str]):
   del argv
   # No devices for local cpu test. A None for prefill and a None for generate.
   devices = server_lib.get_devices()
+  print('HERE 1')
   server_config = config.create_config(
         devices,
         tokenizer_path=_TOKENIZER_PATH.value,
@@ -72,6 +73,7 @@ def main(argv: Sequence[str]):
         batch_size=_BATCH_SIZE.value,
         platform=_PLATFORM.value,
   )
+  print('HERE 2')
 
   # We separate credential from run so that we can unit test it with local credentials.
   # TODO: Add grpc credentials for OSS.
@@ -81,6 +83,7 @@ def main(argv: Sequence[str]):
       config=server_config,
       devices=devices,
   )
+  print('HANQ....')
   jetstream_server.wait_for_termination()
 
 

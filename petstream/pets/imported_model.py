@@ -54,8 +54,6 @@ class ImportedModel:
     self.decode_outputs = None
 
   def convert_to_jax_fn(self):
-    self.pt_model(*self.sample_input_prefill)
-    self.pt_model(*self.sample_input_decode)
     exported_prefill = torch.export.export(
         self.pt_model, self.sample_input_prefill
     )

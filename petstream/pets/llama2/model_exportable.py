@@ -12,6 +12,7 @@ from . import model_args
 import jax.sharding as jsharding
 from jax.experimental import mesh_utils
 import jax
+import torch_xla2.extra
 
 hanq_flag = False
 
@@ -172,7 +173,7 @@ class Attention(nn.Module):
           .expand(bsz, self.n_local_kv_heads, self.max_seq_len, self.head_dim)
       )
       if hanq_flag:
-        iota = torch_xla2.call_jax(
+        iota = torch_xla2.extra.call_jax(
           jax.lax.with_sharding_constraint,
           iota, 
           make_replicated_sharding()
@@ -361,6 +362,8 @@ class Transformer(nn.Module):
     h = self.tok_embeddings(tokens)
     freqs_cis = self.freqs_cis.index_select(0, input_indexes)
     mask = self.mask if prefill else None
+    #print('TU MADRE')
+    #import pdb; pdb.set_trace()
 
     new_caches = []
     for layer, (cache_k, cache_v) in zip(self.layers, caches):
