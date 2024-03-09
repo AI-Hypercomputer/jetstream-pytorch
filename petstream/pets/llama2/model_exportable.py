@@ -362,8 +362,6 @@ class Transformer(nn.Module):
     h = self.tok_embeddings(tokens)
     freqs_cis = self.freqs_cis.index_select(0, input_indexes)
     mask = self.mask if prefill else None
-    #print('TU MADRE')
-    #import pdb; pdb.set_trace()
 
     new_caches = []
     for layer, (cache_k, cache_v) in zip(self.layers, caches):

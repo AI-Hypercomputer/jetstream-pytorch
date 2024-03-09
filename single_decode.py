@@ -46,7 +46,7 @@ _CONTEXT_LENGTH = flags.DEFINE_integer(
     'context_length', 1024, 'The context length', required=False
 )
 _BATCH_SIZE = flags.DEFINE_integer(
-    'batch_size', 1, 'The batch size', required=False
+    'batch_size', 32, 'The batch size', required=False
 )
 _PROFILING_OUTPUT =flags.DEFINE_string(
     'profiling_output',
@@ -121,6 +121,11 @@ def main(argv):
   end = time.perf_counter()
   print('init time', end - start)
 
+  num_params = 0
+  for k, v in model.state_dict().items():
+    num_params += np.prod(v.shape)
+  print('Number of paramters', num_params)
+
   # run forward once in jax
   cpu_device = jax.devices('cpu')[0]
   with jax.default_device(cpu_device):
@@ -137,18 +142,20 @@ def main(argv):
   model_arg.n_kv_heads = model_arg.n_kv_heads or model_arg.n_heads
 
   tokens = jnp.arange( 
-    0, model_arg.max_batch_size).reshape((model_arg.max_batch_size, 1))
+    0, model_arg.max_seq_len).reshape((1, model_arg.max_seq_len))
 
   input_indexes = jnp.full((1, ), 1024)
   cache_indexes = jnp.arange(0, model_arg.max_seq_len)
-  caches_torch = model_utils.make_cache(model_arg, model_arg.max_batch_size)
+
+  input_indexes = cache_indexes
+  caches_torch = model_utils.make_cache(model_arg, 1)
   caches = pytree.tree_map_only(
     torch.Tensor, torch_xla2.tensor.t2j, caches_torch)
 
   cache_sharding = jsharding.NamedSharding(mesh, P(None, None, "x", None))
   caches = jax.device_put(caches, cache_sharding)
 
-  prefill = False
+  prefill = True 
   #todo need to shard inputs
   @functools.partial(
     jax.jit, 
@@ -176,7 +183,7 @@ def main(argv):
   for i in range(20):
     key, subkey = jax.random.split(key)
     start = time.perf_counter()
-    tokens = jax.random.randint(subkey, (model_arg.max_batch_size, 1), 0, 32000)
+    tokens = jax.random.randint(subkey, (1, model_arg.max_seq_len), 0, 32000)
     #tokens = jax.device_put(tokens, x_sharding)
     args = (
       tokens, input_indexes, cache_indexes, caches, prefill
@@ -186,6 +193,8 @@ def main(argv):
     jax.tree_map(lambda r: r.block_until_ready(), res)
     end = time.perf_counter()
     print(i, 'decode step', end - start)
+
+  print('Number of paramters', num_params)
 
 if __name__ == "__main__":
   app.run(main)

@@ -5,9 +5,7 @@ from typing import Sequence
 from absl import app
 from absl import flags
 
-from jetstream.core.implementations.mock import config as mock_config
 from jetstream.core import server_lib
-
 from petstream.pets import config
 
 
@@ -37,7 +35,7 @@ _CONTEXT_LENGTH = flags.DEFINE_integer(
     'context_length', 1024, 'The context length', required=False
 )
 _BATCH_SIZE = flags.DEFINE_integer(
-    'batch_size', 1, 'The batch size', required=False
+    'batch_size', 32, 'The batch size', required=False
 )
 _PROFILING_OUTPUT =flags.DEFINE_string(
     'profiling_output',

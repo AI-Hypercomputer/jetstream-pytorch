@@ -1,5 +1,5 @@
 from jetstream.core.config_lib import ServerConfig
-from petstream.jet_engine import create_pytorch_engine
+from petstream.jet_engine2 import create_pytorch_engine
 
 
 def create_config(
@@ -13,7 +13,6 @@ def create_config(
             platform,
 ):
     def func(a):
-        from petstream.jet_engine import PyTorchEngine
         return create_pytorch_engine(
             devices=devices,
             tokenizer_path=tokenizer_path,

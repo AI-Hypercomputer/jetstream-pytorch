@@ -12,7 +12,7 @@ from absl.testing import absltest
 import os
 import sys
 
-from petstream import jet_engine as je
+from petstream import jet_engine2 as je
 import time
 import logging
 
@@ -37,7 +37,7 @@ _CONTEXT_LENGTH = flags.DEFINE_integer(
     'context_length', 1024, 'The context length', required=False
 )
 _BATCH_SIZE = flags.DEFINE_integer(
-    'batch_size', 1, 'The batch size', required=False
+    'batch_size', 32, 'The batch size', required=False
 )
 _PROFILING_OUTPUT =flags.DEFINE_string(
     'profiling_output',
@@ -100,8 +100,13 @@ def main(argv):
 
   steps = range(max_prefill_predict_length, max_target_length)
   sampled_tokens_list = []
-  start = time.perf_counter()
 
+  for i in range(3): # warm up
+    decode_state, sampled_tokens = engine.generate(
+      params, decode_state
+    )
+    sampled_tokens_list.append(sampled_tokens)
+  start = time.perf_counter()
   print('======= decode starting ===')
   for i in steps:
     decode_state, sampled_tokens = engine.generate(
