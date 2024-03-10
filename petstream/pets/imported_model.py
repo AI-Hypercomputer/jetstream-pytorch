@@ -85,7 +85,7 @@ class ImportedModel:
   def decode(self, weights: Any, inputs: Any) -> Any:
     self.decode_inputs = inputs
     # TODO
-    weights = copy.copy(weights)
+    #weights = copy.copy(weights)
     # del weights['mask']
     self.decode_outputs = self.decode_fn(weights[:-1], inputs)
     return self.decode_outputs

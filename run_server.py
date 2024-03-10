@@ -1,5 +1,5 @@
 """Runs a pytorch server."""
-
+import os
 from typing import Sequence
 
 from absl import app
@@ -58,6 +58,7 @@ _PARAM_SIZE =flags.DEFINE_string(
 
 def main(argv: Sequence[str]):
   del argv
+  os.environ['XLA_FLAGS'] = '--xla_dump_to=/tmp/xla_logs --xla_dump_hlo_as_text'
   # No devices for local cpu test. A None for prefill and a None for generate.
   devices = server_lib.get_devices()
   print('HERE 1')

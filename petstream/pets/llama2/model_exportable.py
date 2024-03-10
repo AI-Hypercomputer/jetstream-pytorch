@@ -142,6 +142,7 @@ class Attention(nn.Module):
       cache_k,
       cache_v,
   ):
+#with jax.named_scope('attn_prj'):
     # bsz, seqlen, _ = x.shape
     bsz, seqlen = x.shape[0], x.shape[-2]
     # qkv fuse
@@ -150,18 +151,20 @@ class Attention(nn.Module):
     xq = xq.view(bsz, seqlen, self.n_local_heads, self.head_dim)
     xk = xk.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
     xv = xv.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
-
+#with jax.named_scope('attn_rope'):
     xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
+#with jax.named_scope('attn_insert'): 
     input_indexes = input_indexes.to(torch.int64)
 
     xk = xk.transpose(-3, -2)
     xv = xv.transpose(-3, -2)
     ###
-    if prefill:
-      # Assumes prefill only
-      cache_k = xk
-      cache_v = xv
-    else:
+    #if prefill:
+    #  # Assumes prefill only
+    #  cache_k = xk
+    #  cache_v = xv
+    #else:
+    if True:
       xk = torch.broadcast_to(
           xk, (bsz, self.n_local_kv_heads, self.max_seq_len, self.head_dim)
       )
@@ -189,12 +192,15 @@ class Attention(nn.Module):
         cache_v, self.n_rep
     )  # (bs, n_local_heads, seqlen, head_dim)
     # (b, i, j) x (b, j, k) -> (b, i, k)
+#with jax.named_scope('attn_mat1'):
     scores = torch.einsum("ijkl,ikml->ikjm", xq, keys) / math.sqrt(
         self.head_dim
     )
+#with jax.named_scope('attn_soft'):
     if mask is not None:
       scores = scores + mask  # (bs, n_local_heads, seqlen, max_seqlen)
     scores = F.softmax(scores.float(), dim=-1).type_as(xq)
+#with jax.named_scope('attn_mat2'):
     output = torch.einsum(
         "ikjm,ikml->ikjl", scores, values
     )  # (bs, n_local_heads, seqlen, head_dim)
@@ -292,8 +298,11 @@ class TransformerBlock(nn.Module):
         cache_k,
         cache_v,
     )
+#with jax.named_scope('ffn_norm'):
     h = x + attn
-    out = h + self.feed_forward.forward(self.ffn_norm(h))
+    ffns = self.ffn_norm(h)
+#with jax.named_scope('ffn'):
+    out = h + self.feed_forward.forward(ffns)
     return out, xk, xv
 
 
@@ -326,7 +335,6 @@ class Transformer(nn.Module):
               params,
           )
       )
-
     self.norm = RMSNorm(params.dim, eps=params.norm_eps, device=params.device)
     self.output = nn.Linear(
         params.dim,
@@ -334,7 +342,6 @@ class Transformer(nn.Module):
         bias=False,
         device=params.device,
     )
-
     # TODO what to do with this
     freqs_cis = precompute_freqs_cis(
         self.params.dim // self.params.n_heads, self.params.max_seq_len * 2
@@ -358,8 +365,10 @@ class Transformer(nn.Module):
       caches: List[Tuple[torch.tensor, Any]],
       prefill,
   ):
+#with jax.named_scope('tr_tok'):
     seqlen = tokens.shape[-1]
     h = self.tok_embeddings(tokens)
+#with jax.named_scope('tr_freq'):
     freqs_cis = self.freqs_cis.index_select(0, input_indexes)
     mask = self.mask if prefill else None
 
@@ -376,6 +385,7 @@ class Transformer(nn.Module):
           cache_v,
       )
       new_caches.append((new_k, new_v))
+#with jax.named_scope('tr_norm'):
     h = self.norm(h)
     output = self.output(h).float()
     return output, new_caches

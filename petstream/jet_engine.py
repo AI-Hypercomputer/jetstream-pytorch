@@ -53,9 +53,12 @@ class PyTorchEngine(engine_api.Engine):
     self.init_decode_state = jax.jit(
         self.init_decode_state, out_shardings=self.get_decode_state_sharding()
     )
-    self.prefill = jax.jit(self.prefill)
-    self.insert = jax.jit(self.insert)
-    self.generate = jax.jit(self.generate)
+    #self.prefill = jax.jit(self.prefill)
+    #self.insert = jax.jit(self.insert)
+    #self.generate = jax.jit(self.generate)
+    self.prefill = jax.jit(self.prefill, out_shardings=self.get_prefix_destination_sharding())
+    self.insert = jax.jit(self.insert, donate_argnums=(0, 1, ), out_shardings=self.get_decode_state_sharding())
+    self.generate = jax.jit(self.generate, donate_argnums=(1, ), out_shardings=(self.get_decode_state_sharding(), None)) #self.get_result_token_sharding()))
 
   def init_decode_state(
       self,
@@ -117,7 +120,6 @@ class PyTorchEngine(engine_api.Engine):
         update,
     )
 
-  @functools.partial(jax.jit, static_argnums=(0,), donate_argnums=(1,2, ))
   def insert(
       self,
       prefix: Prefix,
@@ -153,7 +155,6 @@ class PyTorchEngine(engine_api.Engine):
         ),
     )
 
-  @functools.partial(jax.jit, static_argnums=(0,), donate_argnums=(2, ))
   def generate(
       self, params: Any, decode_state: DecodeState
   ) -> tuple[DecodeState, engine_api.ResultTokens]:
@@ -201,11 +202,12 @@ class PyTorchEngine(engine_api.Engine):
     return (
         DecodeState(
             tokens=next_token,
-            res=_update_result(
-                decode_state.res,
-                next_token,
-                jnp.squeeze(decode_state.decode_state.gen_len),
-            ),
+            #res=_update_result(
+            #    decode_state.res,
+            #    next_token,
+            #    jnp.squeeze(decode_state.decode_state.gen_len),
+            #),
+            res=decode_state.res,
             decode_state=jw.DecodeState(
                 caches=caches_kv,
                 pos=jw.update_pos(
@@ -271,6 +273,15 @@ class PyTorchEngine(engine_api.Engine):
         self.replicated_sharding,
         self.get_cache_sharding(),
     )
+
+  def get_result_token_sharding(self) -> engine_api.ResultTokens:
+    return engine_api.ResultTokens(
+            self.replicated_sharding,
+            (self.replicated_sharding, self.replicated_sharding),
+            (self.replicated_sharding, self.replicated_sharding),
+            (self.replicated_sharding, self.replicated_sharding),
+            self.replicated_sharding,
+            )
 
   def get_prefix_sequence_ddim(self) -> Any:
     """Returns the index of the sequence dim in the prefix type."""
