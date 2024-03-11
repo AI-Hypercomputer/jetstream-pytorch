@@ -26,6 +26,16 @@ def make_replicated_sharding():
   replicated = jsharding.NamedSharding(mesh, P())
   return replicated
 
+def make_batch_sharding():
+  P = jsharding.PartitionSpec
+  num_devices = len(jax.devices())
+  mesh = jsharding.Mesh(
+      mesh_utils.create_device_mesh((num_devices, 1)),
+      axis_names=("x", "y"),
+  )
+  x_sharding = jsharding.NamedSharding(mesh, P("x"))
+  return x_sharding
+
 
 class RMSNorm(torch.nn.Module):
   """RMSNorm module."""
@@ -105,7 +115,7 @@ class Attention(nn.Module):
     self.head_dim = args.dim // args.n_heads
     self.max_seq_len = args.max_seq_len
     self.n_heads = args.n_heads
-
+    self.bsz = args.max_batch_size
     self.wq = nn.Linear(
         args.dim,
         args.n_heads * self.head_dim,
@@ -130,6 +140,15 @@ class Attention(nn.Module):
         bias=False,
         device=args.device,
     )
+    #self.iota = (
+    #          torch.arange(self.max_seq_len).reshape(1, 1, self.max_seq_len, 1)
+    #          .expand(self.bsz, self.n_local_kv_heads, self.max_seq_len, self.head_dim)
+    #      )
+    #self.iota = torch_xla2.extra.call_jax(
+    #      jax.lax.with_sharding_constraint,
+    #      self.iota,
+    #      make_batch_sharding()
+    #    )
 
   def forward(
       self,
@@ -142,70 +161,82 @@ class Attention(nn.Module):
       cache_k,
       cache_v,
   ):
-#with jax.named_scope('attn_prj'):
-    # bsz, seqlen, _ = x.shape
-    bsz, seqlen = x.shape[0], x.shape[-2]
-    # qkv fuse
-    xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
+    with jax.named_scope('attn_linear'):
+        # bsz, seqlen, _ = x.shape
+        bsz, seqlen = x.shape[0], x.shape[-2]
+        # qkv fuse
+        xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
 
-    xq = xq.view(bsz, seqlen, self.n_local_heads, self.head_dim)
-    xk = xk.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
-    xv = xv.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
-#with jax.named_scope('attn_rope'):
-    xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
-#with jax.named_scope('attn_insert'): 
-    input_indexes = input_indexes.to(torch.int64)
+        xq = xq.view(bsz, seqlen, self.n_local_heads, self.head_dim)
+        xk = xk.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
+        xv = xv.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
+    with jax.named_scope('attn_rope'):
+        xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
+    with jax.named_scope('attn_insert_cache'): 
+        #input_indexes = input_indexes.to(torch.int64)
 
-    xk = xk.transpose(-3, -2)
-    xv = xv.transpose(-3, -2)
-    ###
-    #if prefill:
-    #  # Assumes prefill only
-    #  cache_k = xk
-    #  cache_v = xv
-    #else:
-    if True:
-      xk = torch.broadcast_to(
-          xk, (bsz, self.n_local_kv_heads, self.max_seq_len, self.head_dim)
-      )
-      xv = torch.broadcast_to(
-          xv, (bsz, self.n_local_kv_heads, self.max_seq_len, self.head_dim)
-      )
-      iota = (
-          torch.arange(self.max_seq_len).reshape(1, 1, self.max_seq_len, 1)
-          .expand(bsz, self.n_local_kv_heads, self.max_seq_len, self.head_dim)
-      )
-      if hanq_flag:
-        iota = torch_xla2.extra.call_jax(
-          jax.lax.with_sharding_constraint,
-          iota, 
-          make_replicated_sharding()
+        xk = xk.transpose(-3, -2)
+        xv = xv.transpose(-3, -2)
+        ###
+        #if prefill:
+          # Assumes prefill only
+        #  cache_k = xk
+        #  cache_v = xv
+        #else:
+
+        # Original index copy
+        if False:
+          cache_k = cache_k.index_copy(2, input_indexes, xk)
+          cache_v = cache_v.index_copy(2, input_indexes, xv)
+        
+        # Benchmark fastest, but has sharding issue
+        if False:
+          cache_k[:, :, input_indexes, :] = xk
+          cache_v[:, :, input_indexes, :] = xv
+
+        # IOTA, no sharding issue
+        if True:
+          xk = torch.broadcast_to(
+              xk, (bsz, self.n_local_kv_heads, self.max_seq_len, self.head_dim)
+          )
+          xv = torch.broadcast_to(
+              xv, (bsz, self.n_local_kv_heads, self.max_seq_len, self.head_dim)
+          )
+          iota = (
+              torch.arange(self.max_seq_len).reshape(1, 1, self.max_seq_len, 1)
+              .expand(bsz, self.n_local_kv_heads, self.max_seq_len, self.head_dim)
+          )
+          if hanq_flag:
+            iota = torch_xla2.extra.call_jax(
+              jax.lax.with_sharding_constraint,
+              self.iota, 
+              make_replicated_sharding()
+            )
+
+          cache_k = torch.where(iota == input_indexes.expand(self.max_seq_len).reshape(1, 1, self.max_seq_len, 1), xk, cache_k)
+          cache_v = torch.where(iota == input_indexes.expand(self.max_seq_len).reshape(1, 1, self.max_seq_len, 1), xv, cache_v)
+
+        keys = repeat_kv(
+            cache_k, self.n_rep
+        )  # (bs, n_local_heads, seqlen, head_dim)
+        values = repeat_kv(
+            cache_v, self.n_rep
+        )  # (bs, n_local_heads, seqlen, head_dim)
+        # (b, i, j) x (b, j, k) -> (b, i, k)
+    with jax.named_scope('attn_mat1'):
+        scores = torch.einsum("ijkl,ikml->ikjm", xq, keys) / math.sqrt(
+            self.head_dim
         )
-
-      cache_k = torch.where(iota == input_indexes.expand(self.max_seq_len).reshape(1, 1, self.max_seq_len, 1), xk, cache_k)
-      cache_v = torch.where(iota == input_indexes.expand(self.max_seq_len).reshape(1, 1, self.max_seq_len, 1), xv, cache_v)
-
-    keys = repeat_kv(
-        cache_k, self.n_rep
-    )  # (bs, n_local_heads, seqlen, head_dim)
-    values = repeat_kv(
-        cache_v, self.n_rep
-    )  # (bs, n_local_heads, seqlen, head_dim)
-    # (b, i, j) x (b, j, k) -> (b, i, k)
-#with jax.named_scope('attn_mat1'):
-    scores = torch.einsum("ijkl,ikml->ikjm", xq, keys) / math.sqrt(
-        self.head_dim
-    )
-#with jax.named_scope('attn_soft'):
-    if mask is not None:
-      scores = scores + mask  # (bs, n_local_heads, seqlen, max_seqlen)
-    scores = F.softmax(scores.float(), dim=-1).type_as(xq)
-#with jax.named_scope('attn_mat2'):
-    output = torch.einsum(
-        "ikjm,ikml->ikjl", scores, values
-    )  # (bs, n_local_heads, seqlen, head_dim)
-    output = output.transpose(-3, -2).contiguous().view(bsz, seqlen, -1)
-    return self.wo(output), cache_k, cache_v
+    with jax.named_scope('attn_soft'):
+        if mask is not None:
+          scores = scores + mask  # (bs, n_local_heads, seqlen, max_seqlen)
+        scores = F.softmax(scores.float(), dim=-1).type_as(xq)
+    with jax.named_scope('attn_mat2'):
+        output = torch.einsum(
+            "ikjm,ikml->ikjl", scores, values
+        )  # (bs, n_local_heads, seqlen, head_dim)
+        output = output.transpose(-3, -2).contiguous().view(bsz, seqlen, -1)
+        return self.wo(output), cache_k, cache_v
 
 
 class FeedForward(nn.Module):
@@ -246,7 +277,8 @@ class FeedForward(nn.Module):
     )
 
   def forward(self, x):
-    return self.w2(F.silu(self.w1(x)) * self.w3(x))
+    result = self.w2(F.silu(self.w1(x)) * self.w3(x))
+    return result
 
 
 class TransformerBlock(nn.Module):
@@ -298,12 +330,12 @@ class TransformerBlock(nn.Module):
         cache_k,
         cache_v,
     )
-#with jax.named_scope('ffn_norm'):
-    h = x + attn
-    ffns = self.ffn_norm(h)
-#with jax.named_scope('ffn'):
-    out = h + self.feed_forward.forward(ffns)
-    return out, xk, xv
+    with jax.named_scope('ffn_norm'):
+        h = x + attn
+        ffns = self.ffn_norm(h)
+    with jax.named_scope('ffn'):
+        out = h + self.feed_forward.forward(ffns)
+        return out, xk, xv
 
 
 class Transformer(nn.Module):
@@ -365,12 +397,12 @@ class Transformer(nn.Module):
       caches: List[Tuple[torch.tensor, Any]],
       prefill,
   ):
-#with jax.named_scope('tr_tok'):
-    seqlen = tokens.shape[-1]
-    h = self.tok_embeddings(tokens)
-#with jax.named_scope('tr_freq'):
-    freqs_cis = self.freqs_cis.index_select(0, input_indexes)
-    mask = self.mask if prefill else None
+    with jax.named_scope('transformer_tok'):
+        seqlen = tokens.shape[-1]
+        h = self.tok_embeddings(tokens)
+    with jax.named_scope('transformer_freq'):
+        freqs_cis = self.freqs_cis.index_select(0, input_indexes)
+        mask = self.mask if prefill else None
 
     new_caches = []
     for layer, (cache_k, cache_v) in zip(self.layers, caches):
@@ -385,7 +417,7 @@ class Transformer(nn.Module):
           cache_v,
       )
       new_caches.append((new_k, new_v))
-#with jax.named_scope('tr_norm'):
-    h = self.norm(h)
-    output = self.output(h).float()
+    with jax.named_scope('transformer_norm'):
+        h = self.norm(h)
+        output = self.output(h).float()
     return output, new_caches

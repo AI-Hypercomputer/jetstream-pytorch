@@ -77,6 +77,10 @@ class PyTorchEngine(engine_api.Engine):
     self.replicated = jsharding.NamedSharding(self._mesh, P())
     self.cache_sharding = jsharding.NamedSharding(self._mesh, P(None, None, "x", None))
 
+    self.prefill = jax.jit(self.prefill, out_shardings=self.get_prefix_destination_sharding())
+    self.insert = jax.jit(self.insert, donate_argnums=(0, 1, ), out_shardings=self.get_decode_state_sharding())
+    self.generate = jax.jit(self.generate, donate_argnums=(1, ), out_shardings=(self.get_decode_state_sharding(), None))
+
   def sharding_by_name(self, name):
     if "tok_embeddings." in name:
         return self.x_sharding 
@@ -104,11 +108,11 @@ class PyTorchEngine(engine_api.Engine):
         0,
     )
 
-  @functools.partial(
-    jax.jit,
-    static_argnums=(0, 6),
-    donate_argnums=(5, ),
-  )
+  #@functools.partial(
+  #  jax.jit,
+  #  static_argnums=(0, 6),
+  #  donate_argnums=(5, ),
+  #)
   def _call_model(self, 
     weights, 
     tokens, 
@@ -188,11 +192,11 @@ class PyTorchEngine(engine_api.Engine):
   ) -> Prefix:
     return prefix
 
-  @functools.partial(
-    jax.jit,
-    static_argnums=(0,),
-    donate_argnums=(2,3),
-  )
+  #@functools.partial(
+  #  jax.jit,
+  #  static_argnums=(0,),
+  #  donate_argnums=(2,3),
+  #)
   def insert(
       self,
       prefix: Prefix,
@@ -220,7 +224,7 @@ class PyTorchEngine(engine_api.Engine):
     position = prefix.seq_len
     return DecodeState(tokens, caches, position)
 
-  @functools.partial(jax.jit, static_argnums=(0,), donate_argnums=(2, ))
+  #@functools.partial(jax.jit, static_argnums=(0,), donate_argnums=(2, ))
   def generate(
       self, params: Any, decode_state: DecodeState
   ) -> tuple[DecodeState, engine_api.ResultTokens]:
@@ -317,7 +321,7 @@ class PyTorchEngine(engine_api.Engine):
   def get_decode_state_sharding(self) -> DecodeState:
     """Gets the shardings corresponding to the decode state."""
     return DecodeState(
-        self.replicated,
+        self.x_sharding, # Sharding on batch dim of next token
         self.cache_sharding,
         self.replicated,
     )
