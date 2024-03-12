@@ -174,6 +174,10 @@ class Attention(nn.Module):
       xk = xk.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
       xv = xv.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
       
+      xq = torch_xla2.extra.call_jax(jax.lax.with_sharding_constraint, xq, self.env.sharding_by_axis(2))
+      xk = torch_xla2.extra.call_jax(jax.lax.with_sharding_constraint, xk, self.env.sharding_by_axis(2))
+      xv = torch_xla2.extra.call_jax(jax.lax.with_sharding_constraint, xv, self.env.sharding_by_axis(2))
+
     with jax.named_scope('attn_rope'):
       xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
 
@@ -189,6 +193,8 @@ class Attention(nn.Module):
           cache_v, self.n_rep
       )  # (bs, n_local_heads, seqlen, head_dim)
 
+      keys = torch_xla2.extra.call_jax(jax.lax.with_sharding_constraint, keys, self.env.sharding_by_axis(1))
+      values = torch_xla2.extra.call_jax(jax.lax.with_sharding_constraint, values, self.env.sharding_by_axis(1))
     with jax.named_scope('attn_mat1'):
       ## Attention start
       #scores = torch.einsum(jnp.einsum, "ijkl,ikml->ikjm", xq, keys) / math.sqrt(self.head_dim)
@@ -203,6 +209,8 @@ class Attention(nn.Module):
       #    "ikjm,ikml->ikjl", scores, values
       #)  # (bs, n_local_heads, seqlen, head_dim)
       output = torch_xla2.extra.call_jax(jnp.einsum,"ikjm,ikml->ikjl", scores, values)
+      #output = torch.matmul(scores, values)
+      output = torch_xla2.extra.call_jax(jax.lax.with_sharding_constraint, output, self.env.sharding_by_axis(1))
       output = output.transpose(-3, -2).contiguous().view(bsz, seqlen, -1)
     return self.wo(output)
 
