@@ -75,27 +75,28 @@ class PyTorchEngine(engine_api.Engine):
     self.y_sharding = jsharding.NamedSharding(self._mesh, P(None, "x"))
     self.x_sharding = jsharding.NamedSharding(self._mesh, P("x"))
     self.replicated = jsharding.NamedSharding(self._mesh, P())
+    #self.cache_sharding = jsharding.NamedSharding(self._mesh, P("x", None, None, None))
     self.cache_sharding = jsharding.NamedSharding(self._mesh, P(None, None, "x", None))
 
     self.prefill = jax.jit(self.prefill, out_shardings=self.get_prefix_destination_sharding())
     self.insert = jax.jit(self.insert, donate_argnums=(0, 1, ), out_shardings=self.get_decode_state_sharding())
     self.generate = jax.jit(self.generate, donate_argnums=(1, ), out_shardings=(self.get_decode_state_sharding(), None))
 
-  def sharding_by_name(self, name):
+  def sharding_by_name(self, name, reverse = False):
     if "tok_embeddings." in name:
         return self.x_sharding 
     if "attention." in name:
         if "wo" in name:
-            return self.x_sharding 
+            return self.y_sharding if reverse else self.x_sharding
         else:
-            return self.y_sharding 
+            return self.x_sharding if reverse else self.y_sharding
     if "feed_forward." in name:
         if "w2" in name:
-            return self.x_sharding 
+            return self.y_sharding if reverse else self.x_sharding
         else:
-            return self.y_sharding 
+            return self.x_sharding if reverse else self.y_sharding
     if "output" in name:
-        return self.y_sharding 
+        return self.x_sharding if reverse else self.y_sharding 
     return self.replicated 
 
   def init_decode_state(
@@ -300,11 +301,11 @@ class PyTorchEngine(engine_api.Engine):
     # TODO load from files
     with jax.default_device(self.colocated_cpus()):
       jax_weights = self._make_state_dict_jax(self.pt_model.state_dict())
-
     jax_weights = {
       key: jax.device_put(value, self.sharding_by_name(key))
       for key, value in jax_weights.items()
     }
+    jax.tree_map(lambda k, v: print(f'Name: {k}, shape: {v.shape}'), list(jax_weights.keys()), list(jax_weights.values()))
     return jax_weights
 
   def colocated_cpus(self) -> Union[list[engine_api.CpuDevices], None]:
@@ -315,13 +316,15 @@ class PyTorchEngine(engine_api.Engine):
     return Prefix(
         self.replicated,
         self.cache_sharding,
+        #self.replicated,
         self.replicated,
     )
 
   def get_decode_state_sharding(self) -> DecodeState:
     """Gets the shardings corresponding to the decode state."""
     return DecodeState(
-        self.x_sharding, # Sharding on batch dim of next token
+        self.replicated,
+        #self.x_sharding, # Sharding on batch dim of next token
         self.cache_sharding,
         self.replicated,
     )

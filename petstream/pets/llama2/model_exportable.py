@@ -33,8 +33,7 @@ def make_batch_sharding():
       mesh_utils.create_device_mesh((num_devices, 1)),
       axis_names=("x", "y"),
   )
-  x_sharding = jsharding.NamedSharding(mesh, P("x"))
-  return x_sharding
+  return jsharding.NamedSharding(mesh, P("x", None, None, None))
 
 
 class RMSNorm(torch.nn.Module):
@@ -140,16 +139,7 @@ class Attention(nn.Module):
         bias=False,
         device=args.device,
     )
-    #self.iota = (
-    #          torch.arange(self.max_seq_len).reshape(1, 1, self.max_seq_len, 1)
-    #          .expand(self.bsz, self.n_local_kv_heads, self.max_seq_len, self.head_dim)
-    #      )
-    #self.iota = torch_xla2.extra.call_jax(
-    #      jax.lax.with_sharding_constraint,
-    #      self.iota,
-    #      make_batch_sharding()
-    #    )
-
+  
   def forward(
       self,
       x: torch.Tensor,
@@ -166,36 +156,28 @@ class Attention(nn.Module):
         bsz, seqlen = x.shape[0], x.shape[-2]
         # qkv fuse
         xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
-
         xq = xq.view(bsz, seqlen, self.n_local_heads, self.head_dim)
         xk = xk.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
         xv = xv.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
     with jax.named_scope('attn_rope'):
         xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
     with jax.named_scope('attn_insert_cache'): 
-        #input_indexes = input_indexes.to(torch.int64)
 
         xk = xk.transpose(-3, -2)
         xv = xv.transpose(-3, -2)
-        ###
-        #if prefill:
-          # Assumes prefill only
-        #  cache_k = xk
-        #  cache_v = xv
-        #else:
-
+        
         # Original index copy
-        if False:
+        if True:
           cache_k = cache_k.index_copy(2, input_indexes, xk)
           cache_v = cache_v.index_copy(2, input_indexes, xv)
         
-        # Benchmark fastest, but has sharding issue
+        # Benchmark fastest
         if False:
           cache_k[:, :, input_indexes, :] = xk
           cache_v[:, :, input_indexes, :] = xv
 
-        # IOTA, no sharding issue
-        if True:
+        # IOTA
+        if False:
           xk = torch.broadcast_to(
               xk, (bsz, self.n_local_kv_heads, self.max_seq_len, self.head_dim)
           )
@@ -320,16 +302,17 @@ class TransformerBlock(nn.Module):
       cache_k,
       cache_v,
   ):
-    attn, xk, xv = self.attention.forward(
-        self.attention_norm(x),
-        freqs_cis,
-        mask,
-        prefill,
-        input_indexes,
-        cache_indexes,
-        cache_k,
-        cache_v,
-    )
+    with jax.named_scope('attention'):
+        attn, xk, xv = self.attention.forward(
+            self.attention_norm(x),
+            freqs_cis,
+            mask,
+            prefill,
+            input_indexes,
+            cache_indexes,
+            cache_k,
+            cache_v,
+        )
     with jax.named_scope('ffn_norm'):
         h = x + attn
         ffns = self.ffn_norm(h)
@@ -406,17 +389,18 @@ class Transformer(nn.Module):
 
     new_caches = []
     for layer, (cache_k, cache_v) in zip(self.layers, caches):
-      h, new_k, new_v = layer(
-          h,
-          freqs_cis,
-          mask,
-          prefill,
-          input_indexes,
-          cache_indexes,
-          cache_k,
-          cache_v,
-      )
-      new_caches.append((new_k, new_v))
+      with jax.named_scope('transformer_layer'):
+          h, new_k, new_v = layer(
+              h,
+              freqs_cis,
+              mask,
+              prefill,
+              input_indexes,
+              cache_indexes,
+              cache_k,
+              cache_v,
+          )
+          new_caches.append((new_k, new_v))
     with jax.named_scope('transformer_norm'):
         h = self.norm(h)
         output = self.output(h).float()
