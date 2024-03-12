@@ -75,28 +75,28 @@ class PyTorchEngine(engine_api.Engine):
     self.y_sharding = jsharding.NamedSharding(self._mesh, P(None, "x"))
     self.x_sharding = jsharding.NamedSharding(self._mesh, P("x"))
     self.replicated = jsharding.NamedSharding(self._mesh, P())
-    #self.cache_sharding = jsharding.NamedSharding(self._mesh, P("x", None, None, None))
-    self.cache_sharding = jsharding.NamedSharding(self._mesh, P(None, None, "x", None))
-
+    self.reverse = False
+    self.cache_sharding = jsharding.NamedSharding(self._mesh, P(None, None, "x", None)) if self.reverse else jsharding.NamedSharding(self._mesh, P("x", None, None, None))
+    self.prefix_cache_sharding = jsharding.NamedSharding(self._mesh, P(None, None, "x", None))
     self.prefill = jax.jit(self.prefill, out_shardings=self.get_prefix_destination_sharding())
     self.insert = jax.jit(self.insert, donate_argnums=(0, 1, ), out_shardings=self.get_decode_state_sharding())
     self.generate = jax.jit(self.generate, donate_argnums=(1, ), out_shardings=(self.get_decode_state_sharding(), None))
 
-  def sharding_by_name(self, name, reverse = False):
+  def sharding_by_name(self, name):
     if "tok_embeddings." in name:
         return self.x_sharding 
     if "attention." in name:
         if "wo" in name:
-            return self.y_sharding if reverse else self.x_sharding
+            return self.y_sharding if self.reverse else self.x_sharding
         else:
-            return self.x_sharding if reverse else self.y_sharding
+            return self.x_sharding if self.reverse else self.y_sharding
     if "feed_forward." in name:
         if "w2" in name:
-            return self.y_sharding if reverse else self.x_sharding
+            return self.y_sharding if self.reverse else self.x_sharding
         else:
-            return self.x_sharding if reverse else self.y_sharding
+            return self.x_sharding if self.reverse else self.y_sharding
     if "output" in name:
-        return self.x_sharding if reverse else self.y_sharding 
+        return self.x_sharding if self.reverse else self.y_sharding 
     return self.replicated 
 
   def init_decode_state(
@@ -315,7 +315,7 @@ class PyTorchEngine(engine_api.Engine):
     """Returns the shardings necessary to transfer data between engines."""
     return Prefix(
         self.replicated,
-        self.cache_sharding,
+        self.prefix_cache_sharding,
         #self.replicated,
         self.replicated,
     )

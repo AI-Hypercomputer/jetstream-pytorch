@@ -167,12 +167,12 @@ class Attention(nn.Module):
         xv = xv.transpose(-3, -2)
         
         # Original index copy
-        if True:
+        if False:
           cache_k = cache_k.index_copy(2, input_indexes, xk)
           cache_v = cache_v.index_copy(2, input_indexes, xv)
         
         # Benchmark fastest
-        if False:
+        if True:
           cache_k[:, :, input_indexes, :] = xk
           cache_v[:, :, input_indexes, :] = xv
 
