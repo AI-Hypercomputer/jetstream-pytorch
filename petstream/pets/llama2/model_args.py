@@ -32,4 +32,5 @@ class ModelArgs:
   head_dim = -1
   infer_length = 0
   device = 'cpu'
+  quantize = False
 

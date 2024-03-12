@@ -11,13 +11,18 @@ from jax import numpy as jnp
 from jax.experimental import mesh_utils
 import torch
 import jax.sharding as jsharding
+import numpy as np
 
 from jetstream.engine import engine_api, tokenizer_pb2, token_utils
 import torch_xla2
 from .pets.llama2 import model_exportable, model_utils
 from .pets import tokenizer
 
+from petstream.pets import cache_manager
+from petstream.environment import JetEngineEnvironment, JetEngineEnvironmentData
+
 from torch.utils import _pytree as pytree
+import torch
 
 
 
@@ -48,43 +53,40 @@ class PyTorchEngine(engine_api.Engine):
 
   def __init__(
       self,
-      devices: Union[List[Any], Mesh],
       pt_model: torch.nn.Module,
-      tokenizer: Any,
-      tokenizer_path: str,
-      samples_per_slot: int,
-      max_decode_length: int,
+      env: JetEngineEnvironment,
   ):
-    self.devices = devices
-    self.num_of_partitions = len(devices)
     self.pt_model = pt_model
+    self.env = env
 
     # NOTE: this is llama2 specific now.
     self.param = pt_model.params
-    self.tokenizer = tokenizer
-    self.tokenizer_path = tokenizer_path
-    self.samples_per_slot_input = samples_per_slot
-    self._max_decode_length = max_decode_length
 
-    # TODO do we really need Named? seems we are not taking adv of the name at all
-    P = jsharding.PartitionSpec
-    self._mesh = jsharding.Mesh(
-        mesh_utils.create_device_mesh((self.num_of_partitions, 1)),
-        axis_names=("x", "y"),
-    )
-    self.y_sharding = jsharding.NamedSharding(self._mesh, P(None, "x"))
-    self.x_sharding = jsharding.NamedSharding(self._mesh, P("x"))
-    self.replicated = jsharding.NamedSharding(self._mesh, P())
     self.reverse = False
-    self.cache_sharding = jsharding.NamedSharding(self._mesh, P(None, None, "x", None)) if self.reverse else jsharding.NamedSharding(self._mesh, P("x", None, None, None))
-    self.prefix_cache_sharding = jsharding.NamedSharding(self._mesh, P(None, None, "x", None))
+    self.cache_sharding = env.sharding_by_axis(2) if self.reverse else env.sharding_by_axis(0)
+    self.prefix_cache_sharding = env.sharding_by_axis(2)
+    self.y_sharding = env.sharding_by_axis(1)
+    self.x_sharding = env.sharding_by_axis(0)
+    self.replicated = env.sharding_by_axis(-1) # replicated
+    self.cache_sharding = self.y_sharding
+
     self.prefill = jax.jit(self.prefill, out_shardings=self.get_prefix_destination_sharding())
     self.insert = jax.jit(self.insert, donate_argnums=(0, 1, ), out_shardings=self.get_decode_state_sharding())
     self.generate = jax.jit(self.generate, donate_argnums=(1, ), out_shardings=(self.get_decode_state_sharding(), None))
 
   def sharding_by_name(self, name):
+
+    # This allows easier way to edit shardings
+    """
+    for key, val in self.env._data.experimental_sharding_axis_override.items():
+      if name.endswith(key): 
+        return self.env.sharding_by_axis(val)
+    """
+
+    if 'weight_scaler' in name:
+      return self.x_sharding
     if "tok_embeddings." in name:
-        return self.x_sharding 
+        return self.y_sharding
     if "attention." in name:
         if "wo" in name:
             return self.y_sharding if self.reverse else self.x_sharding
@@ -109,26 +111,42 @@ class PyTorchEngine(engine_api.Engine):
         0,
     )
 
-  #@functools.partial(
-  #  jax.jit,
-  #  static_argnums=(0, 6),
-  #  donate_argnums=(5, ),
-  #)
-  def _call_model(self, 
+  def _call_model_generate(
+    self, 
     weights, 
     tokens, 
     input_indexes, 
-    cache_indexes, 
     caches, 
-    prefill
   ):
+    caches_obj = [
+      cache_manager.KVCacheGenerate(k, v, input_indexes, self.cache_sharding) for k, v in torch_xla2.tensor.wrap(caches)
+    ]
     args = (
-      tokens, input_indexes, cache_indexes, caches, prefill
+      tokens, input_indexes, caches_obj, False
     )
     paramst, argst = torch_xla2.tensor.wrap((weights, args))
     with torch_xla2.tensor.XLADispatchMode():
       res = torch.func.functional_call(self.pt_model, paramst, argst)
-    return torch_xla2.tensor.unwrap(res)
+    updated_caches = [c.state() for c in caches_obj]
+    return torch_xla2.tensor.unwrap((res, updated_caches))
+
+
+  @functools.partial(
+    jax.jit,
+    static_argnums=(0, ),
+  )
+  def _call_model_prefill(self, weights, tokens, input_indexes):
+    caches = [
+      cache_manager.KVCachePrefill() for _ in self.pt_model.layers
+    ]
+    args = (
+      tokens, input_indexes, caches, True 
+    )
+    paramst, argst = torch_xla2.tensor.wrap((weights, args))
+    with torch_xla2.tensor.XLADispatchMode():
+      res = torch.func.functional_call(self.pt_model, paramst, argst)[0]
+    caches_res = [c.state() for c in caches]
+    return torch_xla2.tensor.unwrap((res, caches_res))
 
   def _make_cache(self, args, batch_size):
     head_dim = args.dim // args.n_heads
@@ -174,14 +192,11 @@ class PyTorchEngine(engine_api.Engine):
     seq_len = padded_tokens.shape[0]
     initial_caches = self._make_cache(self.pt_model.params, 1)
     input_indexes = jnp.arange(0, seq_len)
-    cache_indexes = input_indexes
-    logits, updated_caches = self._call_model(
+    logits, updated_caches = self._call_model_prefill(
       params, 
       batched_token, 
-      input_indexes, 
-      cache_indexes, 
-      initial_caches, 
-      True)
+      input_indexes,
+    )
     token = self._sampling(logits, 1)
     token = token.squeeze(0) # drop batch
     return Prefix(token, updated_caches, seq_len) 
@@ -235,13 +250,12 @@ class PyTorchEngine(engine_api.Engine):
     pos = decode_state.current_position
     input_indexes = jnp.full((1,), pos) 
     cache_indexes = jnp.arange(0, 1024) + pos
-    logits, new_caches = self._call_model(
+    logits, new_caches = self._call_model_generate(
       params, 
       decode_state.tokens, 
       input_indexes, 
-      cache_indexes, 
       decode_state.caches, 
-      False)
+    )
     next_token = self._sampling(logits, self.param.max_batch_size)
     #logging.info(
     #    'Jet generate next_token: %s, \ncaches: %s', next_token, caches_kv
@@ -264,13 +278,7 @@ class PyTorchEngine(engine_api.Engine):
         length_idx=(2 * length, 2 * length + 1),
         samples_per_slot=1,
     )
-
     
-    # logging.info(
-    #     'Jet decode state after generate: %s \nresult token: %s',
-    #     decode_state,
-    #     result_tokens,
-    # )
     new_decode_state = DecodeState(
       next_token, 
       new_caches,
@@ -280,7 +288,7 @@ class PyTorchEngine(engine_api.Engine):
 
 
   def get_tokenizer(self) -> tokenizer_pb2.TokenizerParameters:
-    return tokenizer_pb2.TokenizerParameters(path=self.tokenizer_path)
+    return tokenizer_pb2.TokenizerParameters(path=self.env.tokenizer_path)
 
   def join_prefixes(
       self,
@@ -305,7 +313,10 @@ class PyTorchEngine(engine_api.Engine):
       key: jax.device_put(value, self.sharding_by_name(key))
       for key, value in jax_weights.items()
     }
-    jax.tree_map(lambda k, v: print(f'Name: {k}, shape: {v.shape}'), list(jax_weights.keys()), list(jax_weights.values()))
+    for k, v in jax_weights.items():
+      if k.startswith('layers') and not k.startswith('layers.0'):
+        continue
+      print(f'Name: {k}, shape: {v.shape} x {v.dtype}')
     return jax_weights
 
   def colocated_cpus(self) -> Union[list[engine_api.CpuDevices], None]:
@@ -339,7 +350,8 @@ class PyTorchEngine(engine_api.Engine):
 
   @property
   def samples_per_slot(self) -> int:
-    return self.samples_per_slot_input
+    return 1
+    # return self.samples_per_slot_input
 
   @property
   def max_prefill_length(self) -> int:
@@ -348,7 +360,7 @@ class PyTorchEngine(engine_api.Engine):
   @property
   def max_decode_length(self) -> int:
     """Maximum decode length."""
-    return self._max_decode_length
+    return self.env._data.max_decode_length
 
   @property
   def mesh(self):
@@ -365,7 +377,8 @@ def create_pytorch_engine(
     context_length: int = 1024,
     batch_size: int = 1,
     max_decode_length: int = 4096,
-    model_name = "llama"
+    model_name = "llama",
+    quantize_weights = False,
 ) -> PyTorchEngine:
   """Returns: The pytorch engine."""
 
@@ -374,6 +387,18 @@ def create_pytorch_engine(
   # Pytorch exports has int64 constants.
   # jax.config.update('jax_enable_x64', True)
   jax.config.update('jax_traceback_filtering', 'off')
+  torch.set_default_dtype(torch.bfloat16)
+
+  env_data = JetEngineEnvironmentData(
+    tokenizer_path=tokenizer_path,
+    model_type = 'llama-2-' + param_size,
+    batch_size = batch_size,
+    max_decode_length = max_decode_length,
+    max_input_sequence_length = context_length,
+    enable_weight_quantization = quantize_weights,
+  )
+
+  env = JetEngineEnvironment(env_data)
 
   tokenizer = token_utils.load_vocab(tokenizer_path)
   pt_model = None
@@ -381,16 +406,15 @@ def create_pytorch_engine(
   if model_name == "llama":
     model_args = model_utils.get_model_args(param_size, context_length, batch_size, tokenizer.vocab_size, bf16_enable)
     model_args.device = 'meta'
-    pt_model = model_exportable.Transformer(model_args)
+    model_args.quantize = quantize_weights
+    pt_model = model_exportable.Transformer(model_args, env)
 
-  if bf16_enable:
-    pt_model = pt_model.to(torch.bfloat16)
+    num_params = 0
+    for k, v in pt_model.state_dict().items():
+      num_params += np.prod(v.shape) * (1 if v.dtype == jnp.int8 else 2)
+    print('Number of param Gbytes:', num_params / (1 << 30))
 
   return PyTorchEngine(
-      devices=devices,
       pt_model=pt_model,
-      tokenizer=tokenizer,
-      samples_per_slot=samples_per_slot,
-      max_decode_length=max_decode_length,
-      tokenizer_path=tokenizer_path,
+      env=env
   )

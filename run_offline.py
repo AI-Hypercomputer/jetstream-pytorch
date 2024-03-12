@@ -48,6 +48,33 @@ _PROFILING_OUTPUT =flags.DEFINE_string(
 
 _SIZE = flags.DEFINE_string('size', 'tiny', 'size of model')
 
+_QUANTIZE_WEIGHTS = flags.DEFINE_bool('quantize_weights', False, 'weight quantization')
+# _QUANTIZE_KV_CACHE= flags.DEFINE_bool('quantize_weights', False, 'weight quantization')
+
+
+WEIGHT_SHARDING_OVERRIDE = {
+  # int is axis; -1 is replicated
+  # 0 is column replicated for linears
+  "tok_embeddings.weight": 1,
+  "tok_embeddings.weight_scaler": 0,
+  "attention.wq.weight": 0,
+  "attention.wq.weight_scaler": 0,
+  "attention.wk.weight": 0,
+  "attention.wk.weight_scaler": 0,
+  "attention.wv.weight": 0,
+  "attention.wv.weight_scaler": 0,
+  "attention.wo.weight": 1,
+  "attention.wo.weight_scaler": 0,
+  "feed_forward.w1.weight": 0,
+  "feed_forward.w1.weight_scaler": 0,
+  "feed_forward.w2.weight": 1,
+  "feed_forward.w2.weight_scaler": 1,
+  "feed_forward.w3.weight": 0,
+  "feed_forward.w3.weight_scaler": 1,
+  "attention_norm.weight":  -1,
+  "ffn_norm.weight": -1,
+}
+
 
 
 def main(argv):
@@ -68,7 +95,8 @@ def main(argv):
         param_size=_SIZE.value,
         context_length=_CONTEXT_LENGTH.value,
         batch_size=_BATCH_SIZE.value,
-    )
+        quantize_weights=_QUANTIZE_WEIGHTS.value,
+  )
   print('Initialize engine', time.perf_counter() - start)
   start = time.perf_counter()
   params = engine.load_params()
@@ -106,15 +134,16 @@ def main(argv):
       params, decode_state
     )
     sampled_tokens_list.append(sampled_tokens)
-  start = time.perf_counter()
   print('======= decode starting ===')
-  for i in steps:
+  for i in range(10):
+    start = time.perf_counter()
     decode_state, sampled_tokens = engine.generate(
       params, decode_state
     )
+    decode_state.tokens.block_until_ready()
     sampled_tokens_list.append(sampled_tokens)
-  end = time.perf_counter()
-  print('decode time avg', (end - start) / len(steps))
+    end = time.perf_counter()
+    print(i, 'decode time', (end - start))
 
   results = [sampled_tokens.get_result_at_slot(slot).tokens.item() for sampled_tokens in sampled_tokens_list]
   output = tokenizer.detokenize(results)
