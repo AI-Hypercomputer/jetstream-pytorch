@@ -60,7 +60,7 @@ class JetEngineEnvironment:
         Mesh = jax.sharding.Mesh
         P = jax.sharding.PartitionSpec
 
-        num_of_partitions = 8  # TODO
+        num_of_partitions = jax.device_count()  # TODO
         # make mesh etc.
         self._mesh = jsharding.Mesh(
             mesh_utils.create_device_mesh((num_of_partitions, 1)),

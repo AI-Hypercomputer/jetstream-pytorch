@@ -12,6 +12,8 @@ from . import model_args
 import jax.sharding as jsharding
 from jax.experimental import mesh_utils
 import jax
+import jax.numpy as jnp
+import torch_xla2
 import torch_xla2.extra
 
 from petstream.layers import Attention, RMSNorm, Int8Embedding, WeightOnlyInt8Linear

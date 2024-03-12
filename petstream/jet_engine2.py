@@ -62,9 +62,6 @@ class PyTorchEngine(engine_api.Engine):
     # NOTE: this is llama2 specific now.
     self.param = pt_model.params
 
-    self.reverse = False
-    self.cache_sharding = env.sharding_by_axis(2) if self.reverse else env.sharding_by_axis(0)
-    self.prefix_cache_sharding = env.sharding_by_axis(2)
     self.y_sharding = env.sharding_by_axis(1)
     self.x_sharding = env.sharding_by_axis(0)
     self.replicated = env.sharding_by_axis(-1) # replicated
@@ -89,16 +86,16 @@ class PyTorchEngine(engine_api.Engine):
         return self.y_sharding
     if "attention." in name:
         if "wo" in name:
-            return self.y_sharding if self.reverse else self.x_sharding
+            return self.y_sharding
         else:
-            return self.x_sharding if self.reverse else self.y_sharding
+            return self.x_sharding
     if "feed_forward." in name:
         if "w2" in name:
-            return self.y_sharding if self.reverse else self.x_sharding
+            return self.y_sharding
         else:
-            return self.x_sharding if self.reverse else self.y_sharding
+            return self.x_sharding
     if "output" in name:
-        return self.x_sharding if self.reverse else self.y_sharding 
+        return self.x_sharding 
     return self.replicated 
 
   def init_decode_state(
@@ -326,8 +323,7 @@ class PyTorchEngine(engine_api.Engine):
     """Returns the shardings necessary to transfer data between engines."""
     return Prefix(
         self.replicated,
-        self.prefix_cache_sharding,
-        #self.replicated,
+        self.cache_sharding,
         self.replicated,
     )
 
@@ -335,7 +331,6 @@ class PyTorchEngine(engine_api.Engine):
     """Gets the shardings corresponding to the decode state."""
     return DecodeState(
         self.replicated,
-        #self.x_sharding, # Sharding on batch dim of next token
         self.cache_sharding,
         self.replicated,
     )

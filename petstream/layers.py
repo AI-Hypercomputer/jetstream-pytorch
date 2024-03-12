@@ -8,7 +8,8 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 import jax
-
+import jax.numpy as jnp
+import torch_xla2
 
 class Int8Embedding(torch.nn.Module):
 
@@ -172,7 +173,7 @@ class Attention(nn.Module):
       xq = xq.view(bsz, seqlen, self.n_local_heads, self.head_dim)
       xk = xk.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
       xv = xv.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
-
+      
     with jax.named_scope('attn_rope'):
       xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
 
@@ -190,18 +191,18 @@ class Attention(nn.Module):
 
     with jax.named_scope('attn_mat1'):
       ## Attention start
-      scores = torch.einsum("ijkl,ikml->ikjm", xq, keys) / math.sqrt(
-          self.head_dim
-      )
+      #scores = torch.einsum(jnp.einsum, "ijkl,ikml->ikjm", xq, keys) / math.sqrt(self.head_dim)
+      scores = torch_xla2.extra.call_jax(jnp.einsum, "ijkl,ikml->ikjm", xq, keys) / math.sqrt(self.head_dim)
       if mask is not None:
         scores = scores + mask  # (bs, n_local_heads, seqlen, max_seqlen)
     with jax.named_scope('attn_soft'):
       scores = F.softmax(scores.float(), dim=-1).type_as(xq)
 
     with jax.named_scope('attn_mat2'):
-      output = torch.einsum(
-          "ikjm,ikml->ikjl", scores, values
-      )  # (bs, n_local_heads, seqlen, head_dim)
+      #output = torch.einsum(
+      #    "ikjm,ikml->ikjl", scores, values
+      #)  # (bs, n_local_heads, seqlen, head_dim)
+      output = torch_xla2.extra.call_jax(jnp.einsum,"ikjm,ikml->ikjl", scores, values)
       output = output.transpose(-3, -2).contiguous().view(bsz, seqlen, -1)
     return self.wo(output)
 
