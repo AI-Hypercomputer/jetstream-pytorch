@@ -19,11 +19,19 @@ class CacheInterface:
 
 class KVCachePrefill:
 
+    def __init__(self, kv_quantize=False):
+        self.kv_quantize = kv_quantize 
+
     def update(self, key, value):
         """This cache just remembers the stuff."""
         self.cache_k = key
         self.cache_v = value
-        return key, value
+        if self.kv_quantize:  # pretend to be quantized
+            bsz, _, seq, _ = key.shape
+            ones = torch_xla2.tensor.wrap(jnp.ones((bsz, 1, seq, 1), dtype=jnp.bfloat16))
+            return key, value, ones, ones
+        else:
+            return key, value
 
     def state(self):
         return self.cache_k, self.cache_v
@@ -55,66 +63,63 @@ class KVCacheGenerate:
         return self.cache_k, self.cache_v 
 
     def state(self):
-        return self.cache_k, self.cache_v
+        return self.cache_k._elem, self.cache_v._elem
 
     @classmethod
     def empty(cls, shape, device):
-        k = jnp.zeros(shape, device=device)
-        v = jnp.zeros(shape, device=device)
+        k = jnp.zeros(shape, device=device, dtype=jnp.bfloat16)
+        v = jnp.zeros(shape, device=device, dtype=jnp.bfloat16)
         k, v = torch_xla2.tensor.wrap((k, v))
         pos = jnp.array([0])  # replicated
         return cls(k, v, 0, device)
         
 
-class Int8KVCache:
+class Int8KVCacheGenerate:
 
     def __init__(self, 
         cache_k, 
         cache_v, 
-        # input_pos,  # used to write cache
-        # context_pos, #  used to read cache
-        prefill = True,
-        input_indexes = None,
+        cache_k_scaler,
+        cache_v_scaler, 
+        input_pos,  # used to write cache
         sharding = None,
     ):
         super().__init__()
-        # These things are jax arrays!
-        self.cache_k = torch_xla2.tensor.wrap(cache_k)  #<bsz, heads, seq, dim> x int8
-        self.cache_v = torch_xla2.tensor.wrap(cache_v)
-        bsz, heads, _, dim = cache_k.shape
-        self.k_scaler = torch_xla2.tensor.wrap(jnp.ones((bsz, heads, 1, dim), dtype=jnp.bfloat16, device=sharding))
-        self.v_scaler = torch_xla2.tensor.wrap(jnp.ones((bsz, heads, 1, dim), dtype=jnp.bfloat16, device=sharding))
+        self.cache_k = cache_k
+        self.cache_v = cache_v
+        self.k_scaler = cache_k_scaler 
+        self.v_scaler = cache_v_scaler 
+        self.input_pos = input_pos
 
-        # self.input_pos = input_pos
-        # self.context_pos = context_pos
-        self.max_seq_len = cache_k.shape[2]
-        self.prefill = prefill
-        self.input_indexes = input_indexes
+    def state(self):
+        return torch_xla2.tensor.unwrap((self.cache_k, self.cache_v))
+
+    
+    def scalers(self):
+        return torch_xla2.tensor.unwrap((self.k_scaler, self.v_scaler))
 
     @classmethod
     def empty(cls, shape, device):
-        pass
+        cache_k = jnp.zeros(shape, device=device, dtype=jnp.int8)
+        cache_v = jnp.zeros(shape, device=device, dtype=jnp.int8)
+        kscaler = jnp.ones((shape[0], 1, shape[2], 1), dtype=jnp.bfloat16)
+        vscaler = jnp.ones((shape[0], 1, shape[2], 1), dtype=jnp.bfloat16)
+
+        cache_k, cache_v, kscaler, vscaler = torch_xla2.tensor.wrap((cache_k, cache_v, kscaler, vscaler))
+        return cls(cache_k, cache_v, kscaler, vscaler, 0, device)
 
 
+    def quantize(self, val):
+        # val is (batch, heads, seqlen, dim)
+        scale = torch.amax(val.abs(), axis=(1, 3), keepdim=True)
+        scale = scale / 127
+        return (val / scale).to(torch.int8), scale
 
     def update(self, xk, xv):
-        # k_val: (bsz, numheads, seq len, head dim)
-        # cache_shape = (Batch heads seqlen headdim)
-        if self.prefill:
-            bsz, heads, seqlen, head_dim = xk.shape
-            return xk.reshape(seqlen, bsz, heads, head_dim), xv.reshape(seqlen, bsz, heads, head_dim)
-            # Assumes prefill only
-            self.cache_k = xk
-            self.cache_v = xv
-            return self.cache_k, self.cache_v
-        else:
-            self.cache_k, self.cache_v = torch_xla2.extra.call_jax(
-                update_caches_jax, self.cache_k, self.cache_v, xk, xv, self.input_indexes)
-            return self.cache_k * self.k_scaler, self.cache_v * self.v_scaler
-
-import functools
-def update_caches_jax(cache_k, cache_v, xk, xv, position):
-    # import pdb; pdb.set_trace()
-    cache_k = cache_k.at[position].set(xk.astype(jnp.int8).squeeze(2))
-    cache_v = cache_v.at[position].set(xv.astype(jnp.int8).squeeze(2))
-    return cache_k, cache_v
+        k_quant, kscale = self.quantize(xk)
+        v_quant, vscale = self.quantize(xv)
+        self.cache_k[:, :, self.input_pos, :] = k_quant
+        self.cache_v[:, :, self.input_pos, :] = v_quant
+        self.k_scaler[:, self.input_pos] = kscale
+        self.v_scaler[:, self.input_pos] = vscale
+        return self.cache_k, self.cache_v, self.k_scaler, self.v_scaler

@@ -6,6 +6,8 @@ import dataclasses
 from typing import Tuple, Dict
 
 from petstream.pets.llama2 import model_utils
+from petstream.pets import cache_manager
+import torch_xla2
 
 
 
@@ -19,6 +21,7 @@ class JetEngineEnvironmentData:
     max_input_sequence_length: int = 1024
     max_decode_length: int = 1024
     batch_size: int = 32 # batch size is generate step batch size
+    cache_sequence_length: int = 2048  # size of the cache.
 
     enable_weight_quantization: bool = False
     enable_kv_quantization: bool = False
@@ -57,6 +60,7 @@ class JetEngineEnvironment:
         self.num_layers = self._model_arg.n_layers
         self.num_heads = self._model_arg.n_heads
         self.head_dim = self._model_arg.dim // self._model_arg.n_heads
+        self.cache_sequence_length = self._data.cache_sequence_length
 
         Mesh = jax.sharding.Mesh
         P = jax.sharding.PartitionSpec
@@ -75,37 +79,45 @@ class JetEngineEnvironment:
         cache_sharding = ("x" if axis == self._data.kv_cache_shard_axis else None
                           for axis in self._data.attention_kv_axis_names)
         self.cache_sharding = jsharding.NamedSharding(self._mesh, P(*cache_sharding))
-        self.qkv_fusion = data.qkv_fusion
+
+    def __getattr__(self, name):
+        if hasattr(self._data, name):
+            return getattr(self._data, name)
+        return super().__getattr__(name)
+
     @property
     def tokenizer_path(self):
         return self._data.tokenizer_path
 
     # This is used by model to add activation sharding.
-    def apply_sharding(self, tensor, *, sharding_dim: int | None):
-        if not insinstance(tensor, torch_xla2.tensor.XLATensor2):
+    def apply_sharding(self, tensor, *, axis: int | None):
+        if not isinstance(tensor, torch_xla2.tensor.XLATensor2):
             return
-        sharding_spec = self.sharding_by_axis(sharding_dim, len(tensor.shape))
-        tensor._elem = jax.lax.with_sharding_constraints(tensor._elem, sharding_spec)
+        sharding_spec = self.sharding_by_axis(axis)
+        tensor._elem = jax.lax.with_sharding_constraint(tensor._elem, sharding_spec)
 
     def sharding_by_axis(self, axis):
-        if axis == -1:
+        if axis == -1 or axis is None:
             return jsharding.NamedSharding(self._mesh, jax.sharding.PartitionSpec())
         sharding = [None] * (axis + 1)
         sharding[axis] = "x"
         sharding_spec = jsharding.NamedSharding(self._mesh, jax.sharding.PartitionSpec(*sharding))
         return sharding_spec
         
-    def make_caches_prefill(self, layers):
+    def make_caches_prefill(self):
         caches = []
-        for _ in range(layers):
+        for _ in range(self.num_layers):
             caches.append(cache_manager.KVCachePrefill())
         return caches
 
-    def make_caches_generate(self, layers):
+    def make_caches_generate(self):
         caches = []
-        shape = (self.batch_size, self.num_heads, self.seq_len, self.head_dim)
-        for _ in range(layers):
-            caches.append(cache_manager.KVCacheGenerate.empty(shape, self.cache_sharding))
+        shape = (self.batch_size, self.num_heads, self._data.cache_sequence_length, self.head_dim)
+        for _ in range(self.num_layers):
+            if self.enable_kv_quantization:
+                caches.append(cache_manager.Int8KVCacheGenerate.empty(shape, self.cache_sharding))
+            else:
+                caches.append(cache_manager.KVCacheGenerate.empty(shape, self.cache_sharding))
         return caches
 
 

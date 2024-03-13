@@ -40,7 +40,7 @@ from jax.sharding import PositionalSharding
 from jax.experimental import mesh_utils
 
 def test2():
-    batch, seq, heads, dim = 256, 1024, 40, 128
+    batch, seq, heads, dim = 96, 2048, 40, 128
     sharding = PositionalSharding(mesh_utils.create_device_mesh((8,)))
     sharding = sharding.reshape((1, 8, 1,  1))
     val_sharding = sharding.reshape((1, 8, 1, 1))

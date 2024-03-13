@@ -49,42 +49,16 @@ _PROFILING_OUTPUT =flags.DEFINE_string(
 _SIZE = flags.DEFINE_string('size', 'tiny', 'size of model')
 
 _QUANTIZE_WEIGHTS = flags.DEFINE_bool('quantize_weights', False, 'weight quantization')
-# _QUANTIZE_KV_CACHE= flags.DEFINE_bool('quantize_weights', False, 'weight quantization')
+_QUANTIZE_KV_CACHE = flags.DEFINE_bool('quantize_kv_cache', False, 'kv_cache_quantize')
+_MAX_CACHE_LENGTH = flags.DEFINE_integer('max_cache_length', 1024, 'kv_cache_quantize')
 
 
-WEIGHT_SHARDING_OVERRIDE = {
-  # int is axis; -1 is replicated
-  # 0 is column replicated for linears
-  "tok_embeddings.weight": 1,
-  "tok_embeddings.weight_scaler": 0,
-  "attention.wq.weight": 0,
-  "attention.wq.weight_scaler": 0,
-  "attention.wk.weight": 0,
-  "attention.wk.weight_scaler": 0,
-  "attention.wv.weight": 0,
-  "attention.wv.weight_scaler": 0,
-  "attention.wo.weight": 1,
-  "attention.wo.weight_scaler": 0,
-  "feed_forward.w1.weight": 0,
-  "feed_forward.w1.weight_scaler": 0,
-  "feed_forward.w2.weight": 1,
-  "feed_forward.w2.weight_scaler": 1,
-  "feed_forward.w3.weight": 0,
-  "feed_forward.w3.weight_scaler": 1,
-  "attention_norm.weight":  -1,
-  "ffn_norm.weight": -1,
-}
-
-
-
-def main(argv):
-  del argv
+def create_engine():
   jax.config.update('jax_default_prng_impl', 'unsafe_rbg')
   os.environ["TF_CPP_MIN_LOG_LEVEL"] = "0"
 
   max_prefill_predict_length = 1024
   max_target_length = max_prefill_predict_length + 256
-
   devices = jax.devices()
   start = time.perf_counter()
   engine = je.create_pytorch_engine(
@@ -96,37 +70,68 @@ def main(argv):
         context_length=_CONTEXT_LENGTH.value,
         batch_size=_BATCH_SIZE.value,
         quantize_weights=_QUANTIZE_WEIGHTS.value,
+        quantize_kv=_QUANTIZE_KV_CACHE.value,
+        max_cache_length = _MAX_CACHE_LENGTH.value,
   )
-  print('Initialize engine', time.perf_counter() - start)
-  start = time.perf_counter()
-  params = engine.load_params()
-  print('Load params ', time.perf_counter() - start)
 
-  text = 'This is a beautiful day'
+  print('Initialize engine', time.perf_counter() - start)
+  return engine
+
+
+def run_prefill_time(engine, params, batch_size):
   metadata = engine.get_tokenizer()
   vocab = token_utils.load_vocab(
     metadata.path, metadata.extra_ids)
   tokenizer = vocab.tokenizer
+
+  text = 'This is a beautiful day'
   tokens, true_length = token_utils.tokenize_and_pad(
-    text, vocab, is_bos=True, prefill_lengths=[max_prefill_predict_length])
-  assert tokens.size <= max_prefill_predict_length, "can't take too many tokens"
+    text, vocab, is_bos=True, prefill_lengths=[batch_size])
+
+  for _ in range(3):
+    prefill_result = engine.prefill(
+        params=params, padded_tokens=tokens, true_length=true_length
+    )
+
+  nums = 5
+  start = time.perf_counter()
+  for _ in range(nums):
+    prefill_result = engine.prefill(
+        params=params, padded_tokens=tokens, true_length=true_length
+    )
+  end = time.perf_counter()
+  return (end - start) / nums, prefill_result
+
+
+MAXTEXT_PREFILL = {64 : 14.02, 128:18.29, 256:23.59, 512:35.28, 1024: 60.28}
+
+def main(argv):
+
+  engine = create_engine()
 
   start = time.perf_counter()
-  prefill_result = engine.prefill(
-      params=params, padded_tokens=tokens, true_length=true_length
-  )
-  end = time.perf_counter()
-  print('Prefill time', end - start)
+  params = engine.load_params()
+  print('Load params ', time.perf_counter() - start)
+
+  # prefill_times = {}
+  # prefill_result = None
+  # for batch in MAXTEXT_PREFILL.keys():
+  #   runtime, prefill_result = run_prefill_time(engine, params, batch)
+  #   prefill_times[batch] = runtime
+  runtime, prefill_result = run_prefill_time(engine, params, 1024)
 
 
   slot = jnp.int32(1)
-
   decode_state = engine.init_decode_state()
+
+  #import pdb; pdb.set_trace()
+  #print(engine.insert.lower(prefill_result, decode_state, slot=slot).as_text())
+
+
   decode_state = engine.insert(
       prefill_result, decode_state, slot=slot
   )
 
-  steps = range(max_prefill_predict_length, max_target_length)
   sampled_tokens_list = []
 
   for i in range(3): # warm up
@@ -134,21 +139,25 @@ def main(argv):
       params, decode_state
     )
     sampled_tokens_list.append(sampled_tokens)
+
   print('======= decode starting ===')
+  if _PROFILING_OUTPUT.value:
+    jax.profiler.start_trace(_PROFILING_OUTPUT.value)
   for i in range(10):
     start = time.perf_counter()
     decode_state, sampled_tokens = engine.generate(
       params, decode_state
     )
-    decode_state.tokens.block_until_ready()
+    jax.block_until_ready(decode_state)
     sampled_tokens_list.append(sampled_tokens)
     end = time.perf_counter()
     print(i, 'decode time', (end - start))
 
-  results = [sampled_tokens.get_result_at_slot(slot).tokens.item() for sampled_tokens in sampled_tokens_list]
-  output = tokenizer.detokenize(results)
-  print(f"Input `{text}` -> `{output}`")
+  if _PROFILING_OUTPUT.value:
+    jax.profiler.stop_trace()
 
 
 if __name__ == "__main__":
+  import os
+  os.environ["TF_CPP_MIN_LOG_LEVEL"] = "0"
   app.run(main)

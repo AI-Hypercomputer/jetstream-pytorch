@@ -42,6 +42,7 @@ class Prefix:
 class DecodeState:
   tokens: jax.Array   # [batch_size, seqlen]
   caches: List[Tuple[jax.Array, jax.Array]]
+  cache_scales: List[Tuple[jax.Array, jax.Array]]  # only present in quantized kv
   current_position: int
 
 
@@ -68,7 +69,7 @@ class PyTorchEngine(engine_api.Engine):
     self.cache_sharding = self.y_sharding
 
     self.prefill = jax.jit(self.prefill, out_shardings=self.get_prefix_destination_sharding())
-    self.insert = jax.jit(self.insert, donate_argnums=(0, 1, ), out_shardings=self.get_decode_state_sharding())
+    self.insert = jax.jit(self.insert, donate_argnums=(0, 1), out_shardings=self.get_decode_state_sharding())
     self.generate = jax.jit(self.generate, donate_argnums=(1, ), out_shardings=(self.get_decode_state_sharding(), None))
 
   def sharding_by_name(self, name):
@@ -101,10 +102,15 @@ class PyTorchEngine(engine_api.Engine):
   def init_decode_state(
       self,
   ) -> DecodeState:
-    caches = self._make_cache(self.param, self.param.max_batch_size)
+    caches_obj = self.env.make_caches_generate()
+    caches = [c.state() for c in caches_obj]
+    scalers = []
+    if self.env.enable_kv_quantization:
+      scalers = [c.scalers() for c in caches_obj]
     return DecodeState(
         jnp.zeros((self.param.max_batch_size, 1), dtype=jnp.int32),
         caches,
+        scalers,
         0,
     )
 
@@ -114,10 +120,18 @@ class PyTorchEngine(engine_api.Engine):
     tokens, 
     input_indexes, 
     caches, 
+    cache_scales,
   ):
-    caches_obj = [
-      cache_manager.KVCacheGenerate(k, v, input_indexes, self.cache_sharding) for k, v in torch_xla2.tensor.wrap(caches)
-    ]
+    if self.env.enable_kv_quantization:
+      caches_obj = [
+        cache_manager.Int8KVCacheGenerate(
+          k, v, ks, vs, input_indexes) for (k, v), (ks, vs) 
+          in torch_xla2.tensor.wrap(list(zip(caches, cache_scales)))
+      ]
+    else:
+      caches_obj = [
+        cache_manager.KVCacheGenerate(k, v, input_indexes, self.cache_sharding) for k, v in torch_xla2.tensor.wrap(caches)
+      ]
     args = (
       tokens, input_indexes, caches_obj, False
     )
@@ -125,7 +139,10 @@ class PyTorchEngine(engine_api.Engine):
     with torch_xla2.tensor.XLADispatchMode():
       res = torch.func.functional_call(self.pt_model, paramst, argst)
     updated_caches = [c.state() for c in caches_obj]
-    return torch_xla2.tensor.unwrap((res, updated_caches))
+    scales = []
+    if self.env.enable_kv_quantization:
+      scales = [c.scalers() for c in caches_obj]
+    return torch_xla2.tensor.unwrap((res, updated_caches, scales))
 
 
   @functools.partial(
@@ -134,7 +151,7 @@ class PyTorchEngine(engine_api.Engine):
   )
   def _call_model_prefill(self, weights, tokens, input_indexes):
     caches = [
-      cache_manager.KVCachePrefill() for _ in self.pt_model.layers
+      cache_manager.KVCachePrefill(self.env.enable_kv_quantization) for _ in self.pt_model.layers
     ]
     args = (
       tokens, input_indexes, caches, True 
@@ -144,25 +161,6 @@ class PyTorchEngine(engine_api.Engine):
       res = torch.func.functional_call(self.pt_model, paramst, argst)[0]
     caches_res = [c.state() for c in caches]
     return torch_xla2.tensor.unwrap((res, caches_res))
-
-  def _make_cache(self, args, batch_size):
-    head_dim = args.dim // args.n_heads
-    res = []
-    kv_heads = args.n_kv_heads if args.n_kv_heads is not None else args.n_heads
-    for _ in range(args.n_layers):
-      k_size = (batch_size, kv_heads, args.max_seq_len, head_dim)
-      v_size = k_size
-      res.append((
-          jnp.zeros(
-              k_size, dtype=jnp.bfloat16,
-              device=self.cache_sharding
-          ),
-          jnp.zeros(
-              v_size, dtype=jnp.bfloat16,
-              device=self.cache_sharding
-          ),
-      ))
-    return res
 
   def _sampling(self, logits: Any, batch_size: int) -> jnp.ndarray:
     return (
@@ -187,7 +185,6 @@ class PyTorchEngine(engine_api.Engine):
           ' {prefill_inputs}'
       )
     seq_len = padded_tokens.shape[0]
-    initial_caches = self._make_cache(self.pt_model.params, 1)
     input_indexes = jnp.arange(0, seq_len)
     logits, updated_caches = self._call_model_prefill(
       params, 
@@ -205,11 +202,6 @@ class PyTorchEngine(engine_api.Engine):
   ) -> Prefix:
     return prefix
 
-  #@functools.partial(
-  #  jax.jit,
-  #  static_argnums=(0,),
-  #  donate_argnums=(2,3),
-  #)
   def insert(
       self,
       prefix: Prefix,
@@ -224,18 +216,53 @@ class PyTorchEngine(engine_api.Engine):
     tokens = decode_state.tokens.at[slot].set(prefix.token)
     # TODO this doest wrap around
     pos = decode_state.current_position
-    def insert(cache, new_entry):
-        return jax.lax.dynamic_update_slice(
-            cache,
-            new_entry,
-            [slot, pos, jnp.int32(0), jnp.int32(0)],
-        )
-    caches = [
-      (insert(k, newk), insert(v, newv))
-      for (k, v), (newk, newv) in zip(decode_state.caches, prefix.caches)
-    ]
+    scales = []
+    if not self.env.enable_kv_quantization:
+      @functools.partial(jax.jit, donate_argnums=(0, 1))
+      def insert(cache, new_entry):
+          res = jax.lax.dynamic_update_slice(
+              cache,
+              new_entry,
+              [slot, 0, pos, 0],
+          )
+          res = jax.lax.with_sharding_constraint(res, self.cache_sharding)
+          return res
+      caches = [
+        (insert(k, newk), insert(v, newv))
+        for (k, v), (newk, newv) in zip(decode_state.caches, prefix.caches)
+      ]
+    else:
+      @functools.partial(jax.jit, donate_argnums=(0, 1))
+      def insert(cache, scaler, new_entry):
+          scales = jnp.maximum(jnp.abs(jnp.amax(new_entry, axis=(1, 3), keepdims=True)), 
+                               jnp.abs(jnp.amin(new_entry, axis=(1, 3), keepdims=True)))
+          scales *= 127
+          scales = jax.lax.with_sharding_constraint(scales, self.replicated)
+          new_scaler = jax.lax.dynamic_update_slice(
+            scaler,
+            scales,
+            [slot, 0, pos, 0],
+          )
+          res = jax.lax.dynamic_update_slice(
+              cache,
+              (new_entry/scales).astype(jnp.int8),
+              [slot, 0, pos, 0],
+          )
+          res = jax.lax.with_sharding_constraint(res, self.cache_sharding)
+          return res, new_scaler
+
+      caches = []
+      for (k, v), (kscaler, vscaler), (newk, newv) in zip(
+          decode_state.caches, 
+          decode_state.cache_scales, 
+          prefix.caches):
+        kcache, kscale = insert(k, kscaler, newk)
+        vcache, vscale = insert(v, vscaler, newv)
+        caches.append((kcache, vcache))
+        scales.append((kscale, vscale))
+
     position = prefix.seq_len
-    return DecodeState(tokens, caches, position)
+    return DecodeState(tokens, caches, scales, position)
 
   #@functools.partial(jax.jit, static_argnums=(0,), donate_argnums=(2, ))
   def generate(
@@ -243,15 +270,15 @@ class PyTorchEngine(engine_api.Engine):
   ) -> tuple[DecodeState, engine_api.ResultTokens]:
     #logging.info('Jet decode state before generate: %s', decode_state)
     #seq_len = padded_tokens.shape[0]
-    #initial_caches = self._make_cache(self.pt_model.params, 1)
     pos = decode_state.current_position
     input_indexes = jnp.full((1,), pos) 
     cache_indexes = jnp.arange(0, 1024) + pos
-    logits, new_caches = self._call_model_generate(
+    logits, new_caches, new_scales = self._call_model_generate(
       params, 
       decode_state.tokens, 
       input_indexes, 
       decode_state.caches, 
+      decode_state.cache_scales
     )
     next_token = self._sampling(logits, self.param.max_batch_size)
     #logging.info(
@@ -279,6 +306,7 @@ class PyTorchEngine(engine_api.Engine):
     new_decode_state = DecodeState(
       next_token, 
       new_caches,
+      new_scales,
       decode_state.current_position + 1
     )
     return new_decode_state, result_tokens
@@ -333,6 +361,7 @@ class PyTorchEngine(engine_api.Engine):
         self.replicated,
         self.cache_sharding,
         self.replicated,
+        self.replicated,
     )
 
   def get_prefix_sequence_ddim(self) -> Any:
@@ -374,6 +403,8 @@ def create_pytorch_engine(
     max_decode_length: int = 4096,
     model_name = "llama",
     quantize_weights = False,
+    quantize_kv = False,
+    max_cache_length = 1024,
 ) -> PyTorchEngine:
   """Returns: The pytorch engine."""
 
@@ -391,6 +422,8 @@ def create_pytorch_engine(
     max_decode_length = max_decode_length,
     max_input_sequence_length = context_length,
     enable_weight_quantization = quantize_weights,
+    enable_kv_quantization = quantize_kv,
+    cache_sequence_length = max_cache_length,
   )
 
   env = JetEngineEnvironment(env_data)
