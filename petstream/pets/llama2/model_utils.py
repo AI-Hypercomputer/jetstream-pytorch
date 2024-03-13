@@ -23,7 +23,7 @@ def get_arg(
     data = {
         "dim": 128,
         "multiple_of": 32,
-        "n_heads": 2,
+        "n_heads": 8,
         "n_layers": 3,
         "norm_eps": 1e-05,
     }
