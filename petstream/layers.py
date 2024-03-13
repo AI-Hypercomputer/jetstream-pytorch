@@ -132,30 +132,6 @@ class Attention(nn.Module):
     LinearLayer = WeightOnlyInt8Linear if args.quantize else nn.Linear
 
 
-    self.wq = LinearLayer(
-        args.dim,
-        args.n_heads * self.head_dim,
-        bias=False,
-        device=args.device,
-    )
-    self.wk = LinearLayer(
-        args.dim,
-        self.n_kv_heads * self.head_dim,
-        bias=False,
-        device=args.device,
-    )
-    self.wv = LinearLayer(
-        args.dim,
-        self.n_kv_heads * self.head_dim,
-        bias=False,
-        device=args.device,
-    )
-    self.wqkv = LinearLayer(
-        args.dim,
-        (args.n_heads + 2 * self.n_kv_heads) * self.head_dim,
-        bias=False,
-        device=args.device,
-    )
     self.wo = LinearLayer(
         args.n_heads * self.head_dim,
         args.dim,
@@ -165,7 +141,32 @@ class Attention(nn.Module):
     self.q_size = args.n_heads * self.head_dim
     self.kv_size = self.n_kv_heads * self.head_dim
     if self.env.qkv_fusion:
-        self._register_load_state_dict_pre_hook(self.load_hook)
+      self._register_load_state_dict_pre_hook(self.load_hook)
+      self.wqkv = LinearLayer(
+          args.dim,
+          (args.n_heads + 2 * self.n_kv_heads) * self.head_dim,
+          bias=False,
+          device=args.device,
+      )
+    else:
+      self.wq = LinearLayer(
+          args.dim,
+          args.n_heads * self.head_dim,
+          bias=False,
+          device=args.device,
+      )
+      self.wk = LinearLayer(
+          args.dim,
+          self.n_kv_heads * self.head_dim,
+          bias=False,
+          device=args.device,
+      )
+      self.wv = LinearLayer(
+          args.dim,
+          self.n_kv_heads * self.head_dim,
+          bias=False,
+          device=args.device,
+      )
 
   def load_hook(self, state_dict, prefix, *args):
       if prefix + "wq.weight" in state_dict:
