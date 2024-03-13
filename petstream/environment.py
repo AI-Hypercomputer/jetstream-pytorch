@@ -36,7 +36,8 @@ class JetEngineEnvironmentData:
     # Override sharding axis of a weight by name
     experimental_sharding_axis_override: Dict[str, int] = dataclasses.field(default_factory=dict)
 
-
+    # QKV fusion has negative performance on TPU, slicing takes longer
+    qkv_fusion: bool = False
 
 class JetEngineEnvironment:
 
@@ -74,7 +75,7 @@ class JetEngineEnvironment:
         cache_sharding = ("x" if axis == self._data.kv_cache_shard_axis else None
                           for axis in self._data.attention_kv_axis_names)
         self.cache_sharding = jsharding.NamedSharding(self._mesh, P(*cache_sharding))
-
+        self.qkv_fusion = data.qkv_fusion
     @property
     def tokenizer_path(self):
         return self._data.tokenizer_path
