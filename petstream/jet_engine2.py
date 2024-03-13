@@ -404,10 +404,13 @@ def create_pytorch_engine(
     model_args.quantize = quantize_weights
     pt_model = model_exportable.Transformer(model_args, env)
 
+    num_params_size = 0
     num_params = 0
     for k, v in pt_model.state_dict().items():
-      num_params += np.prod(v.shape) * (1 if v.dtype == jnp.int8 else 2)
-    print('Number of param Gbytes:', num_params / (1 << 30))
+      num_params += 1
+      num_params_size += np.prod(v.shape) * (1 if v.dtype == jnp.int8 else 2)
+    print('Number of param Gbytes:', num_params_size / (1 << 30))
+    print('Number of param: ', num_params)
 
   return PyTorchEngine(
       pt_model=pt_model,

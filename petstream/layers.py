@@ -199,6 +199,7 @@ class Attention(nn.Module):
       ## Attention start
       #scores = torch.einsum(jnp.einsum, "ijkl,ikml->ikjm", xq, keys) / math.sqrt(self.head_dim)
       scores = torch_xla2.extra.call_jax(jnp.einsum, "ijkl,ikml->ikjm", xq, keys) / math.sqrt(self.head_dim)
+      scores = torch_xla2.extra.call_jax(jax.lax.with_sharding_constraint, scores, self.env.sharding_by_axis(1))
       if mask is not None:
         scores = scores + mask  # (bs, n_local_heads, seqlen, max_seqlen)
     with jax.named_scope('attn_soft'):
@@ -208,9 +209,17 @@ class Attention(nn.Module):
       #output = torch.einsum(
       #    "ikjm,ikml->ikjl", scores, values
       #)  # (bs, n_local_heads, seqlen, head_dim)
+      # For XLA matmul performance boost
+      if seqlen == 1: 
+          scores = torch.broadcast_to(scores, (scores.shape[0], scores.shape[1], 2, scores.shape[3]))
+          scores = torch_xla2.extra.call_jax(jax.lax.with_sharding_constraint, scores, self.env.sharding_by_axis(1))     
       output = torch_xla2.extra.call_jax(jnp.einsum,"ikjm,ikml->ikjl", scores, values)
+      if seqlen == 1:
+          output = output[:, :, 0, :]
       #output = torch.matmul(scores, values)
+      #output = torch_xla2.extra.call_jax(jnp.matmul, scores, values)
       output = torch_xla2.extra.call_jax(jax.lax.with_sharding_constraint, output, self.env.sharding_by_axis(1))
       output = output.transpose(-3, -2).contiguous().view(bsz, seqlen, -1)
+      output = torch_xla2.extra.call_jax(jax.lax.with_sharding_constraint, output, self.env.sharding_by_axis(2))
     return self.wo(output)
 
