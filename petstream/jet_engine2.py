@@ -326,8 +326,8 @@ class PyTorchEngine(engine_api.Engine):
 
   def _make_state_dict_jax(self, model_args_meta):
       def make_array(t):
-          return jnp.ones(
-              t.shape, dtype=torch_xla2.tensor.t2j_dtype(t.dtype))
+        return jax.random.normal(
+          jax.random.key(0), shape=t.shape, dtype=torch_xla2.tensor.t2j_dtype(t.dtype))
       return pytree.tree_map_only(torch.Tensor, make_array, model_args_meta)
 
   def load_params(self) -> Params:
