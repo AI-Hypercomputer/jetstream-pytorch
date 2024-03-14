@@ -10,6 +10,19 @@ cd xla/experimental/torch_xla2
 pip install -e .
 ```
 
+# Merge weights
+```
+export input_ckpt_dir = Original sharded pytorch checkpoints
+export output_ckpt_dir = The output director
+export output_safetensor = True/False, user can choose to store as SafeTensor
+format or not
+python petstream/pets/weight_merger.py --input_ckpt_dir={{input_ckpt_dir}} --output_ckpt_dir={{output_ckpt_dir}} --output_safetensor={{output_safetensor}}
+
+If user choose to load or store the checkpoints from Google Cloud Storage
+buckets, please make sure run `gcloud auth application-default login` beforehand 
+```
+
+
 # Local run
 ```
 python -m petstream.jet_engine_python_run --bf16_enable=True --context_length=8 --batch_size=2

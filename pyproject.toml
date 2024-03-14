@@ -28,6 +28,8 @@ dependencies = [
     "torch",
     "pytest",
     "google-jetstream",
+    "google-cloud-storage",
+    "safetensors",
     #"torch_xla2",
 ]
 
