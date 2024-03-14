@@ -332,14 +332,29 @@ class PyTorchEngine(engine_api.Engine):
 
   def _make_state_dict_jax(self, model_args_meta):
       def make_array(t):
-        return jax.random.normal(
-          jax.random.key(0), shape=t.shape, dtype=torch_xla2.tensor.t2j_dtype(t.dtype))
+        res = jax.random.normal(
+          jax.random.key(0), shape=t.shape, dtype=jnp.bfloat16)
+        res = res.astype(torch_xla2.tensor.t2j_dtype(t.dtype))
+        return res
       return pytree.tree_map_only(torch.Tensor, make_array, model_args_meta)
+
+  def _load_from_safetensors(self, path):
+    from safetensors import safe_open
+    weights = {}
+    with safe_open(path, framework='flax', device='cpu') as f:
+      for key in f.keys():
+        arr = jax.device_put(f.get_tensor(k), self.sharding_by_name(k))
+        weights[key] = arr
+    return weights
 
   def load_params(self) -> Params:
     # TODO load from files
     with jax.default_device(self.colocated_cpus()):
-      jax_weights = self._make_state_dict_jax(self.pt_model.state_dict())
+      if self.env.checkpoint_path:
+        if self.env.checkpoint_format == 'safetensors':
+          return self._load_from_safetensors(self.env.checkpoint_path)
+      else:
+        jax_weights = self._make_state_dict_jax(self.pt_model.state_dict())
     jax_weights = {
       key: jax.device_put(value, self.sharding_by_name(key))
       for key, value in jax_weights.items()
@@ -424,6 +439,8 @@ def create_pytorch_engine(
 
   env_data = JetEngineEnvironmentData(
     tokenizer_path=tokenizer_path,
+    checkpoint_path = ckpt_path, 
+    checkpoint_format = 'safetensors',
     model_type = 'llama-2-' + param_size,
     batch_size = batch_size,
     max_decode_length = max_decode_length,

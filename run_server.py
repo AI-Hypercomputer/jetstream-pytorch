@@ -7,6 +7,7 @@ from absl import flags
 
 from jetstream.core import server_lib
 from petstream.pets import config
+from petstream import jet_engine2 as je
 
 
 _PORT = flags.DEFINE_integer('port', 9000, 'port to listen on')
@@ -56,21 +57,33 @@ _PARAM_SIZE =flags.DEFINE_string(
     required=False,
 )
 
+_QUANTIZE_WEIGHTS = flags.DEFINE_bool('quantize_weights', False, 'weight quantization')
+_QUANTIZE_KV_CACHE = flags.DEFINE_bool('quantize_kv_cache', False, 'kv_cache_quantize')
+_MAX_CACHE_LENGTH = flags.DEFINE_integer('max_cache_length', 1024, 'kv_cache_quantize')
+
+from jetstream.core.config_lib import ServerConfig
+
 def main(argv: Sequence[str]):
   del argv
   os.environ['XLA_FLAGS'] = '--xla_dump_to=/tmp/xla_logs --xla_dump_hlo_as_text'
   # No devices for local cpu test. A None for prefill and a None for generate.
   devices = server_lib.get_devices()
   print('HERE 1')
-  server_config = config.create_config(
-        devices,
+  engine = je.create_pytorch_engine(
+        devices=devices,
         tokenizer_path=_TOKENIZER_PATH.value,
         ckpt_path=_CKPT_PATH.value,
         bf16_enable=True,
         param_size=_PARAM_SIZE.value,
         context_length=_CONTEXT_LENGTH.value,
         batch_size=_BATCH_SIZE.value,
-        platform=_PLATFORM.value,
+        quantize_weights=_QUANTIZE_WEIGHTS.value,
+        quantize_kv=_QUANTIZE_KV_CACHE.value,
+        max_cache_length = _MAX_CACHE_LENGTH.value,
+  )
+  server_config = ServerConfig(
+        interleaved_slices=(_PLATFORM.value, ),
+        interleaved_engine_create_fns=(lambda a: engine, ),
   )
   print('HERE 2')
 

@@ -142,5 +142,33 @@ def test3():
     print('====== 2 ======')
     print(jax.jit(g).lower(x, y).as_text())
 
+from flax import struct
+class A:
 
-test3()
+    def __init__(self, a):
+        self.a = a
+
+    def plus(self):
+        self.a = self.a + 1
+
+def flatten_A(x):
+    return (x.a, ), None
+
+def unflatten_A(aux_data, flat_content):
+    import pdb; pdb.set_trace()
+    return A(*flat_content)
+
+jax.tree_util.register_pytree_node(A, flatten_A, unflatten_A)
+
+import functools
+@functools.partial(jax.jit, donate_argnums=(0, ))
+def f(a):
+    a.plus()
+    return a
+
+def test4():
+    a = A(a=jnp.zeros((2, )))
+    b = f(a)
+    print(b.a)
+
+test4()

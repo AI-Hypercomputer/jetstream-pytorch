@@ -21,6 +21,8 @@ class KVCachePrefill:
 
     def __init__(self, kv_quantize=False):
         self.kv_quantize = kv_quantize 
+        self.cache_k = None
+        self.cache_v = None
 
     def update(self, key, value):
         """This cache just remembers the stuff."""
@@ -35,6 +37,24 @@ class KVCachePrefill:
 
     def state(self):
         return self.cache_k, self.cache_v
+
+
+def KVCachePrefill_flatten(cache):
+    return torch_xla2.tensor.unwrap((cache.cache_k, cache.cache_v)), self.kv_quantize
+
+
+def KVCachePrefill_unflatten(auxdata, data):
+    cache = KVCachePrefill(auxdata)
+    cache_k, cache_v = torch_xla2.tensor.wrap(data)
+    cache.cache_k = cache_k
+    cache.cache_v = cache_v
+
+
+jax.tree_util.register_pytree_node(
+    KVCachePrefill, 
+    KVCachePrefill_flatten, 
+    KVCachePrefill_unflatten)
+
 
 
 
@@ -72,6 +92,22 @@ class KVCacheGenerate:
         k, v = torch_xla2.tensor.wrap((k, v))
         pos = jnp.array([0])  # replicated
         return cls(k, v, 0, device)
+
+def KVCacheGenerate_flatten(cache):
+    return torch_xla2.tensor.unwrap((cache.cache_k, cache.cache_v)), (self.position, self.sharding)
+
+
+def KVCacheGenerate_unflatten(auxdata, data):
+    position, sharding = auxdata
+    cache_k, cache_v = torch_xla2.tensor.wrap(data)
+    cache = KVCachePrefill(cache_k, cache_v, position, sharding)
+    return cache
+
+
+jax.tree_util.register_pytree_node(
+    KVCacheGenerate, 
+    KVCacheGenerate_flatten, 
+    KVCacheGenerate_unflatten)
         
 
 class Int8KVCacheGenerate:

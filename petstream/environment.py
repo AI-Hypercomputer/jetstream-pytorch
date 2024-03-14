@@ -14,7 +14,7 @@ import torch_xla2
 @dataclasses.dataclass
 class JetEngineEnvironmentData:
     checkpoint_path: str = '' # if empty string then use model's state_dict()
-    checkpoint_format: str = 'torch' # torch, jax 
+    checkpoint_format: str = 'safetensors' # torch, safetensors
     
     tokenizer_path: str = ''
 

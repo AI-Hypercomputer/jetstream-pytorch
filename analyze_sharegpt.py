@@ -26,6 +26,9 @@ prefill_bucket_size_to_s = {64: 0.006911616190336645, 128: 0.011646182998083532,
 # batch size 96, rolling, bfloat
 prefill_bucket_size_to_s = {64: 0.007730783987790346, 128: 0.011515899002552033, 256: 0.01780580161139369, 512: 0.03115477201063186, 1024: 0.07443338260054588}
 
+# batch size 160, rolling, quantized 
+prefill_bucket_size_to_s = {64: 0.006821704190224409, 128: 0.01175499300006777, 256: 0.018776051187887787, 512: 0.03392685519065708, 1024: 0.06476318498607725}
+
 prefill_bucket_size_to_ms = {k: p*1000 for k, p in prefill_bucket_size_to_s.items() }
 
 # batch size 60, ful cache, bfloat
@@ -36,6 +39,9 @@ system_time_per_decode_token_ms =26.0/96
 
 # batch size 96, rolling, bfloat
 system_time_per_decode_token_ms =28.18/96
+
+# batch size 160, rolling, quantized 
+system_time_per_decode_token_ms =30/160
 
 
 
