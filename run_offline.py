@@ -78,7 +78,7 @@ def create_engine():
   return engine
 
 
-def run_prefill_time(engine, params, batch_size):
+def run_prefill_time(engine, params, decode_state, seqlen):
   metadata = engine.get_tokenizer()
   vocab = token_utils.load_vocab(
     metadata.path, metadata.extra_ids)
@@ -86,21 +86,28 @@ def run_prefill_time(engine, params, batch_size):
 
   text = 'This is a beautiful day'
   tokens, true_length = token_utils.tokenize_and_pad(
-    text, vocab, is_bos=True, prefill_lengths=[batch_size])
+    text, vocab, is_bos=True, prefill_lengths=[seqlen])
 
   for _ in range(3):
     prefill_result = engine.prefill(
         params=params, padded_tokens=tokens, true_length=true_length
     )
+    decode_state = engine.insert(
+        prefill_result, decode_state, slot=jnp.int32(1)
+    )
 
   nums = 5
   start = time.perf_counter()
-  for _ in range(nums):
+  for i in range(nums):
     prefill_result = engine.prefill(
         params=params, padded_tokens=tokens, true_length=true_length
     )
+    decode_state = engine.insert(
+        prefill_result, decode_state, slot=jnp.int32(i)
+    )
+  jax.block_until_ready(decode_state)
   end = time.perf_counter()
-  return (end - start) / nums, prefill_result
+  return (end - start) / nums, decode_state
 
 
 MAXTEXT_PREFILL = {64 : 14.02, 128:18.29, 256:23.59, 512:35.28, 1024: 60.28}
@@ -113,24 +120,13 @@ def main(argv):
   params = engine.load_params()
   print('Load params ', time.perf_counter() - start)
 
-  # prefill_times = {}
-  # prefill_result = None
-  # for batch in MAXTEXT_PREFILL.keys():
-  #   runtime, prefill_result = run_prefill_time(engine, params, batch)
-  #   prefill_times[batch] = runtime
-  runtime, prefill_result = run_prefill_time(engine, params, 1024)
-
-
+  prefill_times = {}
   slot = jnp.int32(1)
+
   decode_state = engine.init_decode_state()
-
-  #import pdb; pdb.set_trace()
-  #print(engine.insert.lower(prefill_result, decode_state, slot=slot).as_text())
-
-
-  decode_state = engine.insert(
-      prefill_result, decode_state, slot=slot
-  )
+  for batch in MAXTEXT_PREFILL.keys():
+    runtime, decode_state = run_prefill_time(engine, params, decode_state, batch)
+    prefill_times[batch] = runtime
 
   sampled_tokens_list = []
 
@@ -155,6 +151,8 @@ def main(argv):
 
   if _PROFILING_OUTPUT.value:
     jax.profiler.stop_trace()
+
+  print(prefill_times)
 
 
 if __name__ == "__main__":

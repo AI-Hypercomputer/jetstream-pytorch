@@ -133,7 +133,7 @@ class PyTorchEngine(engine_api.Engine):
         cache_manager.KVCacheGenerate(k, v, input_indexes, self.cache_sharding) for k, v in torch_xla2.tensor.wrap(caches)
       ]
     args = (
-      tokens, input_indexes, caches_obj, False
+      tokens, input_indexes, caches_obj, None
     )
     paramst, argst = torch_xla2.tensor.wrap((weights, args))
     with torch_xla2.tensor.XLADispatchMode():
@@ -153,9 +153,13 @@ class PyTorchEngine(engine_api.Engine):
     caches = [
       cache_manager.KVCachePrefill(self.env.enable_kv_quantization) for _ in self.pt_model.layers
     ]
+    mask = jnp.full((1, 1, tokens.shape[1], tokens.shape[1]), 
+                     float('-inf'), dtype=jnp.bfloat16)
+    mask = jnp.triu(mask, k=1)
     args = (
-      tokens, input_indexes, caches, True 
+      tokens, input_indexes, caches, mask
     )
+
     paramst, argst = torch_xla2.tensor.wrap((weights, args))
     with torch_xla2.tensor.XLADispatchMode():
       res = torch.func.functional_call(self.pt_model, paramst, argst)[0]

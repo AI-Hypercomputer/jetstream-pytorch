@@ -177,12 +177,6 @@ class Transformer(nn.Module):
 
     self.register_buffer("freqs_cis", freqs_cis)
 
-    mask = torch.full(
-        (1, 1, self.params.max_seq_len, self.params.max_seq_len), float("-inf")
-    ).to(torch.bfloat16 if self.params.bf16_enable else torch.float)
-
-    mask = torch.triu(mask, diagonal=1)
-    self.register_buffer("mask", mask)
 
   @torch.no_grad()
   def forward(
@@ -190,7 +184,7 @@ class Transformer(nn.Module):
       tokens: torch.Tensor,
       input_pos: torch.Tensor,
       caches: List[Any],
-      prefill,
+      mask,
   ):
     with jax.named_scope('transformer_tok'):
         seqlen = tokens.shape[-1]
@@ -198,7 +192,6 @@ class Transformer(nn.Module):
 
     with jax.named_scope('transformer_freq'):
         freqs_cis = self.freqs_cis[input_pos]
-        mask = self.mask if prefill else None
 
     for layer, cache in zip(self.layers, caches):
       with jax.named_scope('TransformerBlock'):
