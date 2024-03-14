@@ -44,6 +44,7 @@ class DecodeState:
   caches: List[Tuple[jax.Array, jax.Array]]
   cache_scales: List[Tuple[jax.Array, jax.Array]]  # only present in quantized kv
   current_position: int
+  lens: jax.Array # [batch_size, 1]
 
 
 # NOTE model specific
@@ -112,6 +113,7 @@ class PyTorchEngine(engine_api.Engine):
         caches,
         scalers,
         0,
+        jnp.zeros((self.param.max_batch_size, 1), dtype=jnp.int32),
     )
 
   def _call_model_generate(
@@ -266,7 +268,8 @@ class PyTorchEngine(engine_api.Engine):
         scales.append((kscale, vscale))
 
     position = prefix.seq_len
-    return DecodeState(tokens, caches, scales, position)
+    lens = decode_state.lens.at[slot].set(0)
+    return DecodeState(tokens, caches, scales, position, lens)
 
   #@functools.partial(jax.jit, static_argnums=(0,), donate_argnums=(2, ))
   def generate(
@@ -285,14 +288,12 @@ class PyTorchEngine(engine_api.Engine):
       decode_state.cache_scales
     )
     next_token = self._sampling(logits, self.param.max_batch_size)
-    #logging.info(
-    #    'Jet generate next_token: %s, \ncaches: %s', next_token, caches_kv
-    #)
+    lens = decode_state.lens + 1
     data = jnp.concatenate(
         [
             next_token,
             jnp.ones_like(next_token),
-            jnp.ones_like(next_token),  # TODO gen len
+            lens,
         ],
         axis=-1,
     )
@@ -311,7 +312,8 @@ class PyTorchEngine(engine_api.Engine):
       next_token, 
       new_caches,
       new_scales,
-      decode_state.current_position + 1
+      decode_state.current_position + 1,
+      lens,
     )
     return new_decode_state, result_tokens
 
@@ -364,6 +366,7 @@ class PyTorchEngine(engine_api.Engine):
     return DecodeState(
         self.replicated,
         self.cache_sharding,
+        self.replicated,
         self.replicated,
         self.replicated,
     )
