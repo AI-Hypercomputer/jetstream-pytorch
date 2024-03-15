@@ -342,10 +342,11 @@ class PyTorchEngine(engine_api.Engine):
     from safetensors import safe_open
     weights = {}
     with safe_open(path, framework='flax', device='cpu') as f:
-      for key in self.pt_model.state_dict().keys():
+      for key, model_weights in self.pt_model.state_dict().items():
         if key == 'freqs_cis': 
           continue
         arr = jax.device_put(f.get_tensor(key), self.sharding_by_name(key))
+        assert tuple(model_weights.shape) == tuple(arr.shape), key
         weights[key] = arr
     freqs_cis = torch_xla2.tensor.t2j(self.pt_model.freqs_cis)
     weights['freqs_cis'] = jax.device_put(freqs_cis, self.replicated)

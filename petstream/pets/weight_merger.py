@@ -89,6 +89,33 @@ def _quantize_state_dict(state_dict):
     return state_dict
 
 
+_QUANTIZE_LINEAR_WEIGHTS = {
+    'attention.wq.weight',
+    'attention.wk.weight',
+    'attention.wv.weight',
+    'attention.wo.weight',
+    'feed_forward.w1.weight',
+    'feed_forward.w2.weight',
+    'feed_forward.w3.weight',
+    'output.weight',
+}
+
+def _quantize_state_dict(state_dict):
+    updated_weights = {}
+    for key, val in state_dict.items():
+        for qname in _QUANTIZE_LINEAR_WEIGHTS:
+            if key.endswith(qname):
+                new_weights, scaler = quantize.quantize_torch_int8(val, reduce_axis=(1, ))
+                updated_weights[key] = new_weights
+                scale_name = key + '_scaler'
+                updated_weights[scale_name] = scaler.squeeze()
+    tok_weights, tok_scalers = quantize.quantize_torch_int8(state_dict['tok_embeddings.weight'], reduce_axis=(0, ))
+    updated_weights['tok_embeddings.weight'] = tok_weights
+    updated_weights['tok_embeddings.weight_scaler'] = tok_scalers.squeeze()
+    state_dict.update(updated_weights)
+    return state_dict
+
+
 def _compute_md5(file_path: epath.Path) -> str:
   md5_hash = hashlib.md5()
   with file_path.open('rb') as file:
