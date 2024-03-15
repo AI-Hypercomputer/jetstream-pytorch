@@ -9,6 +9,7 @@ python \
     --output_ckpt_dir=${output_ckpt_dir}
 """
 
+from petstream.pets import quantize
 from collections.abc import Sequence
 import gc
 import hashlib
@@ -41,6 +42,7 @@ _MINIMIZE_MEMORY_FOOTPRINT = flags.DEFINE_bool(
 )
 
 _OUTPUT_SAFETENSOR = flags.DEFINE_bool('output_safetensor', True, 'When set to true, save to HugginFace SafeTensor format')
+_QUANTIZE = flags.DEFINE_bool('quantize', False, 'When set to true, produces quantized weights')
 
 # ParallelEmbedding is col partitioned across the shards.
 # ColumnParallelLinear is row partitioned across shards due to transpose.
@@ -61,6 +63,30 @@ _WEIGHT_SHARDING_TYPE = {
     'norm.weight': None,
     'output.weight': 'ColumnParallelLinear',
 }
+
+_QUANTIZED_WEIGHTS_TO_SCALER_NAME= {
+    'tok_embeddings.weight': 'tok_embeddings.weight_scaler',
+    'attention.wq.weight': 'attention.wq.weight_scaler',
+    'attention.wk.weight': 'attention.wk.weight_scaler',
+    'attention.wv.weight': 'attention.wv.weight_scaler',
+    'attention.wo.weight': 'attention.wo.weight_scaler',
+    'feed_forward.w1.weight': 'feed_forward.w1.weight_scaler',
+    'feed_forward.w2.weight': 'feed_forward.w2.weight_scaler',
+    'feed_forward.w3.weight': 'feed_forward.w3.weight_scaler',
+    'output.weight': 'output.weight_scaler',
+}
+
+def _quantize_state_dict(state_dict):
+    updated_weights = {}
+    for key, val in state_dict.items():
+        for qname, qscale_name in _QUANTIZED_WEIGHTS_TO_SCALER_NAME.items():
+            if key.endswith(qname):
+                new_weights, scaler = quantize.quantize_torch_int8(val, reduce_axis=(1, ))
+                updated_weights[key] = new_weights
+                scale_name = key[:-len(qname)] + qscale_name
+                updated_weights[scale_name] = scaler
+    state_dict.update(updated_weights)
+    return state_dict
 
 
 def _compute_md5(file_path: epath.Path) -> str:
@@ -249,6 +275,12 @@ def merge_weights(
   state_dict = _merge_weights(checkpoints, minimize_memory_footprint)
   end = time.perf_counter()
   print(f"Merging weights takes {end - start} seconds")
+
+  if _QUANTIZE.value:
+    start =  time.perf_counter()
+    state_dict = _quantize_state_dict(state_dict)
+    end = time.perf_counter()
+    print(f"Quantizing weights takes {end - start} seconds")
 
   print(f'Writing merged weights to dir {output_ckpt_dir}')
   start = time.perf_counter()
