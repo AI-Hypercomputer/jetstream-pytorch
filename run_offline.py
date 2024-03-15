@@ -139,6 +139,7 @@ def main(argv):
   print('======= decode starting ===')
   if _PROFILING_OUTPUT.value:
     jax.profiler.start_trace(_PROFILING_OUTPUT.value)
+  dec_times = []
   for i in range(10):
     start = time.perf_counter()
     decode_state, sampled_tokens = engine.generate(
@@ -147,12 +148,22 @@ def main(argv):
     jax.block_until_ready(decode_state)
     sampled_tokens_list.append(sampled_tokens)
     end = time.perf_counter()
+    dec_times.append(end - start)
     print(i, 'decode time', (end - start))
+
 
   if _PROFILING_OUTPUT.value:
     jax.profiler.stop_trace()
 
-  print(prefill_times)
+  print('prefill ', prefill_times)
+  print('decode', sum(dec_times) / 10 )
+
+  prefill_times_ms = {k: v*1000 for k, v in prefill_times.items()}
+  decode_time_ms = sum(dec_times) * 1000 / 10 / _BATCH_SIZE.value
+
+  import analyze_sharegpt
+  analyze_sharegpt.do_simulation(prefill_times_ms, decode_time_ms)
+
 
 
 if __name__ == "__main__":
