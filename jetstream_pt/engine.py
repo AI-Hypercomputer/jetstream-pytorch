@@ -18,8 +18,8 @@ import torch_xla2
 from .pets.llama2 import model_exportable, model_utils
 from .pets import tokenizer
 
-from petstream.pets import cache_manager
-from petstream.environment import JetEngineEnvironment, JetEngineEnvironmentData
+from .pets import cache_manager
+from .environment import JetEngineEnvironment, JetEngineEnvironmentData
 
 from torch.utils import _pytree as pytree
 import torch
@@ -70,7 +70,7 @@ class PyTorchEngine(engine_api.Engine):
     self.cache_sharding = self.y_sharding
 
     self.prefill = jax.jit(self.prefill, out_shardings=self.get_prefix_destination_sharding())
-    self.insert = jax.jit(self.insert, donate_argnums=(0, 1), out_shardings=self.get_decode_state_sharding())
+    # self.insert = jax.jit(self.insert, donate_argnums=(0, 1), out_shardings=self.get_decode_state_sharding())
     self.generate = jax.jit(self.generate, donate_argnums=(1, ), out_shardings=(self.get_decode_state_sharding(), None))
 
   def sharding_by_name(self, name):
@@ -222,15 +222,15 @@ class PyTorchEngine(engine_api.Engine):
     tokens = decode_state.tokens.at[slot].set(prefix.token)
     # TODO this doest wrap around
     pos = decode_state.current_position
+    update_indexes = (jnp.arange(-prefix.seq_len, 0) + pos) % self.env.cache_sequence_length
+    update_indexes = update_indexes.reshape(1, -1)
+    head_indexes = jnp.arange(self.env.num_heads).reshape(1, -1, 1)
+      # wrap around
     scales = []
     if not self.env.enable_kv_quantization:
       @functools.partial(jax.jit, donate_argnums=(0, 1))
       def insert(cache, new_entry):
-          res = jax.lax.dynamic_update_slice(
-              cache,
-              new_entry,
-              [slot, 0, pos, 0],
-          )
+          res = cache.at[slot, head_indexes, update_indexes.reshape(1, -1), :].set(new_entry)
           res = jax.lax.with_sharding_constraint(res, self.cache_sharding)
           return res
       caches = [
@@ -244,16 +244,8 @@ class PyTorchEngine(engine_api.Engine):
                                jnp.abs(jnp.amin(new_entry, axis=(1, 3), keepdims=True)))
           scales *= 127
           scales = jax.lax.with_sharding_constraint(scales, self.replicated)
-          new_scaler = jax.lax.dynamic_update_slice(
-            scaler,
-            scales,
-            [slot, 0, pos, 0],
-          )
-          res = jax.lax.dynamic_update_slice(
-              cache,
-              (new_entry/scales).astype(jnp.int8),
-              [slot, 0, pos, 0],
-          )
+          new_scaler = scaler.at[slot, head_indexes, update_indexes, :].set(scales)
+          res = cache.at[slot, head_indexes, update_indexes, :].set((new_entry/scales).astype(jnp.int8))
           res = jax.lax.with_sharding_constraint(res, self.cache_sharding)
           return res, new_scaler
 

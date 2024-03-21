@@ -16,7 +16,7 @@ import jax.numpy as jnp
 import torch_xla2
 import torch_xla2.extra
 
-from petstream.layers import Attention, RMSNorm, Int8Embedding, WeightOnlyInt8Linear
+from jetstream_pt.layers import Attention, RMSNorm, Int8Embedding, WeightOnlyInt8Linear
 
 
 

@@ -5,8 +5,8 @@ from jax.experimental import mesh_utils
 import dataclasses
 from typing import Tuple, Dict
 
-from petstream.pets.llama2 import model_utils
-from petstream.pets import cache_manager
+from .pets.llama2 import model_utils
+from .pets import cache_manager
 import torch_xla2
 
 
@@ -81,9 +81,7 @@ class JetEngineEnvironment:
         self.cache_sharding = jsharding.NamedSharding(self._mesh, P(*cache_sharding))
 
     def __getattr__(self, name):
-        if hasattr(self._data, name):
-            return getattr(self._data, name)
-        return super().__getattr__(name)
+        return getattr(self._data, name)
 
     @property
     def tokenizer_path(self):
