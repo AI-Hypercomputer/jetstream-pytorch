@@ -110,3 +110,5 @@ def do_simulation(prefill_bucket_size_to_ms, system_time_per_decode_token_ms):
     idealized_overall_time = idealized_generate_sec + idealized_prefill_sec
 
     print(f"Idealized out tokens {output_tokens} in {idealized_overall_time:.2f} seconds, for {output_tokens/idealized_overall_time:.2f} out tok/s")
+    print('prfill', prefill_bucket_size_to_ms)
+    print('decode step', system_time_per_decode_token_ms)

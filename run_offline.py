@@ -23,7 +23,7 @@ FLAGS = flags.FLAGS
 
 _TOKENIZER_PATH = flags.DEFINE_string(
     'tokenizer_path',
-    'petstream/pets/tokenizer.model',
+    'jetstream_pt/pets/tokenizer.model',
     'The tokenizer model path',
     required=False,
 )

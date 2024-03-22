@@ -171,4 +171,111 @@ def test4():
     b = f(a)
     print(b.a)
 
-test4()
+def test5():
+    batch, seq, heads, dim = 96, 2048, 40, 128
+    sharding = PositionalSharding(mesh_utils.create_device_mesh((8,)))
+    sharding = sharding.reshape((1, 8, 1,  1))
+    val_sharding = sharding.reshape((1, 8, 1, 1))
+    caches_k = jnp.zeros((batch, heads, seq, dim), device=sharding, dtype=jnp.bfloat16)
+    caches_v = jnp.zeros((batch, heads, seq, dim), device=sharding, dtype=jnp.bfloat16)
+
+    def insert_cache(
+        cache, 
+        new_entry,
+        slot,
+        head_indexes,
+        update_indexes
+    ):
+        res = cache.at[slot, head_indexes, update_indexes.reshape(1, -1), :].set(new_entry)
+        res = jax.lax.with_sharding_constraint(res, sharding)
+        return res
+
+    def insert_cache2(
+        cache, 
+        new_entry,
+        slot,
+        head_indexes,
+        update_indexes
+    ):
+        res = cache.at[slot, :, update_indexes, :].set(
+            jnp.transpose(new_entry.squeeze(0), (1, 0, 2)))
+        res = jax.lax.with_sharding_constraint(res, sharding)
+        return res
+
+    def insert_cache3(
+        cache, 
+        new_entry,
+        slot,
+        head_indexes,
+        update_indexes
+    ):
+
+        index = jnp.expand_dims(jnp.full_like(update_indexes, slot), -1)
+        update_indexes = jnp.expand_dims(update_indexes, -1)
+        combined = jnp.concatenate([index, update_indexes], axis=-1)
+        dimension_numbers = jax.lax.ScatterDimensionNumbers(
+            update_window_dims=[0, 2],
+            inserted_window_dims=[0, 2],
+            scatter_dims_to_operand_dims=[1, 3],
+        )
+        res = jax.lax.scatter(
+            cache, combined, new_entry.squeeze(0), dimension_numbers,
+            unique_indices=True,
+            indices_are_sorted=True,
+            mode='promise_in_bounds')
+        res = jax.lax.with_sharding_constraint(res, sharding)
+        return res
+
+
+
+
+    insert_cache = jax.jit(
+        insert_cache, 
+        donate_argnums=(0, 1)
+    )
+    insert_cache2 = jax.jit(
+        insert_cache2, 
+        donate_argnums=(0, 1)
+    )
+    insert_cache3 = jax.jit(
+        insert_cache3, 
+        donate_argnums=(0, 1)
+    )
+    insert_seqlen = 1024
+
+    subkey = jax.random.PRNGKey(234) 
+    to_insert = jax.device_put(
+        jax.random.normal(
+            subkey, (1, heads, insert_seqlen, dim), dtype=jnp.bfloat16),
+        device=val_sharding).block_until_ready()
+    j = jnp.int32(7).block_until_ready()
+
+    update_indexes = (jnp.arange(-insert_seqlen, 0) + 7) % 1024
+    update_indexes = update_indexes
+    head_indexes = jnp.arange(heads).reshape(1, -1, 1)
+    
+    rng = jax.random.PRNGKey(0) 
+    for func in (insert_cache3, ):
+        print(f'===={func.__name__}====')
+        print(func.lower(
+            caches_k, to_insert, j, head_indexes, update_indexes).as_text())
+
+    for func in (insert_cache, insert_cache2, insert_cache3):
+        for i in range(10):
+            all_times = 0
+            for j in range(40):
+                rng, subkey = jax.random.split(rng)
+                key = jax.device_put(
+                    jax.random.normal(
+                        subkey, (1, heads, insert_seqlen, dim), dtype=jnp.bfloat16),
+                    device=val_sharding).block_until_ready()
+                j = jnp.int32(j).block_until_ready()
+                start = time.perf_counter()
+                caches_k = func(
+                    caches_k, to_insert, j, head_indexes, update_indexes)
+                caches_k.block_until_ready()
+                end = time.perf_counter()
+                all_times += (end - start)
+            print(func.__name__, 'time is', all_times)
+
+test5()

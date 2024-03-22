@@ -73,6 +73,14 @@ class PyTorchEngine(engine_api.Engine):
     self.prefill = jax.jit(self.prefill, out_shardings=self.get_prefix_destination_sharding())
     # self.insert = jax.jit(self.insert, donate_argnums=(0, 1), out_shardings=self.get_decode_state_sharding())
     self.generate = jax.jit(self.generate, donate_argnums=(1, ), out_shardings=(self.get_decode_state_sharding(), None))
+    self._insert_wrap = jax.jit(self._insert_wrap, donate_argnums=(0, 1, 2, 3, 4),
+                                out_shardings=(self.cache_sharding, self.replicated)
+                               )
+
+    self._insert_no_wrap = jax.jit(
+        self._insert_no_wrap, 
+        donate_argnums=(0, 1), 
+        out_shardings=self.get_decode_state_sharding())
 
   def sharding_by_name(self, name):
 
@@ -110,11 +118,11 @@ class PyTorchEngine(engine_api.Engine):
     if self.env.enable_kv_quantization:
       scalers = [c.scalers() for c in caches_obj]
     return DecodeState(
-        jnp.zeros((self.param.max_batch_size, 1), dtype=jnp.int32),
+        jnp.zeros((self.env.batch_size, 1), dtype=jnp.int32),
         caches,
         scalers,
-        0,
-        jnp.zeros((self.param.max_batch_size, 1), dtype=jnp.int32),
+        self.env.max_input_sequence_length,
+        jnp.zeros((self.env.batch_size, 1), dtype=jnp.int32),
     )
 
   def _call_model_generate(
@@ -200,6 +208,14 @@ class PyTorchEngine(engine_api.Engine):
     )
     token = self._sampling(logits, 1)
     token = token.squeeze(0) # drop batch
+    # truncate to true_length didnt work need to be out side of jit
+    # caches = [
+    #   (jax.lax.dynamic_slice_in_dim(
+    #       k, seq_len - true_length, true_length, axis=2),
+    #    jax.lax.dynamic_slice_in_dim(
+    #       v, seq_len - true_length, true_length, axis=2))
+    #   for k, v in updated_caches
+    # ]
     return Prefix(token, updated_caches, seq_len) 
 
   def shrink_prefix(
@@ -209,29 +225,24 @@ class PyTorchEngine(engine_api.Engine):
   ) -> Prefix:
     return prefix
 
-  def insert(
-      self,
-      prefix: Prefix,
-      decode_state: DecodeState,
-      slot: int,
-  ) -> DecodeState:
-    logging.info(
-        'Jet input prefix: %s, decode state before insert: %s',
-        prefix,
-        decode_state,
-    )
-    tokens = decode_state.tokens.at[slot].set(prefix.token)
-    # TODO this doest wrap around
-    pos = decode_state.current_position
-    update_indexes = (jnp.arange(-prefix.seq_len, 0) + pos) % self.env.cache_sequence_length
-    update_indexes = update_indexes.reshape(1, -1)
-    head_indexes = jnp.arange(self.env.num_heads).reshape(1, -1, 1)
-      # wrap around
+  def _insert_no_wrap(
+    self,
+    prefix: Prefix,
+    decode_state: DecodeState,
+    slot: int,
+  ):
     scales = []
+    caches = []
+    pos = decode_state.current_position
+    tokens = decode_state.tokens.at[slot].set(prefix.token)
     if not self.env.enable_kv_quantization:
-      @functools.partial(jax.jit, donate_argnums=(0, 1))
+      @functools.partial(jax.jit, donate_argnums=(0, 1), inline=True)
       def insert(cache, new_entry):
-          res = cache.at[slot, head_indexes, update_indexes.reshape(1, -1), :].set(new_entry)
+          res = jax.lax.dynamic_update_slice(
+              cache,
+              new_entry,
+              [slot, 0, pos, 0],
+          )
           res = jax.lax.with_sharding_constraint(res, self.cache_sharding)
           return res
       caches = [
@@ -239,29 +250,118 @@ class PyTorchEngine(engine_api.Engine):
         for (k, v), (newk, newv) in zip(decode_state.caches, prefix.caches)
       ]
     else:
-      @functools.partial(jax.jit, donate_argnums=(0, 1))
+      @functools.partial(jax.jit, donate_argnums=(0, 1), inline=True)
       def insert(cache, scaler, new_entry):
           reduce_axis = (1, 3)
           vals, scales = torch_xla2.extra.call_torch(
             quantize.quantize_torch_int8, new_entry, reduce_axis)
-          new_scaler = scaler.at[slot, head_indexes, update_indexes, :].set(scales)
-          res = cache.at[slot, head_indexes, update_indexes, :].set(vals)
+          new_scaler = jax.lax.dynamic_update_slice(
+              scaler,
+              scales,
+              [slot, 0, pos, 0],
+          )
+          new_scaler = jax.lax.with_sharding_constraint(new_scaler, self.replicated)
+          res = jax.lax.dynamic_update_slice(
+              cache,
+              vals,
+              [slot, 0, pos, 0],
+          )
           res = jax.lax.with_sharding_constraint(res, self.cache_sharding)
           return res, new_scaler
 
-      caches = []
       for (k, v), (kscaler, vscaler), (newk, newv) in zip(
-          decode_state.caches, 
-          decode_state.cache_scales, 
+          decode_state.caches,
+          decode_state.cache_scales,
           prefix.caches):
         kcache, kscale = insert(k, kscaler, newk)
         vcache, vscale = insert(v, vscaler, newv)
         caches.append((kcache, vcache))
         scales.append((kscale, vscale))
 
-    position = prefix.seq_len
-    lens = decode_state.lens.at[slot].set(0)
-    return DecodeState(tokens, caches, scales, position, lens)
+    lens = decode_state.lens.at[slot].set(1)
+    return DecodeState(tokens, caches, scales, pos, lens)
+
+
+  def _insert_wrap(
+    self,
+    old_caches,
+    old_scales,
+    cache_inserts,
+    update_indexes,
+    slot
+  ):  # returns caches and scales
+    scales = []
+    caches = []
+    if not self.env.enable_kv_quantization:
+      @functools.partial(jax.jit, donate_argnums=(0, 1), inline=True)
+      def insert(cache, new_entry):
+          new_entry = jnp.transpose(new_entry.squeeze(0), (1, 0, 2))
+          res = cache.at[slot, :, update_indexes, :].set(new_entry)
+          res = jax.lax.with_sharding_constraint(res, self.cache_sharding)
+          return res
+      caches = [
+        (insert(k, newk), insert(v, newv))
+        for (k, v), (newk, newv) in zip(old_caches, cache_inserts)
+      ]
+    else:
+      @functools.partial(jax.jit, donate_argnums=(0, 1), inline=True)
+      def insert(cache, scaler, new_entry):
+          new_entry = jnp.transpose(new_entry.squeeze(0), (1, 0, 2))
+          reduce_axis = (0, )
+          vals, scales = torch_xla2.extra.call_torch(
+            quantize.quantize_torch_int8, new_entry, reduce_axis)
+          new_scaler = scaler.at[slot, head_indexes, update_indexes, :].set(scales)
+          new_scaler = jax.lax.with_sharding_constraint(new_scaler, self.replicated)
+          res = cache.at[slot, :, update_indexes, :].set(vals)
+          res = jax.lax.with_sharding_constraint(res, self.cache_sharding)
+          return res, new_scaler
+
+      caches = []
+      for (k, v), (kscaler, vscaler), (newk, newv) in zip(
+          old_caches,
+          old_scales,
+          cache_inserts):
+        kcache, kscale = insert(k, kscaler, newk)
+        vcache, vscale = insert(v, vscaler, newv)
+        caches.append((kcache, vcache))
+        scales.append((kscale, vscale))
+    return caches, scales
+
+
+  def insert(
+      self,
+      prefix: Prefix,
+      decode_state: DecodeState,
+      slot: int,
+  ) -> DecodeState:
+    # logging.info(
+    #     'Jet input prefix: %s, decode state before insert: %s',
+    #     prefix,
+    #     decode_state,
+    # )
+    if decode_state.current_position - prefix.seq_len >= 0:
+      # Will not wrap around:
+      return self._insert_no_wrap(prefix, decode_state, slot)
+    else:
+      # Wraps around
+      tokens = decode_state.tokens.at[slot].set(prefix.token)
+
+      pos = decode_state.current_position
+      # Create indexes
+      update_indexes = (jnp.arange(-prefix.seq_len, 0) + pos) % self.env.cache_sequence_length
+      update_indexes = update_indexes.reshape(1, -1)
+
+      caches, scales = self._insert_wrap(
+        decode_state.caches, 
+        decode_state.cache_scales,
+        prefix.caches,
+        update_indexes,
+        slot
+      )
+
+      position = prefix.seq_len
+      lens = decode_state.lens.at[slot].set(0)
+      return DecodeState(tokens, caches, scales, position, lens)
 
   #@functools.partial(jax.jit, static_argnums=(0,), donate_argnums=(2, ))
   def generate(
