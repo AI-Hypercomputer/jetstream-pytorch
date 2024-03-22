@@ -213,6 +213,8 @@ class Attention(nn.Module):
         keys, values = cache.update(xk, xv)
         self.env.apply_sharding(keys, axis=1)
         self.env.apply_sharding(values, axis=1)
+        keys = repeat_kv(keys, self.n_rep)
+        values = repeat_kv(values, self.n_rep)
       with jax.named_scope('attn_mat1'):
         ## Attention start
         #scores = torch.einsum(jnp.einsum, "ijkl,ikml->ikjm", xq, keys) / math.sqrt(self.head_dim)
@@ -241,6 +243,8 @@ class Attention(nn.Module):
         keys, values, k_scaler, v_scaler = cache.update(xk, xv)
         self.env.apply_sharding(keys, axis=1)
         self.env.apply_sharding(values, axis=1)
+        keys = repeat_kv(keys, self.n_rep)
+        values = repeat_kv(values, self.n_rep)
       with jax.named_scope('attn_mat1'):
         ## Attention start
         #scores = torch.einsum(jnp.einsum, "ijkl,ikml->ikjm", xq, keys) / math.sqrt(self.head_dim)
