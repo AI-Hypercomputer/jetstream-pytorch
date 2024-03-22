@@ -20,6 +20,7 @@ from .pets import tokenizer
 
 from .pets import cache_manager
 from .environment import JetEngineEnvironment, JetEngineEnvironmentData
+from .pets import quantize
 
 from torch.utils import _pytree as pytree
 import torch
@@ -240,12 +241,11 @@ class PyTorchEngine(engine_api.Engine):
     else:
       @functools.partial(jax.jit, donate_argnums=(0, 1))
       def insert(cache, scaler, new_entry):
-          scales = jnp.maximum(jnp.abs(jnp.amax(new_entry, axis=(1, 3), keepdims=True)), 
-                               jnp.abs(jnp.amin(new_entry, axis=(1, 3), keepdims=True)))
-          scales *= 127
-          scales = jax.lax.with_sharding_constraint(scales, self.replicated)
+          reduce_axis = (1, 3)
+          vals, scales = torch_xla2.extra.call_torch(
+            quantize.quantize_torch_int8, new_entry, reduce_axis)
           new_scaler = scaler.at[slot, head_indexes, update_indexes, :].set(scales)
-          res = cache.at[slot, head_indexes, update_indexes, :].set((new_entry/scales).astype(jnp.int8))
+          res = cache.at[slot, head_indexes, update_indexes, :].set(vals)
           res = jax.lax.with_sharding_constraint(res, self.cache_sharding)
           return res, new_scaler
 

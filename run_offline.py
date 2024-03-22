@@ -12,7 +12,7 @@ from absl.testing import absltest
 import os
 import sys
 
-from petstream import jet_engine2 as je
+from jetstream_pt import engine as je
 import time
 import logging
 

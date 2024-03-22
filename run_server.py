@@ -6,8 +6,8 @@ from absl import app
 from absl import flags
 
 from jetstream.core import server_lib
-from petstream.pets import config
-from petstream import jet_engine2 as je
+from jetstream_pt.pets import config
+from jetstream_pt import engine as je
 
 
 _PORT = flags.DEFINE_integer('port', 9000, 'port to listen on')
