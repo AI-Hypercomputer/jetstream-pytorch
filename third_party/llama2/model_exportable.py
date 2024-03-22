@@ -1,5 +1,7 @@
 # pylint: disable-all
-"""This version contains modification to make it easier to trace and support batch."""
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# This software may be used and distributed according to the terms of the Llama 2 Community License Agreement.
+"""Llama2 model. forked from: https://github.com/meta-llama/llama/blob/main/llama/model.py """
 
 import math
 from typing import Any, List, Optional, Tuple

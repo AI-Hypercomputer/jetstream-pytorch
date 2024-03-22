@@ -25,12 +25,10 @@ dependencies = [
     "jax>=0.4.24",
     "jaxlib>=0.4.24",
     "sentencepiece",
-    "torch",
     "pytest",
     "google-jetstream",
     "google-cloud-storage",
     "safetensors",
-    #"torch_xla2",
 ]
 
 requires-python = ">=3.10"
