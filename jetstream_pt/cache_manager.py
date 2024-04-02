@@ -1,16 +1,3 @@
-# Copyright 2024 Google LLC
-# 
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-# 
-#     https://www.apache.org/licenses/LICENSE-2.0
-# 
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 import torch_xla2
 import jax
 import jax.numpy as jnp
@@ -53,7 +40,7 @@ class KVCachePrefill:
 
 
 def KVCachePrefill_flatten(cache):
-    return torch_xla2.tensor.unwrap((cache.cache_k, cache.cache_v)), self.kv_quantize
+    return torch_xla2.tensor.unwrap((cache.cache_k, cache.cache_v)), cache.kv_quantize
 
 
 def KVCachePrefill_unflatten(auxdata, data):
@@ -89,8 +76,6 @@ class KVCacheGenerate:
 
     def update(self, key, value):
         keyj, valuej = torch_xla2.tensor.unwrap((key, value))
-        keyj = jax.lax.with_sharding_constraint(keyj, self.sharding)
-        valuej = jax.lax.with_sharding_constraint(valuej, self.sharding)
         self.cache_k._elem = self.cache_k._elem.at[:, :, self.pos].set(keyj)
         self.cache_v._elem = self.cache_v._elem.at[:, :, self.pos].set(valuej)
         return self.cache_k, self.cache_v 
@@ -169,6 +154,6 @@ class Int8KVCacheGenerate:
         v_quant, vscale = self.quantize(xv)
         self.cache_k[:, :, self.input_pos, :] = k_quant
         self.cache_v[:, :, self.input_pos, :] = v_quant
-        self.k_scaler[:, self.input_pos] = kscale
-        self.v_scaler[:, self.input_pos] = vscale
+        self.k_scaler[:, :, self.input_pos, :] = kscale
+        self.v_scaler[:, :, self.input_pos, :] = vscale
         return self.cache_k, self.cache_v, self.k_scaler, self.v_scaler

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 
 [tool.poetry]
-name = "petstream-package"
+name = "jetstream_pt-package"
 version = "0.1.0"
 description = "The Pet Stream."
 authors = ["Han Qi <qihan.dev@gmail.com>", "Lance Wang <lancelot.wing@gmail.com>", "Fanhai Lu <fanhai@google.com>"]
@@ -17,13 +17,11 @@ flax = { git = "https://github.com/google/flax.git", branch = "main" }
 
 [project]
 version = "0.0.1"
-name = "petstream"
+name = "jetstream_pt"
 dependencies = [
     "absl-py",
     "flatbuffers",
     "flax",
-    "jax>=0.4.24",
-    "jaxlib>=0.4.24",
     "sentencepiece",
     "pytest",
     "google-jetstream",

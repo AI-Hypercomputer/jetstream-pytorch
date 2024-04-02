@@ -1,7 +1,5 @@
 # pylint: disable-all
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# This software may be used and distributed according to the terms of the Llama 2 Community License Agreement.
-"""Llama2 model. forked from: https://github.com/meta-llama/llama/blob/main/llama/model.py """
+"""This version contains modification to make it easier to trace and support batch."""
 
 import math
 from typing import Any, List, Optional, Tuple
@@ -193,7 +191,9 @@ class Transformer(nn.Module):
         h = self.tok_embeddings(tokens)
 
     with jax.named_scope('transformer_freq'):
+        bsz, seqlen = tokens.shape
         freqs_cis = self.freqs_cis[input_pos]
+        freqs_cis = freqs_cis.reshape(bsz, seqlen, -1)
 
     for layer, cache in zip(self.layers, caches):
       with jax.named_scope('TransformerBlock'):

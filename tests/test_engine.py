@@ -1,16 +1,3 @@
-# Copyright 2024 Google LLC
-# 
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-# 
-#     https://www.apache.org/licenses/LICENSE-2.0
-# 
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 from typing import List, Any
 import unittest
 import torch
@@ -19,6 +6,7 @@ import jax.numpy as jnp
 
 from jetstream_pt.environment import JetEngineEnvironment, JetEngineEnvironmentData
 from jetstream_pt.engine import PyTorchEngine, Prefix, DecodeState
+from jetstream_pt.third_party.llama2 import model_exportable, model_original
 
 # This model will output tokens with value of 2
 # and will update caches with value of 1.0
@@ -85,11 +73,9 @@ class EngineTest(unittest.TestCase):
             seqlen
         )
         decode_state = engine.init_decode_state()
-        self.assertEqual(decode_state.current_position, 0)
         updated = engine.insert(
             prefill_result, decode_state, slot=jnp.int32(1)
         )
-        self.assertEqual(decode_state.current_position, 0)
 
         _, hl, sl, dl = updated.caches[0][0].shape
         for k, v in updated.caches:
@@ -126,6 +112,9 @@ class EngineTest(unittest.TestCase):
             decode_state.cache_scales,
             10, # current position 
             decode_state.lens,
+            decode_state.validity,
+            decode_state.true_length,
+            decode_state.mask,
         )
         updated = engine.insert(
             prefill_result, decode_state, slot=jnp.int32(1)
@@ -222,6 +211,18 @@ class EngineTest(unittest.TestCase):
                             jnp.allclose(inflated[1, h, s, d], 
                             seqlen + jnp.bfloat16(s), atol=0.1, rtol=0.01), 
                             f"{inflated[1, h, s, d]} vs. {seqlen + jnp.bfloat16(s)}")
+
+    def test_tiny(self):
+        engine = self._make_small_engine()
+        model_arg = engine.env._model_arg
+        model_orig = model_original.Transformer(model_arg)
+        state_dict = dict(model_orig.state_dict())
+        state_dict['freqs_cis'] = model_orig.freqs_cis
+        model_ours = model_exportable.Transformer(model_arg, env)
+        engine.pt_model = model_ours
+
+        # prefill
+        
 
 
 if __name__ == '__main__':

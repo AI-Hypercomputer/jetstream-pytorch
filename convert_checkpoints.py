@@ -1,28 +1,14 @@
-# Copyright 2024 Google LLC
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 r"""Utility to merge sharded weights of llama2 model into a single file.
 
 Usage:
 export input_ckpt_dir=/path/to/llama2/weight/dir
 export output_ckpt_dir=/tmp/llama2/
-python \
-    petstream/pets/weight_merger \
-    --input_ckpt_dir=${input_ckpt_dir} \
-    --output_ckpt_dir=${output_ckpt_dir}
+python convert_checkpoint.py \
+    --input_checkpoint_dir=${input_ckpt_dir} \
+    --output_checkpoint_dir=${output_ckpt_dir}
 """
 
-from petstream.pets import quantize
+from jetstream_pt import quantize
 from collections.abc import Sequence
 import gc
 import hashlib
@@ -37,13 +23,13 @@ from google.cloud import storage
 import time
 
 _INPUT_CHECKPOINT_DIR = epath.DEFINE_path(
-    'input_ckpt_dir',
+    'input_checkpoint_dir',
     None,
     'The input dir containing llama2 model weights sharded across files.',
 )
 
 _OUTPUT_CHECKPOINT_DIR = epath.DEFINE_path(
-    'output_ckpt_dir',
+    'output_checkpoint_dir',
     None,
     'The output dir containing llama2 model weights merged in a single file.',
 )
@@ -54,7 +40,7 @@ _MINIMIZE_MEMORY_FOOTPRINT = flags.DEFINE_bool(
     'When set to true, reduce memory usage by staging in-memory data on disk',
 )
 
-_OUTPUT_SAFETENSOR = flags.DEFINE_bool('output_safetensor', True, 'When set to true, save to HugginFace SafeTensor format')
+_OUTPUT_SAFETENSORS = flags.DEFINE_bool('output_safetensors', True, 'When set to true, save to HugginFace SafeTensors format')
 _QUANTIZE = flags.DEFINE_bool('quantize', False, 'When set to true, produces quantized weights')
 
 # ParallelEmbedding is col partitioned across the shards.
@@ -243,7 +229,9 @@ def _merge_weights(checkpoints, minimize_memory_footprint):
     # Doing so could help with reducing memory usage.
     del checkpoints
     gc.collect()
-    for path in tmp_dir.glob('*.pth'):
+    paths = tmp_dir.glob('*.pth')
+    paths = sorted(paths)
+    for path in paths:
       state_dict.update(
           torch.load(os.fspath(path), map_location=torch.device('cpu'))
       )
@@ -282,9 +270,11 @@ def _load_from_local(input_ckpt_dir: epath.Path):
   params = json.loads((input_ckpt_dir / 'params.json').read_text())
 
   print(f'Loading checkpoint files from {input_ckpt_dir}.')
+  paths = input_ckpt_dir.glob('*.pth')
+  paths = sorted(paths)
   checkpoints = [
       torch.load(os.fspath(path), map_location=torch.device('cpu'))
-      for path in input_ckpt_dir.glob('*.pth')
+      for path in paths
   ]
   if not checkpoints:
     raise ValueError(f'No *.pth found in the input dir {input_ckpt_dir}')
@@ -294,7 +284,7 @@ def _load_from_local(input_ckpt_dir: epath.Path):
 def _export_to_gcs(output_ckpt_dir: epath.Path, params, state_dict):
   output_ckpt_dir_str = str(output_ckpt_dir)
   bucket_name, output_ckpt = str(output_ckpt_dir).split("//")[-1].split("/", 1)
-  print(f"Export to bucket {bucket_name}, blob {blob_name}")
+  print(f"Export to bucket {bucket_name}, blob {output_ckpt}")
   storage_client = storage.Client()
   bucket = storage_client.bucket(bucket_name)
 
@@ -315,7 +305,7 @@ def _export_to_gcs(output_ckpt_dir: epath.Path, params, state_dict):
 def _export_to_local(output_ckpt_dir: epath.Path, params, state_dict):
   output_ckpt_dir.mkdir(parents=True, exist_ok=True)
   (output_ckpt_dir / 'params.json').write_text(json.dumps(params))
-  if _OUTPUT_SAFETENSOR.value:
+  if _OUTPUT_SAFETENSORS.value:
     from safetensors.torch import save_file
     save_file(state_dict, os.fspath(output_ckpt_dir / 'model.safetensors'))
   else:

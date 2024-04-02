@@ -78,40 +78,6 @@ def create_engine():
   return engine
 
 
-def run_prefill_time(engine, params, decode_state, seqlen):
-  metadata = engine.get_tokenizer()
-  vocab = token_utils.load_vocab(
-    metadata.path, metadata.extra_ids)
-  tokenizer = vocab.tokenizer
-
-  text = 'This is a beautiful day'
-  tokens, true_length = token_utils.tokenize_and_pad(
-    text, vocab, is_bos=True, prefill_lengths=[seqlen])
-
-  for _ in range(3):
-    prefill_result = engine.prefill(
-        params=params, padded_tokens=tokens, true_length=true_length
-    )
-    decode_state = engine.insert(
-        prefill_result, decode_state, slot=jnp.int32(1)
-    )
-
-  nums = 5
-  start = time.perf_counter()
-  for i in range(nums):
-    prefill_result = engine.prefill(
-        params=params, padded_tokens=tokens, true_length=true_length
-    )
-    decode_state = engine.insert(
-        prefill_result, decode_state, slot=jnp.int32(i)
-    )
-  jax.block_until_ready(decode_state)
-  end = time.perf_counter()
-  return (end - start) / nums, decode_state
-
-
-MAXTEXT_PREFILL = {16:0, 32: 0, 64 : 14.02, 128:18.29, 256:23.59, 512:35.28, 1024: 60.28}
-
 def main(argv):
 
   engine = create_engine()
@@ -121,48 +87,44 @@ def main(argv):
   print('Load params ', time.perf_counter() - start)
 
   prefill_times = {}
-  slot = jnp.int32(1)
+  slot = jnp.int32(0)
+  metadata = engine.get_tokenizer()
+  vocab = token_utils.load_vocab(
+    metadata.path, metadata.extra_ids)
+  tokenizer = vocab.tokenizer
 
-  if _PROFILING_OUTPUT.value:
-    jax.profiler.start_trace(_PROFILING_OUTPUT.value)
-  decode_state = engine.init_decode_state()
-  for batch in MAXTEXT_PREFILL.keys():
-    runtime, decode_state = run_prefill_time(engine, params, decode_state, batch)
-    prefill_times[batch] = runtime
+  while True:
+    # text = input('Text >>>> ')
+    text = 'I believe the meaning of life is'
+    decode_state = engine.init_decode_state()
+    tokens, true_length = token_utils.tokenize_and_pad(text, vocab, is_bos=True)
+    # tokens = tokenizer.encode(text)
+    # tokens = [tokenizer.bos_id()] + tokens
+    print('Encoded tokens are: ', tokens)
 
-  sampled_tokens_list = []
-
-  for i in range(3): # warm up
-    decode_state, sampled_tokens = engine.generate(
-      params, decode_state
+    prefill_result = engine.prefill(
+        params=params, padded_tokens=tokens, true_length=true_length
     )
-    sampled_tokens_list.append(sampled_tokens)
-
-  print('======= decode starting ===')
-  dec_times = []
-  for i in range(10):
-    start = time.perf_counter()
-    decode_state, sampled_tokens = engine.generate(
-      params, decode_state
+    decode_state = engine.insert(
+        prefill_result, decode_state, slot=slot
     )
-    jax.block_until_ready(decode_state)
-    sampled_tokens_list.append(sampled_tokens)
-    end = time.perf_counter()
-    dec_times.append(end - start)
-    print(i, 'decode time', (end - start))
+    sampled_tokens_list = []
+    for i in range(100):
+      decode_state, sampled_tokens = engine.generate(
+        params, decode_state
+      )
+      tstart, end = sampled_tokens.tokens_idx
+      sampled_tokens_list.append(sampled_tokens.data[0, 0].item())
+
+    print('---- ans ----')
+    print(sampled_tokens_list)
+    print(tokenizer.decode(sampled_tokens_list))
+    break
+
 
 
   if _PROFILING_OUTPUT.value:
     jax.profiler.stop_trace()
-
-  print('prefill ', prefill_times)
-  print('decode', sum(dec_times) / 10 )
-
-  prefill_times_ms = {k: v*1000 for k, v in prefill_times.items()}
-  decode_time_ms = sum(dec_times) * 1000 / 10 / _BATCH_SIZE.value
-
-  import analyze_sharegpt
-  analyze_sharegpt.do_simulation(prefill_times_ms, decode_time_ms)
 
 
 

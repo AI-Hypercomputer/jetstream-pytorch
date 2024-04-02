@@ -1,17 +1,4 @@
 # pylint: disable-all
-# Copyright 2024 Google LLC
-# 
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-# 
-#     https://www.apache.org/licenses/LICENSE-2.0
-# 
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 """This version contains modification to make it easier to trace and support batch."""
 
 import math
@@ -92,8 +79,9 @@ def reshape_for_broadcast(
 ) -> torch.Tensor:
   ndim = x.ndim
   assert 1 < ndim
-  assert freqs_cis.shape == (x.shape[-3], x.shape[-1]), x.shape
+  assert freqs_cis.shape == (x.shape[0], x.shape[-3], x.shape[-1]), f"freqs_cis: {freqs_cis.shape }, x: {x.shape}"
   shape = [d if i == 1 or i == ndim - 1 else 1 for i, d in enumerate(x.shape)]
+  shape[0] = x.shape[0] # batch size
   return freqs_cis.view(*shape)
 
 
@@ -207,6 +195,7 @@ class Attention(nn.Module):
       xq = xq.view(bsz, seqlen, self.n_local_heads, self.head_dim)
       xk = xk.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
       xv = xv.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
+
       
       self.env.apply_sharding(xq, axis=2)
       self.env.apply_sharding(xk, axis=2)
@@ -215,11 +204,11 @@ class Attention(nn.Module):
     with jax.named_scope('attn_rope'):
       xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
 
-    xk = xk.transpose(-3, -2)
-    xv = xv.transpose(-3, -2)
+    xk = xk.transpose(1, 2)
+    xv = xv.transpose(1, 2)
 
     if seqlen == 1:
-        xq = torch.broadcast_to(xq, (xq.shape[0], 2, xq.shape[2], xq.shape[3])) 
+      xq = torch.broadcast_to(xq, (xq.shape[0], 2, xq.shape[2], xq.shape[3]))
 
     if not self.env.enable_kv_quantization:
       with jax.named_scope('attn_insert_cache'):
@@ -234,6 +223,8 @@ class Attention(nn.Module):
         scores = torch_xla2.extra.call_jax(jnp.einsum, "ijkl,ikml->ikjm", xq, keys) / math.sqrt(self.head_dim)
         self.env.apply_sharding(scores, axis=1)
         if mask is not None:
+          # if mask.shape != (1,1,16,16):
+          #   breakpoint()
           scores = scores + mask  # (bs, n_local_heads, seqlen, max_seqlen)
       with jax.named_scope('attn_soft'):
         scores = F.softmax(scores.float(), dim=-1).type_as(xq)
@@ -243,9 +234,9 @@ class Attention(nn.Module):
         #    "ikjm,ikml->ikjl", scores, values
         #)  # (bs, n_local_heads, seqlen, head_dim)
         output = torch_xla2.extra.call_jax(jnp.einsum,"ikjm,ikml->ikjl", scores, values)
-        # For XLA matmul performance boost
         if seqlen == 1:
-          output = output[:, :, 0, :]
+          output = output[:, :, 0:1, :]
+        # For XLA matmul performance boost
         #output = torch.matmul(scores, values)
         self.env.apply_sharding(output, axis=1)
         output = output.transpose(-3, -2).contiguous().view(bsz, seqlen, -1)
@@ -276,7 +267,7 @@ class Attention(nn.Module):
         #)  # (bs, n_local_heads, seqlen, head_dim)
         output = torch_xla2.extra.call_jax(jnp.einsum,"ikjm,ikml->ikjl", scores, values)
         if seqlen == 1:
-          output = output[:, :, 0, :]
+          output = output[:, :, 0:1, :]
         #output = torch.matmul(scores, values)
         self.env.apply_sharding(output, axis=1)
         output = output.transpose(-3, -2).contiguous().view(bsz, seqlen, -1)
