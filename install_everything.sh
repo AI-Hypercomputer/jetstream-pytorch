@@ -9,10 +9,10 @@ mkdir -p deps
 pushd deps
 git clone https://github.com/google/JetStream.git
 git clone https://github.com/pytorch/xla.git
-pushd xla
+pushd xla/experimental/torch_xla2
 git checkout $TORCHXLA_TAG
-popd
+pip install .
 popd  # now at the folder of jetstream-pytorch
-
-export PYTHONPATH=$PYTHONPATH:$(pwd)/deps/xla/experimental/torch_xla2:$(pwd)/deps/JetStream:$(pwd)
-
+pushd JetStream
+pip install .
+popd

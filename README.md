@@ -14,11 +14,8 @@ git clone https://github.com/pytorch-tpu/jetstream-pytorch.git
 ### 2. Run installation script:
 
 ```bash
-source install_everything.sh
+sh install_everything.sh
 ```
-
-NOTE: the above script will export `PYTHONPATH`, so sourcing will make it 
-to take effect in the current shell
 
 
 # Get weights
