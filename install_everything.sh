@@ -12,7 +12,9 @@ git clone https://github.com/pytorch/xla.git
 pushd xla/experimental/torch_xla2
 git checkout $TORCHXLA_TAG
 pip install .
-popd  # now at the folder of jetstream-pytorch
+popd  # now at the folder deps
 pushd JetStream
 pip install .
-popd
+popd # now at the folder deps
+popd # now at the folder current file
+pip install -e .
