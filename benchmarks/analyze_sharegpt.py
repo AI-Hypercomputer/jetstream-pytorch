@@ -54,7 +54,7 @@ def do_simulation(prefill_bucket_size_to_ms, system_time_per_decode_token_ms):
         return return_val
 
     convo_numbers = []
-    loaded_share_gpt = json.load(open('/home/hanq/data/ShareGPT_V3_unfiltered_cleaned_split.json', 'r'))
+    loaded_share_gpt = json.load(open('~/data/ShareGPT_V3_unfiltered_cleaned_split.json', 'r'))
     for example in loaded_share_gpt:
         if len(example['conversations']) < 2:
             continue
