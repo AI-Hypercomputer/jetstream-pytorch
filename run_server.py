@@ -68,7 +68,7 @@ def main(argv: Sequence[str]):
   os.environ['XLA_FLAGS'] = '--xla_dump_to=/tmp/xla_logs --xla_dump_hlo_as_text'
   # No devices for local cpu test. A None for prefill and a None for generate.
   devices = server_lib.get_devices()
-  print('HERE 1')
+  print(f'devices: {devices}')
   engine = je.create_pytorch_engine(
         devices=devices,
         tokenizer_path=_TOKENIZER_PATH.value,
@@ -85,7 +85,7 @@ def main(argv: Sequence[str]):
         interleaved_slices=(_PLATFORM.value, ),
         interleaved_engine_create_fns=(lambda a: engine, ),
   )
-  print('HERE 2')
+  print(f'server_config: {server_config}')
 
   # We separate credential from run so that we can unit test it with local credentials.
   # TODO: Add grpc credentials for OSS.
@@ -95,7 +95,7 @@ def main(argv: Sequence[str]):
       config=server_config,
       devices=devices,
   )
-  print('HANQ....')
+  print('Started jetstream_server....')
   jetstream_server.wait_for_termination()
 
 
