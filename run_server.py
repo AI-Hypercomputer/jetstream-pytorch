@@ -6,8 +6,9 @@ from absl import app
 from absl import flags
 
 from jetstream.core import server_lib
+import jetstream_pt
 from jetstream_pt import config
-from jetstream_pt import engine as je
+from jetstream.core.config_lib import ServerConfig
 
 
 _PORT = flags.DEFINE_integer('port', 9000, 'port to listen on')
@@ -61,7 +62,6 @@ _QUANTIZE_WEIGHTS = flags.DEFINE_bool('quantize_weights', False, 'weight quantiz
 _QUANTIZE_KV_CACHE = flags.DEFINE_bool('quantize_kv_cache', False, 'kv_cache_quantize')
 _MAX_CACHE_LENGTH = flags.DEFINE_integer('max_cache_length', 1024, 'kv_cache_quantize')
 
-from jetstream.core.config_lib import ServerConfig
 
 def main(argv: Sequence[str]):
   del argv
@@ -69,7 +69,7 @@ def main(argv: Sequence[str]):
   # No devices for local cpu test. A None for prefill and a None for generate.
   devices = server_lib.get_devices()
   print(f"devices: {devices}")
-  engine = je.create_pytorch_engine(
+  engine = jetstream_pt.create_pytorch_engine(
         devices=devices,
         tokenizer_path=_TOKENIZER_PATH.value,
         ckpt_path=_CKPT_PATH.value,
