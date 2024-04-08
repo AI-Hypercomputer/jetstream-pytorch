@@ -2,21 +2,8 @@
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-
-[tool.poetry]
-name = "jetstream_pt-package"
-version = "0.1.0"
-description = "The Pet Stream."
-authors = ["Han Qi <qihan.dev@gmail.com>", "Lance Wang <lancelot.wing@gmail.com>", "Fanhai Lu <fanhai@google.com>"]
-
-
-[tool.poetry.dependencies]
-python = "^3.9"
-flax = { git = "https://github.com/google/flax.git", branch = "main" }
-
-
 [project]
-version = "0.0.1"
+version = "0.2.0"
 name = "jetstream_pt"
 dependencies = [
     "absl-py",

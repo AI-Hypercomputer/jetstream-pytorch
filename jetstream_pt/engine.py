@@ -589,10 +589,29 @@ def create_pytorch_engine(
   jax.config.update('jax_traceback_filtering', 'off')
   torch.set_default_dtype(torch.bfloat16)
 
+  checkpoint_format = ''
+  checkpoint_path = ''
+
+  if not ckpt_path or ckpt_path == None:
+      print('WARNING: Using random weights instead of checkpoints.')
+  elif ".safetensors" in ckpt_path:
+      checkpoint_format = 'safetensors'
+      checkpoint_path = ckpt_path
+  elif ".pth" in ckpt_path:
+      raise NotImplementedError('Loading from Pytorch raw checkpoint is not supported!')
+  else:
+      from etils import epath
+      path = epath.Path(ckpt_path) if ckpt_path and ckpt_path != None else ''
+      if not path.exists():
+          raise ValueError(f'Checkpoint path {ckpt_path} not exists!')
+      paths = list(path.glob('*.safetensors'))
+      assert len(paths) == 1, f'Expects 1 *.safetensors in the checkpoint dir, see {len(paths)}'
+      checkpoint_format = 'safetensors'
+      checkpoint_path = paths[0]
   env_data = JetEngineEnvironmentData(
     tokenizer_path=tokenizer_path,
-    checkpoint_path = ckpt_path, 
-    checkpoint_format = 'safetensors',
+    checkpoint_path = checkpoint_path,
+    checkpoint_format = checkpoint_format,
     model_type = 'llama-2-' + param_size,
     batch_size = batch_size,
     max_decode_length = max_decode_length,
@@ -601,7 +620,6 @@ def create_pytorch_engine(
     enable_kv_quantization = quantize_kv,
     cache_sequence_length = max_cache_length,
   )
-
   env = JetEngineEnvironment(env_data)
 
   tokenizer = token_utils.load_vocab(tokenizer_path)
