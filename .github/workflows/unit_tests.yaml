@@ -46,7 +46,7 @@ jobs:
         pip install pytype
         pip install pylint
         pip install pyink
-        pip install -r requirements.txt
+        source install_everything.sh
     - name: Typecheck the code with pytype
       run: |
         pytype --jobs auto --disable import-error --disable module-attr jetstream_pt/
@@ -73,10 +73,10 @@ jobs:
         python-version: ${{ matrix.python-version }}
     - name: Install Dependencies
       run: |
-        pip install -r requirements.txt
+        source install_everything.sh
     - name: Run all unit tests for jetstream_pt (/tests)
       run: |
-        coverage run -m unittest -v
+        JAX_PLATFORMS=cpu coverage run -m unittest -v
     - name: Create test coverage report
       run: |
         coverage report -m
