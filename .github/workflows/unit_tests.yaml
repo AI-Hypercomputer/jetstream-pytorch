@@ -76,7 +76,7 @@ jobs:
         source install_everything.sh
     - name: Run all unit tests for jetstream_pt (/tests)
       run: |
-        coverage run -m unittest -v
+        JAX_PLATFORMS=cpu coverage run -m unittest -v
     - name: Create test coverage report
       run: |
         coverage report -m
