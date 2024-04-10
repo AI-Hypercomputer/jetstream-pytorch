@@ -1,21 +1,10 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # This software may be used and distributed according to the terms of the Llama 2 Community License Agreement.
 
-import json
 import os
-import sys
-import time
-from pathlib import Path
 from typing import List, Literal, Optional, Tuple, TypedDict
 
 import torch
-import torch.nn.functional as F
-from fairscale.nn.model_parallel.initialize import (
-    get_model_parallel_rank,
-    initialize_model_parallel,
-    model_parallel_is_initialized,
-)
-
 from jetstream_pt.third_party.llama2 import model_original
 
 from llama.tokenizer import Tokenizer
@@ -72,6 +61,65 @@ class LlamaOriginal:
     def __init__(self, model: model_original.Transformer, tokenizer: Tokenizer):
         self.model = model
         self.tokenizer = tokenizer
+
+
+    @torch.inference_mode()
+    def prefill(
+        self,
+        prompt_tokens: List[List[int]],
+        max_gen_len: int,
+    ) -> List[List[int]]:
+        """
+        Do greedy search on CPU and return tokens only. 
+        """
+         
+        params = self.model.params
+        bsz = len(prompt_tokens)
+        assert bsz <= params.max_batch_size, (bsz, params.max_batch_size)
+
+        min_prompt_len = min(len(t) for t in prompt_tokens)
+        max_prompt_len = max(len(t) for t in prompt_tokens)
+        assert max_prompt_len <= params.max_seq_len
+        total_len = min(params.max_seq_len, max_gen_len + max_prompt_len)
+
+        pad_id = self.tokenizer.pad_id
+        tokens = torch.full((bsz, total_len), pad_id, dtype=torch.long, device="cpu")
+        for k, t in enumerate(prompt_tokens):
+            tokens[k, : len(t)] = torch.tensor(t, dtype=torch.long, device="cpu")
+    
+
+        prev_pos = 0
+        eos_reached = torch.tensor([False] * bsz, device="cpu")
+        input_text_mask = tokens != pad_id
+
+        cur_pos = min_prompt_len
+        logits = self.model.forward(tokens[:, prev_pos:cur_pos], prev_pos)
+        next_token = torch.argmax(logits[:, -1], dim=-1)
+
+        next_token = next_token.reshape(-1)
+        # only replace token if prompt has already been generated
+        next_token = torch.where(
+            input_text_mask[:, cur_pos], tokens[:, cur_pos], next_token
+        )
+        tokens[:, cur_pos] = next_token
+        eos_reached |= (~input_text_mask[:, cur_pos]) & (
+            next_token == self.tokenizer.eos_id
+        )
+        prev_pos = cur_pos
+
+        out_tokens, out_logprobs = [], []
+        for i, toks in enumerate(tokens.tolist()):
+            # cut to max gen len
+            start = len(prompt_tokens[i])
+            toks = toks[start : start + 1]
+            probs = None
+            # cut to eos tok if any
+            if self.tokenizer.eos_id in toks:
+                eos_idx = toks.index(self.tokenizer.eos_id)
+                toks = toks[:eos_idx]
+            out_tokens.append(toks)
+            out_logprobs.append(probs)
+        return out_tokens
 
     @torch.inference_mode()
     def generate(

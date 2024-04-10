@@ -45,7 +45,7 @@ class LlamaE2ETest(unittest.TestCase):
     def test_original_llama2_seed(self):
         jax.config.update('jax_platform_name', 'cpu')
         x = jnp.square(2)
-        print(f"---------> {repr(x.addressable_data(0).devices())}")
+        print(f"---------> {jax.devices()}")
         torch.set_default_dtype(torch.bfloat16)
         env = self._make_env()
         model_arg = env._model_arg 
@@ -67,7 +67,7 @@ class LlamaE2ETest(unittest.TestCase):
     def test_jetstream_llama2_seed(self):
         jax.config.update('jax_platform_name', 'cpu')
         x = jnp.square(2)
-        print(f"---------> {repr(x.addressable_data(0).devices())}")
+        print(f"---------> {jax.devices()}")
 
         torch.set_default_dtype(torch.bfloat16)
         env = self._make_env()
@@ -134,7 +134,7 @@ class LlamaE2ETest(unittest.TestCase):
     def test_llama_e2e(self):
         jax.config.update('jax_platform_name', 'cpu')
         x = jnp.square(2)
-        print(f"---------> {repr(x.addressable_data(0).devices())}")
+        print(f"---------> {jax.devices()}")
 
         torch.set_default_dtype(torch.bfloat16)
         env = self._make_env()
@@ -203,7 +203,7 @@ class LlamaE2ETest(unittest.TestCase):
     def test_llama_e2e_two_addtional_tokens(self):
         jax.config.update('jax_platform_name', 'cpu')
         x = jnp.square(2)
-        print(f"---------> {repr(x.addressable_data(0).devices())}")
+        print(f"---------> {jax.devices()}")
 
         torch.set_default_dtype(torch.bfloat16)
         env = self._make_env()
@@ -271,13 +271,13 @@ class LlamaE2ETest(unittest.TestCase):
     def test_llama_e2e_four_addtional_tokens(self):
         jax.config.update('jax_platform_name', 'cpu')
         x = jnp.square(2)
-        print(f"---------> {repr(x.addressable_data(0).devices())}")
+        print(f"---------> {jax.devices()}")
 
         torch.set_default_dtype(torch.bfloat16)
         env = self._make_env()
         model_arg = env._model_arg 
         tokens = np.arange(10, dtype=np.int32)
-        tokens = np.append(tokens, [15050, 3503, 28551, 29604], axis=-1)
+        tokens = np.append(tokens, [15050, 3503, 11833, 28551], axis=-1)
         true_length = tokens.shape[-1]
         padded_tokens = np.pad(tokens, (0, 6))
         padded_tokens = jnp.array(padded_tokens)
