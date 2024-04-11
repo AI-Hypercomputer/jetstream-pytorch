@@ -77,6 +77,7 @@ class PyTorchEngine(engine_api.Engine):
   ):
     self.pt_model = pt_model
     self.env = env
+    self.default_dtype = jnp.bfloat16 if env.bf16_enable else jnp.float32
 
     # NOTE: this is llama2 specific now.
     self.param = pt_model.params
@@ -141,7 +142,7 @@ class PyTorchEngine(engine_api.Engine):
         jnp.zeros((self.env.batch_size, 1), dtype=jnp.int32),
         jnp.zeros((self.env.batch_size, ), dtype=jnp.int32),  # input pos 
         jnp.full((self.env.batch_size, self.env.cache_sequence_length), float('-inf'), 
-                  dtype=jnp.bfloat16),
+                  dtype=self.default_dtype),
     )
 
   def _call_model_generate(
@@ -190,7 +191,7 @@ class PyTorchEngine(engine_api.Engine):
       cache_manager.KVCachePrefill(self.env.enable_kv_quantization) for _ in self.pt_model.layers
     ]
     mask = jnp.full((1, 1, tokens.shape[1], tokens.shape[1]), 
-                     float('-inf'), dtype=jnp.bfloat16)
+                     float('-inf'), dtype=self.default_dtype)
     mask = jnp.triu(mask, k=1)
     args = (
       tokens, input_indexes, caches, mask
@@ -492,7 +493,7 @@ class PyTorchEngine(engine_api.Engine):
   def _make_state_dict_jax(self, model_args_meta):
       def make_array(t):
         res = jax.random.normal(
-          jax.random.key(0), shape=t.shape, dtype=jnp.bfloat16)
+          jax.random.key(0), shape=t.shape, dtype=self.default_dtype)
         res = res.astype(torch_xla2.tensor.t2j_dtype(t.dtype))
         return res
       return pytree.tree_map_only(torch.Tensor, make_array, model_args_meta)
@@ -507,8 +508,13 @@ class PyTorchEngine(engine_api.Engine):
         arr = jax.device_put(f.get_tensor(key), self.sharding_by_name(key))
         assert tuple(model_weights.shape) == tuple(arr.shape), f"key: {key} error: {model_weights.shape} != {arr.shape}"
         weights[key] = arr
+        print(f"key:{key}, value shape:{arr.dtype}")
     freqs_cis = torch_xla2.tensor.t2j(self.pt_model.freqs_cis)
     weights['freqs_cis'] = jax.device_put(freqs_cis, self.replicated)
+
+    # if not self.env.bf16_enable:
+    #   for k, v in weights.items():
+    #     weights[k] = jax.lax.convert_element_type(v, jnp.float32)
     return weights
 
   def load_params(self) -> Params:
@@ -601,7 +607,8 @@ def create_pytorch_engine(
   # Pytorch exports has int64 constants.
   # jax.config.update('jax_enable_x64', True)
   jax.config.update('jax_traceback_filtering', 'off')
-  torch.set_default_dtype(torch.bfloat16)
+  torch_dtype = torch.bfloat16 if bf16_enable else torch.float32
+  torch.set_default_dtype(torch_dtype)
 
   checkpoint_format = ''
   checkpoint_path = ''
@@ -633,6 +640,7 @@ def create_pytorch_engine(
     enable_weight_quantization = quantize_weights,
     enable_kv_quantization = quantize_kv,
     cache_sequence_length = max_cache_length,
+    bf16_enable = bf16_enable,
   )
   env = JetEngineEnvironment(env_data)
 

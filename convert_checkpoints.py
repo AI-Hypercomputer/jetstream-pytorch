@@ -54,6 +54,12 @@ _MINIMIZE_MEMORY_FOOTPRINT = flags.DEFINE_bool(
     'When set to true, reduce memory usage by staging in-memory data on disk',
 )
 
+_ENABLE_FLOAT32 = flags.DEFINE_bool(
+    'enable_float32',
+    False,
+    'When set to true, convert to float32 weights',
+)
+
 _OUTPUT_SAFETENSORS = flags.DEFINE_bool('output_safetensors', True, 'When set to true, save to HugginFace SafeTensors format')
 _QUANTIZE = flags.DEFINE_bool('quantize', False, 'When set to true, produces quantized weights')
 
@@ -190,7 +196,7 @@ def _tensors_have_same_shape(tensors):
       return False
   return True
 
-def _merge_weights(checkpoints, minimize_memory_footprint):
+def _merge_weights(checkpoints, minimize_memory_footprint, enable_float32):
   print('Starting to merge weights.')
   state_dict = {}
   tmp_dir: epath.Path = None
@@ -229,6 +235,9 @@ def _merge_weights(checkpoints, minimize_memory_footprint):
                 f'Tensors must be identical across shards for {key}'
             )
           state_dict_for_key[key] = tensors[0]
+
+        if enable_float32:
+          state_dict_for_key[key] = state_dict_for_key[key].float()
     if minimize_memory_footprint:
       # Stage this merged weights on disk to reduce memory footprint.
       torch.save(state_dict_for_key, os.fspath(tmp_dir / (key + '.pth')))
@@ -332,6 +341,7 @@ def merge_weights(
     input_ckpt_dir: epath.Path,
     output_ckpt_dir: epath.Path,
     minimize_memory_footprint: bool = True,
+    enable_float32: bool = False,
 ) -> None:
   start = time.perf_counter()
   if "gs://" in str(input_ckpt_dir):
@@ -343,7 +353,7 @@ def merge_weights(
   print(f"Loading checkpoints takes {end - start} seconds")
 
   start =  time.perf_counter()
-  state_dict = _merge_weights(checkpoints, minimize_memory_footprint)
+  state_dict = _merge_weights(checkpoints, minimize_memory_footprint, enable_float32)
   end = time.perf_counter()
   print(f"Merging weights takes {end - start} seconds")
 
@@ -370,6 +380,7 @@ def main(argv: Sequence[str]) -> None:
       _INPUT_CHECKPOINT_DIR.value,
       _OUTPUT_CHECKPOINT_DIR.value,
       _MINIMIZE_MEMORY_FOOTPRINT.value,
+      _ENABLE_FLOAT32.value,
   )
 
 

@@ -98,9 +98,10 @@ class KVCacheGenerate:
         return self.cache_k._elem, self.cache_v._elem
 
     @classmethod
-    def empty(cls, shape, device):
-        k = jnp.zeros(shape, device=device, dtype=jnp.bfloat16)
-        v = jnp.zeros(shape, device=device, dtype=jnp.bfloat16)
+    def empty(cls, shape, device, bf16_enable):
+        default_dtype = jnp.bfloat16 if bf16_enable else jnp.float32
+        k = jnp.zeros(shape, device=device, dtype=default_dtype)
+        v = jnp.zeros(shape, device=device, dtype=default_dtype)
         k, v = torch_xla2.tensor.wrap((k, v))
         pos = jnp.array([0])  # replicated
         return cls(k, v, 0, device)
@@ -147,9 +148,10 @@ class Int8KVCacheGenerate:
         return torch_xla2.tensor.unwrap((self.k_scaler, self.v_scaler))
 
     @classmethod
-    def empty(cls, shape, device):
+    def empty(cls, shape, device, bf16_enable):
         cache_k = jnp.zeros(shape, device=device, dtype=jnp.int8)
         cache_v = jnp.zeros(shape, device=device, dtype=jnp.int8)
+        # bf16_enable is a placeholder parameter, it's not used in Int8KVCache 
         kscaler = jnp.ones((shape[0], 1, shape[2], 1), dtype=jnp.bfloat16)
         vscaler = jnp.ones((shape[0], 1, shape[2], 1), dtype=jnp.bfloat16)
 

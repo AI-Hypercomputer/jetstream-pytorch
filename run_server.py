@@ -45,7 +45,7 @@ _CKPT_PATH = flags.DEFINE_string(
     'checkpoint_path', None, 'Directory for .pth checkpoints', required=False
 )
 _BF16_ENABLE = flags.DEFINE_bool(
-    'bf16_enable', False, 'Whether to enable bf16', required=False
+    'bf16_enable', True, 'Whether to enable bf16', required=False
 )
 _CONTEXT_LENGTH = flags.DEFINE_integer(
     'context_length', 1024, 'The context length', required=False
@@ -87,7 +87,7 @@ def main(argv: Sequence[str]):
         devices=devices,
         tokenizer_path=_TOKENIZER_PATH.value,
         ckpt_path=_CKPT_PATH.value,
-        bf16_enable=True,
+        bf16_enable=_BF16_ENABLE.value,
         param_size=_PARAM_SIZE.value,
         context_length=_CONTEXT_LENGTH.value,
         batch_size=_BATCH_SIZE.value,
