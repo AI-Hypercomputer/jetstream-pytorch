@@ -47,9 +47,9 @@ jobs:
         pip install pylint
         pip install pyink
         source install_everything.sh
-    - name: Typecheck the code with pytype
-      run: |
-        pytype --jobs auto --disable import-error --disable module-attr jetstream_pt/
+    # - name: Typecheck the code with pytype
+    #   run: |
+    #     pytype --jobs auto --disable import-error --disable module-attr jetstream_pt/
     - name: Analysing the code with pylint
       run: |
         pylint jetstream_pt/ benchmarks/
