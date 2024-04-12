@@ -508,9 +508,14 @@ class PyTorchEngine(engine_api.Engine):
         arr = jax.device_put(f.get_tensor(key), self.sharding_by_name(key))
         assert tuple(model_weights.shape) == tuple(arr.shape), f"key: {key} error: {model_weights.shape} != {arr.shape}"
         weights[key] = arr
-        print(f"key:{key}, value shape:{arr.dtype}")
+
     freqs_cis = torch_xla2.tensor.t2j(self.pt_model.freqs_cis)
     weights['freqs_cis'] = jax.device_put(freqs_cis, self.replicated)
+    
+    for k, v in weights.items():
+      if k.startswith('layers') and not k.startswith('layers.0'):
+        continue
+      print(f'Name: {k}, shape: {v.shape} x {v.dtype}')
 
     return weights
 
