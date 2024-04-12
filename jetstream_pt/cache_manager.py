@@ -107,13 +107,13 @@ class KVCacheGenerate:
         return cls(k, v, 0, device)
 
 def KVCacheGenerate_flatten(cache):
-    return torch_xla2.tensor.unwrap((cache.cache_k, cache.cache_v)), (self.position, self.sharding)
+    return torch_xla2.tensor.unwrap((cache.cache_k, cache.cache_v)), (cache.pos, cache.sharding)
 
 
 def KVCacheGenerate_unflatten(auxdata, data):
     position, sharding = auxdata
     cache_k, cache_v = torch_xla2.tensor.wrap(data)
-    cache = KVCachePrefill(cache_k, cache_v, position, sharding)
+    cache = KVCacheGenerate(cache_k, cache_v, position, sharding)
     return cache
 
 
