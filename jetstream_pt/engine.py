@@ -512,9 +512,6 @@ class PyTorchEngine(engine_api.Engine):
     freqs_cis = torch_xla2.tensor.t2j(self.pt_model.freqs_cis)
     weights['freqs_cis'] = jax.device_put(freqs_cis, self.replicated)
 
-    # if not self.env.bf16_enable:
-    #   for k, v in weights.items():
-    #     weights[k] = jax.lax.convert_element_type(v, jnp.float32)
     return weights
 
   def load_params(self) -> Params:
