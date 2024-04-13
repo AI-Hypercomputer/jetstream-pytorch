@@ -64,6 +64,8 @@ class ModelComponentTest(unittest.TestCase):
             torch_xla2.tensor.move_to_device, tree)
 
     def _make_env(self):
+        jax.config.update('jax_platform_name', 'cpu')
+        torch.set_default_dtype(torch.float32)
         env_data = environment.JetEngineEnvironmentData()
         env_data.max_input_sequence_length = 128
         env_data.max_input_sequence_length = 128
