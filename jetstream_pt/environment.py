@@ -56,6 +56,9 @@ class JetEngineEnvironmentData:
     # QKV fusion has negative performance on TPU, slicing takes longer
     qkv_fusion: bool = False
 
+    # If Ture, use bfloat16 as dtype. If False, use float32 as dtype 
+    bf16_enable: bool = True
+
 class JetEngineEnvironment:
 
     def __init__(self, data: JetEngineEnvironmentData):
@@ -66,7 +69,7 @@ class JetEngineEnvironment:
             context_length=data.max_input_sequence_length,
             batch_size=data.batch_size,
             vocab_size=32000,  # ?
-            bf16_enable=True,
+            bf16_enable=data.bf16_enable,
             )
 
         self.batch_size = self._data.batch_size
@@ -76,6 +79,7 @@ class JetEngineEnvironment:
         self.num_heads = self._model_arg.n_heads
         self.head_dim = self._model_arg.dim // self._model_arg.n_heads
         self.cache_sequence_length = self._data.cache_sequence_length
+        self.bf16_enable = self._data.bf16_enable
 
         Mesh = jax.sharding.Mesh
         P = jax.sharding.PartitionSpec
@@ -128,9 +132,9 @@ class JetEngineEnvironment:
         shape = (self.batch_size, self.num_kv_heads, self._data.cache_sequence_length, self.head_dim)
         for _ in range(self.num_layers):
             if self.enable_kv_quantization:
-                caches.append(cache_manager.Int8KVCacheGenerate.empty(shape, self.cache_sharding))
+                caches.append(cache_manager.Int8KVCacheGenerate.empty(shape, self.cache_sharding, self.bf16_enable))
             else:
-                caches.append(cache_manager.KVCacheGenerate.empty(shape, self.cache_sharding))
+                caches.append(cache_manager.KVCacheGenerate.empty(shape, self.cache_sharding, self.bf16_enable))
         return caches
 
 

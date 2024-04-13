@@ -25,24 +25,21 @@ from jetstream_pt.third_party.llama2.generation_original import LlamaOriginal
 from jetstream_pt import environment
 
 
-
-
 import unittest
-
 
 class LlamaE2ETest(unittest.TestCase):
 
     def setup(self):
         torch.set_default_dtype(torch.bfloat16)
 
-    
-
     def _to_jax(self, tree):
         return pytree.tree_map_only(
             torch.Tensor,
             torch_xla2.tensor.t2j, tree)    
 
-    def _make_env(self):
+    def _make_env(self, bf16_enable=True):
+        torch_dtype = torch.bfloat16 if bf16_enable else torch.float32
+        torch.set_default_dtype(torch_dtype)
         jax.config.update('jax_dynamic_shapes', False)
         jax.config.update('jax_traceback_filtering', 'off')
         env_data = environment.JetEngineEnvironmentData()
@@ -51,6 +48,7 @@ class LlamaE2ETest(unittest.TestCase):
         env_data.cache_sequence_length = 128
         env_data.model_type = 'llama-2-tiny'
         env_data.batch_size = 1
+        env_data.bf16_enable = bf16_enable
         env = environment.JetEngineEnvironment(env_data)
         env.apply_sharding = lambda *args, **kwargs: None  # don't shard on cpu
         return env
@@ -145,13 +143,7 @@ class LlamaE2ETest(unittest.TestCase):
             if index > 0:
                 self.assertEqual(output_tokens_multiple[index], output_tokens_multiple[index - 1])
 
-    def test_llama_e2e(self):
-        jax.config.update('jax_platform_name', 'cpu')
-        x = jnp.square(2)
-        print(f"---------> {jax.devices()}")
-
-        torch.set_default_dtype(torch.bfloat16)
-        env = self._make_env()
+    def _llama_e2e(self, env):
         model_arg = env._model_arg 
         tokens = np.arange(10, dtype=np.int32)
         true_length = tokens.shape[-1]
@@ -160,7 +152,7 @@ class LlamaE2ETest(unittest.TestCase):
 
         seed = 1
         torch.manual_seed(1)
-        max_output_length = 10
+        max_output_length = 32
 
         file_dir = os.path.dirname(__file__)
         tokenizer_path = os.path.join(file_dir, '../jetstream_pt/third_party/llama2/tokenizer.model')
@@ -207,11 +199,25 @@ class LlamaE2ETest(unittest.TestCase):
             out_tokens.append(token_id)
             if slot_lengths > max_output_length:
                 break
-        print(f"-------------------->out_tokens:{out_tokens}")
-        print(f"-------------------->expected_output_tokens:{expected_output_tokens}")
-        # self.assertEqual(out_tokens ,expected_output_tokens)
+        return  out_tokens, expected_output_tokens[0]
+
+    def test_llama_e2e_float32(self):
+        jax.config.update('jax_platform_name', 'cpu')
+        print(f"---------> {jax.devices()}")
+
+        env = self._make_env(bf16_enable=False)
+        out_tokens ,expected_output_tokens = self._llama_e2e(env)
+        self.assertEqual(out_tokens ,expected_output_tokens)
 
 
+    def test_llama_e2e_bfloat16(self):
+        jax.config.update('jax_platform_name', 'cpu')
+        jax.config.update('jax_default_matmul_precision', jax.lax.Precision.HIGHEST)
+        print(f"---------> {jax.devices()}")
+
+        env = self._make_env(bf16_enable=True)
+        out_tokens ,expected_output_tokens = self._llama_e2e(env)
+        self.assertNotEqual(out_tokens ,expected_output_tokens)
 
 
     def test_llama_e2e_two_addtional_tokens(self):
