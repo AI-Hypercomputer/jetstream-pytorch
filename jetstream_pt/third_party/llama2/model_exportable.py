@@ -1,20 +1,14 @@
 # pylint: disable-all
 """This version contains modification to make it easier to trace and support batch."""
 
-import math
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional
 
 import torch
 from torch import nn
 import torch.nn.functional as F
 
 from . import model_args 
-import jax.sharding as jsharding
-from jax.experimental import mesh_utils
 import jax
-import jax.numpy as jnp
-import torch_xla2
-import torch_xla2.extra
 
 from jetstream_pt.layers import Attention, RMSNorm, Int8Embedding, WeightOnlyInt8Linear
 

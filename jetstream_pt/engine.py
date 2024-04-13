@@ -14,18 +14,14 @@
 
 """Implement Jet Engine API."""
 
-import copy
 from typing import Any, List, Optional, Tuple, Union
 import threading
 import functools
 
 from flax import struct
-from absl import logging
 import jax
 from jax import numpy as jnp
-from jax.experimental import mesh_utils
 import torch
-import jax.sharding as jsharding
 import numpy as np
 
 from jetstream.engine import engine_api, tokenizer_pb2, token_utils
@@ -37,7 +33,6 @@ from jetstream_pt import quantize
 from jetstream_pt.environment import JetEngineEnvironment, JetEngineEnvironmentData
 
 from torch.utils import _pytree as pytree
-import torch
 
 
 

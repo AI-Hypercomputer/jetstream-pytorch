@@ -21,7 +21,6 @@ from absl import flags
 
 from jetstream.core import server_lib
 import jetstream_pt
-from jetstream_pt import config
 from jetstream.core.config_lib import ServerConfig
 
 

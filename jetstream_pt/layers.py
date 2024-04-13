@@ -16,7 +16,7 @@
 """This version contains modification to make it easier to trace and support batch."""
 
 import math
-from typing import Any, List, Optional, Tuple
+from typing import Optional, Tuple
 
 import torch
 from torch import nn

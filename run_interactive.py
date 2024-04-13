@@ -17,22 +17,16 @@ from absl import flags
 from absl import logging
 import random
 from typing import List
-import sys
 import jax
-import jax.numpy as jnp
-import numpy as np
 
 from jetstream.engine import token_utils
-from absl.testing import absltest
-from colorama import Fore, Back, Style
+from colorama import Fore, Style
 
 
 import os
-import sys
 
 from jetstream_pt import engine as je
 import time
-import logging
 
 
 logging.getLogger().setLevel(logging.ERROR)
