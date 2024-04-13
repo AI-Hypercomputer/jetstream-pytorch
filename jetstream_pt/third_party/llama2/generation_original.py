@@ -6,8 +6,7 @@ from typing import List, Literal, Optional, Tuple, TypedDict
 
 import torch
 from jetstream_pt.third_party.llama2 import model_original
-
-from llama.tokenizer import Tokenizer
+from jetstream_pt.third_party.llama2.tokenizer import Tokenizer
 
 Role = Literal["system", "user", "assistant"]
 
