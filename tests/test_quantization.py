@@ -32,7 +32,7 @@ class QuantizationTest(unittest.TestCase):
     def test_kv_cache(self):
         cache_shape = (3, 2, 100, 2)  # bs, num heads, seqlen, dim
         with jax.default_device(jax.devices('cpu')[0]):
-            cache = cache_manager.Int8KVCacheGenerate.empty(cache_shape, None)
+            cache = cache_manager.Int8KVCacheGenerate.empty(cache_shape, None, False)
             # seqlen is 1
             k = self._xla_tensor((3, 2, 1, 2))
             v = self._xla_tensor((3, 2, 1, 2))
