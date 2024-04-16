@@ -14,6 +14,11 @@
 
 TORCHXLA_TAG=jetstream-pytorch
 
+# Uninstall existing jax
+pip3 show jax && pip3 uninstall -y jax
+pip3 show jaxlib && pip3 uninstall -y jaxlib
+pip3 show libtpu-nightly && pip3 uninstall -y libtpu-nightly
+
 pip3 install pip install jax[tpu] -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
 # torch cpu
 pip3 install torch --index-url https://download.pytorch.org/whl/cpu
