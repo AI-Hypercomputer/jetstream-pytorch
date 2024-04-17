@@ -115,9 +115,9 @@ Fix:
 # Links
 
 ## JetStream
-`[text](https://github.com/google/JetStream)`
+* https://github.com/google/JetStream
 
 ## MaxText
-`[text](https://github.com/google/maxtext)`
+* https://github.com/google/maxtext
 
 
