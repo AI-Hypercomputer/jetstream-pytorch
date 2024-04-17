@@ -100,16 +100,24 @@ Please look at `deps/JetStream/benchmarks/README.md` for more information.
 
 # Typical Errors
 
-##  Unexpected keyword argument 'device'
+## Unexpected keyword argument 'device'
 
 Fix:
 * Uninstall jax and jaxlib dependencies 
 * Reinstall using `source install_everything.sh
 
-##  Out of memory
+## Out of memory
 
 Fix:
 * Use smaller batch size
 * Use quantization
+
+# Links
+
+## JetStream
+* https://github.com/google/JetStream
+
+## MaxText
+* https://github.com/google/maxtext
 
 
