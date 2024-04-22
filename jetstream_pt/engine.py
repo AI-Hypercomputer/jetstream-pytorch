@@ -652,7 +652,19 @@ def create_pytorch_engine(
       num_params_size += np.prod(v.shape) * (1 if v.dtype == jnp.int8 else 2)
     print('Number of param Gbytes:', num_params_size / (1 << 30))
     print('Number of param: ', num_params)
+  elif model_name == "gemma":
+    args = model_args.get_model_args(param_size, context_length, batch_size, tokenizer.vocab_size, bf16_enable)
+    args.device = 'google'
+    args.quantize = quantize_weights
+    pt_model = model_exportable.Transformer(args, env)
 
+    num_params_size = 0
+    num_params = 0
+    for k, v in pt_model.state_dict().items():
+      num_params += 1
+      num_params_size += np.prod(v.shape) * (1 if v.dtype == jnp.int8 else 2)
+    print('Number of param Gbytes:', num_params_size / (1 << 30))
+    print('Number of param: ', num_params)
   return PyTorchEngine(
       pt_model=pt_model,
       env=env
