@@ -21,8 +21,8 @@ gcloud compute config-ssh
 gcloud compute tpus tpu-vm ssh "your-tpu-vm" --project "your-project" --zone "your-project-zone"
 ```
 ## Create a Cloud TPU VM in a GCP project  if you haven’t
-Follow step 1-9 in the following guide
-* https://cloud.google.com/tpu/docs/v5e-inference#prepare-a-project
+Follow the steps in
+* https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm
 
 # Clone repo and install dependencies 
 
