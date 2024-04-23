@@ -122,7 +122,7 @@ class TransformerBlock(nn.Module):
         return out
 
 def precompute_freqs_cis(
-    dim: int, end: int, theta: float = 10000.0
+    dim: int, end: int, theta: float = 500000.0
 ) -> torch.Tensor:
   freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
   t = torch.arange(end, device=freqs.device)  # type: ignore

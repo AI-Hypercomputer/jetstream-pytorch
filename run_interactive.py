@@ -9,6 +9,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from jetstream.engine import token_utils
+from jetstream_pt.third_party.llama2 import llama3_tokenizer
 from absl.testing import absltest
 from colorama import Fore, Back, Style
 
@@ -91,10 +92,11 @@ def main(argv):
   params = engine.load_params()
   print('Load params ', time.perf_counter() - start)
 
-  metadata = engine.get_tokenizer()
-  vocab = token_utils.load_vocab(
-    metadata.path, metadata.extra_ids)
-  stop_tokens = [vocab.eos_id, vocab.pad_id]
+  #metadata = engine.get_tokenizer()
+  #vocab = token_utils.load_vocab(
+  #   metadata.path, metadata.extra_ids)
+  tokenizer = llama3_tokenizer.Tokenizer(_TOKENIZER_PATH.value)
+  stop_tokens = [tokenizer.eos_id, tokenizer.pad_id]
   max_output_length = 1024
 
   if _PROFILING_OUTPUT.value:
@@ -109,8 +111,8 @@ def main(argv):
     "<s>[INST] <<SYS>>\nYou are an AI assistant. You will be given a task. You must generate a detailed and long answer.\n<</SYS>>\n\nContinue the following story.\n\nKay didn't have shoes that fit her feet properly. She only wore sneakers, because the \nChoose from: [I] shoes  fitted badly. [II] sneakers  fitted badly. [/INST]",
   ]
   for prompt in prompts:
-    slot = random.randint(0, _BATCH_SIZE.value) 
-    tokens, true_length = token_utils.tokenize_and_pad(prompt, vocab, is_bos=True)
+    slot = 0 # random.randint(0, _BATCH_SIZE.value) 
+    tokens, true_length = token_utils.tokenize_and_pad(prompt, tokenizer, is_bos=True)
     print(f"---- Input prompts are: {prompt}")
     print(f"---- Encoded tokens are: {tokens}")
 
@@ -136,7 +138,8 @@ def main(argv):
         break
 
       sampled_tokens_list.append(token_id)
-      output = token_utils.mix_decode(vocab, token_id)
+      #output = token_utils.mix_decode(tokenizer, token_id)
+      output = tokenizer.decode([token_id])
       print(Fore.GREEN + output, end="", flush=True)
 
     print(Style.RESET_ALL + "\n")

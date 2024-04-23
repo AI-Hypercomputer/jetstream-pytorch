@@ -70,6 +70,7 @@ def main(argv: Sequence[str]):
   devices = server_lib.get_devices()
   print(f"devices: {devices}")
   engine = jetstream_pt.create_pytorch_engine(
+        model_name='llama-3',
         devices=devices,
         tokenizer_path=_TOKENIZER_PATH.value,
         ckpt_path=_CKPT_PATH.value,

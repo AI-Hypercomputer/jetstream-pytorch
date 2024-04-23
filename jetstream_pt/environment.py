@@ -48,17 +48,16 @@ class JetEngineEnvironment:
         self._data = data
         # Get 13b
         self._model_arg = model_args.get_model_args(
-            data.model_type.replace('llama-2-', ''),
+            data.model_type,
             context_length=data.max_input_sequence_length,
             batch_size=data.batch_size,
-            vocab_size=32000,  # ?
             bf16_enable=True,
-            )
+        )
 
         self.batch_size = self._data.batch_size
         self.seq_len = self._data.max_input_sequence_length
         self.num_layers = self._model_arg.n_layers
-        self.num_heads = self._model_arg.n_heads
+        self.num_heads = self._model_arg.n_kv_heads or self._model_arg.n_heads
         self.head_dim = self._model_arg.dim // self._model_arg.n_heads
         self.cache_sequence_length = self._data.cache_sequence_length
 

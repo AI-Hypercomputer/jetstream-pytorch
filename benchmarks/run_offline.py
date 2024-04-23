@@ -62,6 +62,7 @@ def create_engine():
   devices = jax.devices()
   start = time.perf_counter()
   engine = je.create_pytorch_engine(
+        model_name='llama-3',
         devices=devices,
         tokenizer_path=_TOKENIZER_PATH.value,
         ckpt_path=_CKPT_PATH.value,
@@ -79,14 +80,11 @@ def create_engine():
 
 
 def run_prefill_time(engine, params, decode_state, seqlen):
-  metadata = engine.get_tokenizer()
-  vocab = token_utils.load_vocab(
-    metadata.path, metadata.extra_ids)
-  tokenizer = vocab.tokenizer
+  tokenizer = engine.get_tokenizer()
 
   text = 'This is a beautiful day'
   tokens, true_length = token_utils.tokenize_and_pad(
-    text, vocab, is_bos=True, prefill_lengths=[seqlen])
+    text, tokenizer, is_bos=True, prefill_lengths=[seqlen])
 
   for _ in range(3):
     prefill_result = engine.prefill(

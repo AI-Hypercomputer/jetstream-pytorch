@@ -60,9 +60,11 @@ class PyTorchEngine(engine_api.Engine):
       self,
       pt_model: torch.nn.Module,
       env: JetEngineEnvironment,
+      tokenizer: Any
   ):
     self.pt_model = pt_model
     self.env = env
+    self.tokenizer = tokenizer
 
     # NOTE: this is llama2 specific now.
     self.param = pt_model.params
@@ -462,9 +464,9 @@ class PyTorchEngine(engine_api.Engine):
 
     return new_decode_state, result_tokens
 
-
   def get_tokenizer(self) -> tokenizer_pb2.TokenizerParameters:
-    return tokenizer_pb2.TokenizerParameters(path=self.env.tokenizer_path)
+    #return tokenizer_pb2.TokenizerParameters(path=self.env.tokenizer_path)
+    return self.tokenizer
 
   def join_prefixes(
       self,
@@ -575,7 +577,7 @@ def create_pytorch_engine(
     context_length: int = 1024,
     batch_size: int = 1,
     max_decode_length: int = 4096,
-    model_name = "llama",
+    model_name = "llama-2",
     quantize_weights = False,
     quantize_kv = False,
     max_cache_length = 1024,
@@ -604,11 +606,14 @@ def create_pytorch_engine(
 
   env = JetEngineEnvironment(env_data)
 
-  tokenizer = token_utils.load_vocab(tokenizer_path)
+  #tokenizer = token_utils.load_vocab(tokenizer_path)
+  from jetstream_pt.third_party.llama2 import llama3_tokenizer
+  tok = llama3_tokenizer.Tokenizer(tokenizer_path)
+  tokenizer = tok.model
   pt_model = None
   shard_weights_fn = None
-  if model_name == "llama":
-    args = model_args.get_model_args(param_size, context_length, batch_size, tokenizer.vocab_size, bf16_enable)
+  if model_name in ("llama-2", "llama-3"):
+    args = model_args.get_model_args(param_size, context_length, batch_size)
     args.device = 'meta'
     args.quantize = quantize_weights
     pt_model = model_exportable.Transformer(args, env)
@@ -620,8 +625,15 @@ def create_pytorch_engine(
       num_params_size += np.prod(v.shape) * (1 if v.dtype == jnp.int8 else 2)
     print('Number of param Gbytes:', num_params_size / (1 << 30))
     print('Number of param: ', num_params)
+  
+  if model_name == 'llama-3':
+    from jetstream_pt.third_party.llama2 import llama3_tokenizer
+    tokenizer = llama3_tokenizer.Tokenizer(tokenizer_path)
+  else:
+    tokenizer = tokenizer_pb2.TokenizerParameters(path=tokenizer_path)
 
   return PyTorchEngine(
       pt_model=pt_model,
-      env=env
+      env=env,
+      tokenizer=tokenizer
   )

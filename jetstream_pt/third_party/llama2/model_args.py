@@ -44,8 +44,11 @@ def get_arg(
 ) -> ModelArgs:
   """Gets model args."""
 
+  if not param_size.startswith('llama'):
+    param_size = 'llama-2-' + param_size
+
   data = {}
-  if param_size == "tiny":
+  if param_size == "llama-2-tiny":
     data = {
         "dim": 128,
         "multiple_of": 32,
@@ -53,7 +56,7 @@ def get_arg(
         "n_layers": 3,
         "norm_eps": 1e-05,
     }
-  elif param_size == "7b":
+  elif param_size == "llama-2-7b":
     data = {
         "dim": 4096,
         "multiple_of": 256,
@@ -61,7 +64,7 @@ def get_arg(
         "n_layers": 32,
         "norm_eps": 1e-05,
     }
-  elif param_size == "13b":
+  elif param_size == "llama-2-13b":
     data = {
         "dim": 5120,
         "multiple_of": 256,
@@ -69,7 +72,7 @@ def get_arg(
         "n_layers": 40,
         "norm_eps": 1e-05,
     }
-  elif param_size == "70b":
+  elif param_size == "llama-2-70b":
     data = {
         "dim": 8192,
         "multiple_of": 4096,
@@ -79,15 +82,30 @@ def get_arg(
         "n_layers": 80,
         "norm_eps": 1e-05,
     }
-  return ModelArgs(
+  elif param_size == 'llama-3-8b':
+    data = {
+      "dim": 4096,
+      "n_layers": 32,
+      "n_heads": 32,
+      "n_kv_heads": 8,
+      "vocab_size": 128256,
+      "multiple_of": 1024,
+      "ffn_dim_multiplier": 1.3,
+      "norm_eps": 1e-05,
+      #"rope_theta": 500000.0
+    }
+  data.update(dict(
       max_seq_len=seqlen,
       max_batch_size=batch_size,
-      vocab_size=vocab_size,
+      #vocab_size=vocab_size,
       bf16_enable=bf16_enable,
+  ))
+  return ModelArgs(
       **data,
   )
 
-def get_model_args(param_size, context_length, batch_size, vocab_size, bf16_enable):
+def get_model_args(
+  param_size, context_length, batch_size, vocab_size=None, bf16_enable=True):
     model_args = get_arg(
         param_size=param_size,
         seqlen=context_length,
