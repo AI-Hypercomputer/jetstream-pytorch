@@ -6,6 +6,7 @@ from typing import List, Literal, Optional, Tuple, TypedDict
 
 import torch
 from jetstream_pt.third_party.llama2 import model_original
+from flax import struct
 from jetstream_pt.third_party.llama2.tokenizer import Tokenizer
 
 Role = Literal["system", "user", "assistant"]
@@ -35,6 +36,16 @@ B_SYS, E_SYS = "<<SYS>>\n", "\n<</SYS>>\n\n"
 
 SPECIAL_TAGS = [B_INST, E_INST, "<<SYS>>", "<</SYS>>"]
 UNSAFE_ERROR = "Error: special tags are not allowed as part of the prompt."
+
+@struct.dataclass
+class DecodeStateOriginal:
+    prev_pos: int
+    cur_pos: int
+    tokens: torch.tensor
+    out_tokens: List[List[int]]
+    logits: torch.tensor
+    input_text_mask: torch.tensor
+    prompt_tokens: List[List[int]]
 
 
 class LlamaOriginal:
@@ -67,7 +78,7 @@ class LlamaOriginal:
         self,
         prompt_tokens: List[List[int]],
         max_gen_len: int,
-    ) -> List[List[int]]:
+    ) -> DecodeStateOriginal:
         """
         Do greedy search on CPU and return tokens only. 
         """
@@ -88,7 +99,6 @@ class LlamaOriginal:
     
 
         prev_pos = 0
-        eos_reached = torch.tensor([False] * bsz, device="cpu")
         input_text_mask = tokens != pad_id
 
         cur_pos = min_prompt_len
@@ -101,9 +111,7 @@ class LlamaOriginal:
             input_text_mask[:, cur_pos], tokens[:, cur_pos], next_token
         )
         tokens[:, cur_pos] = next_token
-        eos_reached |= (~input_text_mask[:, cur_pos]) & (
-            next_token == self.tokenizer.eos_id
-        )
+
         prev_pos = cur_pos
 
         out_tokens, out_logprobs = [], []
@@ -112,13 +120,48 @@ class LlamaOriginal:
             start = len(prompt_tokens[i])
             toks = toks[start : start + 1]
             probs = None
-            # cut to eos tok if any
-            if self.tokenizer.eos_id in toks:
-                eos_idx = toks.index(self.tokenizer.eos_id)
-                toks = toks[:eos_idx]
             out_tokens.append(toks)
             out_logprobs.append(probs)
-        return out_tokens
+        state = DecodeStateOriginal(prev_pos = cur_pos, cur_pos = cur_pos + 1, tokens = tokens, out_tokens = out_tokens, 
+                                    logits = logits, input_text_mask = input_text_mask, prompt_tokens = prompt_tokens)   
+        
+        return state
+
+    @torch.inference_mode()
+    def decode(
+        self,
+        decode_state: DecodeStateOriginal,
+    ) -> DecodeStateOriginal:
+
+        prev_pos = decode_state.prev_pos
+        cur_pos = decode_state.cur_pos
+        tokens = decode_state.tokens
+        input_text_mask = decode_state.input_text_mask
+        prompt_tokens = decode_state.prompt_tokens
+
+
+        logits = self.model.forward(tokens[:, prev_pos:cur_pos], prev_pos)
+        next_token = torch.argmax(logits[:, -1], dim=-1)
+
+        next_token = next_token.reshape(-1)
+        # only replace token if prompt has already been generated
+        next_token = torch.where(
+            input_text_mask[:, cur_pos], tokens[:, cur_pos], next_token
+        )
+        tokens[:, cur_pos] = next_token
+        prev_pos = cur_pos
+
+        out_tokens, out_logprobs = [], []
+        for i, toks in enumerate(tokens.tolist()):
+            toks = toks[cur_pos : cur_pos + 1]
+            probs = None
+            out_tokens.append(toks)
+            out_logprobs.append(probs)
+
+        state = DecodeStateOriginal(prev_pos = cur_pos, cur_pos = cur_pos + 1, tokens = tokens, out_tokens = out_tokens, 
+                                    logits = logits, input_text_mask = input_text_mask, prompt_tokens = prompt_tokens)   
+        
+        return state
 
     @torch.inference_mode()
     def generate(
