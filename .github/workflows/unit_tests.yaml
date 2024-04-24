@@ -52,7 +52,7 @@ jobs:
     #     pytype --jobs auto --disable import-error --disable module-attr jetstream_pt/
     - name: Analysing the code with pylint
       run: |
-        pylint jetstream_pt/ benchmarks/
+        pylint --indent-string='  ' jetstream_pt/ benchmarks/
     - name: Format check with pyink
       run: |
         pyink --pyink-indentation 2 --line-length 80 --check --verbose .
