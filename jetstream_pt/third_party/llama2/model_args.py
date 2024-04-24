@@ -31,7 +31,7 @@ class ModelArgs:
   bf16_enable: bool = False
   head_dim = -1
   infer_length = 0
-  device = 'cpu'
+  device = "cpu"
   quantize = False
 
 
@@ -87,18 +87,21 @@ def get_arg(
       **data,
   )
 
-def get_model_args(param_size, context_length, batch_size, vocab_size, bf16_enable):
-    model_args = get_arg(
-        param_size=param_size,
-        seqlen=context_length,
-        batch_size=batch_size,
-        vocab_size=vocab_size,
-        bf16_enable=bf16_enable,
-    )
-    model_args.n_kv_heads = (
-        model_args.n_heads
-        if model_args.n_kv_heads is None
-        else model_args.n_kv_heads
-    )
-    model_args.head_dim = model_args.dim // model_args.n_heads
-    return model_args
+
+def get_model_args(
+    param_size, context_length, batch_size, vocab_size, bf16_enable
+):
+  model_args = get_arg(
+      param_size=param_size,
+      seqlen=context_length,
+      batch_size=batch_size,
+      vocab_size=vocab_size,
+      bf16_enable=bf16_enable,
+  )
+  model_args.n_kv_heads = (
+      model_args.n_heads
+      if model_args.n_kv_heads is None
+      else model_args.n_kv_heads
+  )
+  model_args.head_dim = model_args.dim // model_args.n_heads
+  return model_args

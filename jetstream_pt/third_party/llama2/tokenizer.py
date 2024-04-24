@@ -8,36 +8,39 @@ from sentencepiece import SentencePieceProcessor
 
 
 """Only use decode to do accuacy varification"""
+
+
 class Tokenizer:
-    """tokenizing and encoding/decoding text using SentencePiece."""
-    def __init__(self, model_path: str):
-        """
-        Initializes the Tokenizer with a SentencePiece model.
+  """tokenizing and encoding/decoding text using SentencePiece."""
 
-        Args:
-            model_path (str): The path to the SentencePiece model file.
-        """
-        # reload tokenizer
-        print(f"model_path: {model_path}")
-        assert os.path.isfile(model_path), model_path
-        self.sp_model = SentencePieceProcessor(model_file=model_path)
+  def __init__(self, model_path: str):
+    """
+    Initializes the Tokenizer with a SentencePiece model.
 
-        # BOS / EOS token IDs
-        self.n_words: int = self.sp_model.vocab_size()
-        self.bos_id: int = self.sp_model.bos_id()
-        self.eos_id: int = self.sp_model.eos_id()
-        self.pad_id: int = self.sp_model.pad_id()
+    Args:
+        model_path (str): The path to the SentencePiece model file.
+    """
+    # reload tokenizer
+    print(f"model_path: {model_path}")
+    assert os.path.isfile(model_path), model_path
+    self.sp_model = SentencePieceProcessor(model_file=model_path)
 
-        assert self.sp_model.vocab_size() == self.sp_model.get_piece_size()
+    # BOS / EOS token IDs
+    self.n_words: int = self.sp_model.vocab_size()
+    self.bos_id: int = self.sp_model.bos_id()
+    self.eos_id: int = self.sp_model.eos_id()
+    self.pad_id: int = self.sp_model.pad_id()
 
-    def decode(self, t: List[int]) -> str:
-        """
-        Decodes a list of token IDs into a string.
+    assert self.sp_model.vocab_size() == self.sp_model.get_piece_size()
 
-        Args:
-            t (List[int]): The list of token IDs to be decoded.
+  def decode(self, t: List[int]) -> str:
+    """
+    Decodes a list of token IDs into a string.
 
-        Returns:
-            str: The decoded string.
-        """
-        return self.sp_model.decode(t)
+    Args:
+        t (List[int]): The list of token IDs to be decoded.
+
+    Returns:
+        str: The decoded string.
+    """
+    return self.sp_model.decode(t)
