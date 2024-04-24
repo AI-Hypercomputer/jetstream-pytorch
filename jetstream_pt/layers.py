@@ -25,21 +25,20 @@ import jax
 import jax.numpy as jnp
 import torch_xla2
 
+
 class Int8Embedding(torch.nn.Module):
 
-  def __init__(self, num_embeddings, embedding_dims, device='cpu'):
+  def __init__(self, num_embeddings, embedding_dims, device="cpu"):
     super().__init__()
     table = torch.ones(
-      (num_embeddings, embedding_dims), device=device,
-      dtype=torch.int8
+        (num_embeddings, embedding_dims), device=device, dtype=torch.int8
     )
-    self.register_buffer('weight', table)
+    self.register_buffer("weight", table)
     embedding_scaler = torch.ones(
-      (embedding_dims,), device=device,
-      dtype=torch.bfloat16
+        (embedding_dims,), device=device, dtype=torch.bfloat16
     )
-    self.register_buffer('weight_scaler', embedding_scaler)
-  
+    self.register_buffer("weight_scaler", embedding_scaler)
+
   def forward(self, input):
     return F.embedding(input, self.weight) * self.weight_scaler
 
@@ -51,17 +50,19 @@ class WeightOnlyInt8Linear(torch.nn.Module):
     self.in_features = in_features
     self.out_features = out_features
 
-    weight = torch.ones((out_features, in_features), 
-      dtype=torch.int8, device=device)
-    self.register_buffer('weight', weight)
+    weight = torch.ones(
+        (out_features, in_features), dtype=torch.int8, device=device
+    )
+    self.register_buffer("weight", weight)
 
-    weight_scaler = torch.ones((out_features, ), 
-      dtype=torch.bfloat16, device=device)
-    self.register_buffer('weight_scaler', weight_scaler)
-    
+    weight_scaler = torch.ones(
+        (out_features,), dtype=torch.bfloat16, device=device
+    )
+    self.register_buffer("weight_scaler", weight_scaler)
+
     # if bias:
     #   self.bias = torch.nn.Parameter(
-    #     torch.zeros((out_features, ), 
+    #     torch.zeros((out_features, ),
     #     dtype=torch.bfloat16, device=device))
     # else:
     #   self.register_parameter('bias', None)
@@ -73,7 +74,7 @@ class WeightOnlyInt8Linear(torch.nn.Module):
 class RMSNorm(torch.nn.Module):
   """RMSNorm module."""
 
-  def __init__(self, dim: int, eps: float = 1e-6, device='meta'):
+  def __init__(self, dim: int, eps: float = 1e-6, device="meta"):
     super().__init__()
     self.eps = eps
     self.weight = nn.Parameter(torch.ones(dim, device=device))
@@ -86,16 +87,18 @@ class RMSNorm(torch.nn.Module):
     return output * self.weight
 
 
-
-
 def reshape_for_broadcast(
     freqs_cis: torch.Tensor, x: torch.Tensor
 ) -> torch.Tensor:
   ndim = x.ndim
   assert 1 < ndim
-  assert freqs_cis.shape == (x.shape[0], x.shape[-3], x.shape[-1]), f"freqs_cis: {freqs_cis.shape }, x: {x.shape}"
+  assert freqs_cis.shape == (
+      x.shape[0],
+      x.shape[-3],
+      x.shape[-1],
+  ), f"freqs_cis: {freqs_cis.shape }, x: {x.shape}"
   shape = [d if i == 1 or i == ndim - 1 else 1 for i, d in enumerate(x.shape)]
-  shape[0] = x.shape[0] # batch size
+  shape[0] = x.shape[0]  # batch size
   return freqs_cis.view(*shape)
 
 
@@ -146,7 +149,6 @@ class Attention(nn.Module):
 
     LinearLayer = WeightOnlyInt8Linear if args.quantize else nn.Linear
 
-
     self.wo = LinearLayer(
         args.n_heads * self.head_dim,
         args.dim,
@@ -184,11 +186,11 @@ class Attention(nn.Module):
       )
 
   def load_hook(self, state_dict, prefix, *args):
-      if prefix + "wq.weight" in state_dict:
-            wq = state_dict.pop(prefix + "wq.weight")
-            wk = state_dict.pop(prefix + "wk.weight")
-            wv = state_dict.pop(prefix + "wv.weight")
-            state_dict[prefix + "wqkv.weight"] = torch.cat([wq, wk, wv])
+    if prefix + "wq.weight" in state_dict:
+      wq = state_dict.pop(prefix + "wq.weight")
+      wk = state_dict.pop(prefix + "wk.weight")
+      wv = state_dict.pop(prefix + "wv.weight")
+      state_dict[prefix + "wqkv.weight"] = torch.cat([wq, wk, wv])
 
   def forward(
       self,
@@ -198,24 +200,25 @@ class Attention(nn.Module):
       cache,
   ):
     # bsz, seqlen, _ = x.shape
-    with jax.named_scope('attn_linear_before_cache'):
+    with jax.named_scope("attn_linear_before_cache"):
       bsz, seqlen = x.shape[0], x.shape[-2]
 
       # qkv fuse
       if self.env.qkv_fusion:
-          xq, xk, xv = self.wqkv(x).split([self.q_size, self.kv_size, self.kv_size], dim=-1)
+        xq, xk, xv = self.wqkv(x).split(
+            [self.q_size, self.kv_size, self.kv_size], dim=-1
+        )
       else:
-          xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
+        xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
       xq = xq.view(bsz, seqlen, self.n_local_heads, self.head_dim)
       xk = xk.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
       xv = xv.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
 
-      
       self.env.apply_sharding(xq, axis=2)
       self.env.apply_sharding(xk, axis=2)
       self.env.apply_sharding(xv, axis=2)
 
-    with jax.named_scope('attn_rope'):
+    with jax.named_scope("attn_rope"):
       xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
 
     xk = xk.transpose(1, 2)
@@ -225,66 +228,75 @@ class Attention(nn.Module):
       xq = torch.broadcast_to(xq, (xq.shape[0], 2, xq.shape[2], xq.shape[3]))
 
     if not self.env.enable_kv_quantization:
-      with jax.named_scope('attn_insert_cache'):
+      with jax.named_scope("attn_insert_cache"):
         keys, values = cache.update(xk, xv)
         self.env.apply_sharding(keys, axis=1)
         self.env.apply_sharding(values, axis=1)
         keys = repeat_kv(keys, self.n_rep)
         values = repeat_kv(values, self.n_rep)
-      with jax.named_scope('attn_mat1'):
+      with jax.named_scope("attn_mat1"):
         ## Attention start
-        #scores = torch.einsum(jnp.einsum, "ijkl,ikml->ikjm", xq, keys) / math.sqrt(self.head_dim)
-        scores = torch_xla2.extra.call_jax(jnp.einsum, "ijkl,ikml->ikjm", xq, keys) / math.sqrt(self.head_dim)
+        # scores = torch.einsum(jnp.einsum, "ijkl,ikml->ikjm", xq, keys) / math.sqrt(self.head_dim)
+        scores = torch_xla2.extra.call_jax(
+            jnp.einsum, "ijkl,ikml->ikjm", xq, keys
+        ) / math.sqrt(self.head_dim)
         self.env.apply_sharding(scores, axis=1)
         if mask is not None:
           # if mask.shape != (1,1,16,16):
           #   breakpoint()
           scores = scores + mask  # (bs, n_local_heads, seqlen, max_seqlen)
-      with jax.named_scope('attn_soft'):
+      with jax.named_scope("attn_soft"):
         scores = F.softmax(scores.float(), dim=-1).type_as(xq)
 
-      with jax.named_scope('attn_mat2'):
-        #output = torch.einsum(
+      with jax.named_scope("attn_mat2"):
+        # output = torch.einsum(
         #    "ikjm,ikml->ikjl", scores, values
-        #)  # (bs, n_local_heads, seqlen, head_dim)
-        output = torch_xla2.extra.call_jax(jnp.einsum,"ikjm,ikml->ikjl", scores, values)
+        # )  # (bs, n_local_heads, seqlen, head_dim)
+        output = torch_xla2.extra.call_jax(
+            jnp.einsum, "ikjm,ikml->ikjl", scores, values
+        )
         if seqlen == 1:
           output = output[:, :, 0:1, :]
         # For XLA matmul performance boost
-        #output = torch.matmul(scores, values)
+        # output = torch.matmul(scores, values)
         self.env.apply_sharding(output, axis=1)
         output = output.transpose(-3, -2).contiguous().view(bsz, seqlen, -1)
         self.env.apply_sharding(output, axis=2)
       return self.wo(output)
     else:
-      with jax.named_scope('attn_insert_cache'):
+      with jax.named_scope("attn_insert_cache"):
         keys, values, k_scaler, v_scaler = cache.update(xk, xv)
         self.env.apply_sharding(keys, axis=1)
         self.env.apply_sharding(values, axis=1)
         keys = repeat_kv(keys, self.n_rep)
         values = repeat_kv(values, self.n_rep)
-      with jax.named_scope('attn_mat1'):
+      with jax.named_scope("attn_mat1"):
         ## Attention start
-        #scores = torch.einsum(jnp.einsum, "ijkl,ikml->ikjm", xq, keys) / math.sqrt(self.head_dim)
-        scores = torch_xla2.extra.call_jax(jnp.einsum, "ijkl,ikml->ikjm", xq, keys) / math.sqrt(self.head_dim) * (k_scaler.reshape(bsz, 1, 1, keys.shape[2]))
+        # scores = torch.einsum(jnp.einsum, "ijkl,ikml->ikjm", xq, keys) / math.sqrt(self.head_dim)
+        scores = (
+            torch_xla2.extra.call_jax(jnp.einsum, "ijkl,ikml->ikjm", xq, keys)
+            / math.sqrt(self.head_dim)
+            * (k_scaler.reshape(bsz, 1, 1, keys.shape[2]))
+        )
         self.env.apply_sharding(scores, axis=1)
         if mask is not None:
           scores = scores + mask  # (bs, n_local_heads, seqlen, max_seqlen)
-      with jax.named_scope('attn_soft'):
+      with jax.named_scope("attn_soft"):
         scores = F.softmax(scores.float(), dim=-1).type_as(xq)
         scores = scores * v_scaler.reshape((bsz, 1, 1, keys.shape[2]))
         self.env.apply_sharding(scores, axis=1)
 
-      with jax.named_scope('attn_mat2'):
-        #output = torch.einsum(
+      with jax.named_scope("attn_mat2"):
+        # output = torch.einsum(
         #    "ikjm,ikml->ikjl", scores, values
-        #)  # (bs, n_local_heads, seqlen, head_dim)
-        output = torch_xla2.extra.call_jax(jnp.einsum,"ikjm,ikml->ikjl", scores, values)
+        # )  # (bs, n_local_heads, seqlen, head_dim)
+        output = torch_xla2.extra.call_jax(
+            jnp.einsum, "ikjm,ikml->ikjl", scores, values
+        )
         if seqlen == 1:
           output = output[:, :, 0:1, :]
-        #output = torch.matmul(scores, values)
+        # output = torch.matmul(scores, values)
         self.env.apply_sharding(output, axis=1)
         output = output.transpose(-3, -2).contiguous().view(bsz, seqlen, -1)
         self.env.apply_sharding(output, axis=2)
       return self.wo(output)
-
