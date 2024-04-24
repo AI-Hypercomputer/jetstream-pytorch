@@ -7,11 +7,10 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from . import model_args 
+from . import model_args
 import jax
 
 from jetstream_pt.layers import Attention, RMSNorm, Int8Embedding, WeightOnlyInt8Linear
-
 
 
 class FeedForward(nn.Module):
@@ -23,9 +22,9 @@ class FeedForward(nn.Module):
       hidden_dim: int,
       multiple_of: int,
       ffn_dim_multiplier: Optional[float],
-      device = 'meta',
-      quantize = False,
-      env = None,
+      device="meta",
+      quantize=False,
+      env=None,
   ):
     super().__init__()
     self.env = env
@@ -76,10 +75,7 @@ class TransformerBlock(nn.Module):
     self.dim = args.dim
     self.head_dim = args.dim // args.n_heads
 
-    self.attention = Attention(
-        args,
-        env
-    )
+    self.attention = Attention(args, env)
     self.feed_forward = FeedForward(
         dim=args.dim,
         hidden_dim=4 * args.dim,
@@ -87,10 +83,12 @@ class TransformerBlock(nn.Module):
         ffn_dim_multiplier=args.ffn_dim_multiplier,
         device=args.device,
         quantize=args.quantize,
-        env=env
+        env=env,
     )
     self.layer_id = layer_id
-    self.attention_norm = RMSNorm(args.dim, eps=args.norm_eps, device=args.device)
+    self.attention_norm = RMSNorm(
+        args.dim, eps=args.norm_eps, device=args.device
+    )
     self.ffn_norm = RMSNorm(args.dim, eps=args.norm_eps, device=args.device)
 
   def forward(
@@ -98,22 +96,20 @@ class TransformerBlock(nn.Module):
       x: torch.Tensor,
       freqs_cis: torch.Tensor,
       mask: Optional[torch.Tensor],
-      cache
+      cache,
   ):
-    with jax.named_scope('Attention'):
+    with jax.named_scope("Attention"):
       attn = self.attention.forward(
-          self.attention_norm(x),
-          freqs_cis,
-          mask,
-          cache
+          self.attention_norm(x), freqs_cis, mask, cache
       )
-    with jax.named_scope('ffn_norm'):
-        h = x + attn
-        ffns = self.ffn_norm(h)
+    with jax.named_scope("ffn_norm"):
+      h = x + attn
+      ffns = self.ffn_norm(h)
 
-    with jax.named_scope('ffn'):
-        out = h + self.feed_forward.forward(ffns)
-        return out
+    with jax.named_scope("ffn"):
+      out = h + self.feed_forward.forward(ffns)
+      return out
+
 
 def precompute_freqs_cis(
     dim: int, end: int, theta: float = 10000.0
@@ -123,6 +119,7 @@ def precompute_freqs_cis(
   freqs = torch.outer(t, freqs).float()  # type: ignore
   freqs_cis = torch.polar(torch.ones_like(freqs), freqs)  # complex64
   return freqs_cis
+
 
 class Transformer(nn.Module):
   """Transformer module."""
@@ -147,15 +144,9 @@ class Transformer(nn.Module):
 
     self.layers = torch.nn.ModuleList()
     for layer_id in range(params.n_layers):
-      self.layers.append(
-          TransformerBlock(
-              layer_id,
-              params,
-              env
-          )
-      )
+      self.layers.append(TransformerBlock(layer_id, params, env))
     self.norm = RMSNorm(params.dim, eps=params.norm_eps, device=params.device)
-    
+
     LinearLayer = WeightOnlyInt8Linear if params.quantize else nn.Linear
 
     self.output = LinearLayer(
@@ -171,7 +162,6 @@ class Transformer(nn.Module):
 
     self.register_buffer("freqs_cis", freqs_cis)
 
-
   @torch.no_grad()
   def forward(
       self,
@@ -180,25 +170,20 @@ class Transformer(nn.Module):
       caches: List[Any],
       mask,
   ):
-    with jax.named_scope('transformer_tok'):
-        seqlen = tokens.shape[-1]
-        h = self.tok_embeddings(tokens)
+    with jax.named_scope("transformer_tok"):
+      seqlen = tokens.shape[-1]
+      h = self.tok_embeddings(tokens)
 
-    with jax.named_scope('transformer_freq'):
-        bsz, seqlen = tokens.shape
-        freqs_cis = self.freqs_cis[input_pos]
-        freqs_cis = freqs_cis.reshape(bsz, seqlen, -1)
+    with jax.named_scope("transformer_freq"):
+      bsz, seqlen = tokens.shape
+      freqs_cis = self.freqs_cis[input_pos]
+      freqs_cis = freqs_cis.reshape(bsz, seqlen, -1)
 
     for layer, cache in zip(self.layers, caches):
-      with jax.named_scope('TransformerBlock'):
-        h = layer(
-            h,
-            freqs_cis,
-            mask,
-            cache
-        )
+      with jax.named_scope("TransformerBlock"):
+        h = layer(h, freqs_cis, mask, cache)
 
-    with jax.named_scope('transformer_norm'):
-        h = self.norm(h)
-        output = self.output(h).float()
+    with jax.named_scope("transformer_norm"):
+      h = self.norm(h)
+      output = self.output(h).float()
     return output
