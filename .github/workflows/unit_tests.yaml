@@ -53,9 +53,9 @@ jobs:
     # - name: Analysing the code with pylint
     #   run: |
     #     pylint jetstream_pt/ benchmarks/
-    # - name: Format check with pyink
-    #   run: |
-    #     pyink --pyink-indentation 2 --line-length 80 --check --verbose .
+    - name: Format check with pyink
+      run: |
+        pyink --pyink-indentation 2 --line-length 80 --check --verbose .
 
   cpu:
     name: "jetstream_pt unit tests"
