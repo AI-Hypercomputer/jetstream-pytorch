@@ -23,30 +23,30 @@ import jax.numpy as jnp
 
 class QuantizationTest(unittest.TestCase):
 
-    def _xla_tensor(self, shape):
-        res = torch.randn(shape, dtype=torch.bfloat16)
-        return torch_xla2.tensor.move_to_device(res)
+  def _xla_tensor(self, shape):
+    res = torch.randn(shape, dtype=torch.bfloat16)
+    return torch_xla2.tensor.move_to_device(res)
+
+  def test_kv_cache(self):
+    cache_shape = (3, 2, 100, 2)  # bs, num heads, seqlen, dim
+    with jax.default_device(jax.devices("cpu")[0]):
+      cache = cache_manager.Int8KVCacheGenerate.empty(cache_shape, None, False)
+      # seqlen is 1
+      k = self._xla_tensor((3, 2, 1, 2))
+      v = self._xla_tensor((3, 2, 1, 2))
+
+      cache.input_pos = [57]
+      new_k, new_v, scaler_k, scaler_v = cache.update(k, v)
+      new_k = new_k * scaler_k
+      new_v = new_v * scaler_v
+
+      self.assertTrue(
+          jnp.allclose(k._elem, new_k._elem[:, :, 57:58, :], atol=0.1)
+      )
+      self.assertTrue(
+          jnp.allclose(v._elem, new_v._elem[:, :, 57:58, :], atol=0.1)
+      )
 
 
-
-    def test_kv_cache(self):
-        cache_shape = (3, 2, 100, 2)  # bs, num heads, seqlen, dim
-        with jax.default_device(jax.devices('cpu')[0]):
-            cache = cache_manager.Int8KVCacheGenerate.empty(cache_shape, None, False)
-            # seqlen is 1
-            k = self._xla_tensor((3, 2, 1, 2))
-            v = self._xla_tensor((3, 2, 1, 2))
-
-            cache.input_pos = [57]
-            new_k, new_v, scaler_k, scaler_v = cache.update(k, v)
-            new_k = new_k * scaler_k
-            new_v = new_v * scaler_v
-
-            self.assertTrue(jnp.allclose(k._elem, new_k._elem[:, :, 57:58, :], atol=0.1))
-            self.assertTrue(jnp.allclose(v._elem, new_v._elem[:, :, 57:58, :], atol=0.1))
-
-
-
-            
-if __name__ == '__main__':
-    unittest.main()
+if __name__ == "__main__":
+  unittest.main()
