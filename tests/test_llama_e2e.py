@@ -12,25 +12,29 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import torch
+
+import unittest
 import os
-from torch.utils import _pytree as pytree
-import torch_xla2
+
+import numpy as np
 import jax
 import jax.numpy as jnp
-import numpy as np
+import torch
+import torch_xla2
+from torch.utils import _pytree as pytree
+
+
 from jetstream_pt.engine import PyTorchEngine
 from jetstream_pt.third_party.llama2 import model_exportable
 from jetstream_pt.third_party.llama2.generation_original import LlamaOriginal
 from jetstream_pt import environment
 
 
-import unittest
-
-
 class LlamaE2ETest(unittest.TestCase):
+  """This test class includes all E2E test for llama2"""
 
   def setup(self):
+    """setup torch env"""
     torch.set_default_dtype(torch.bfloat16)
 
   def _to_jax(self, tree):
@@ -53,11 +57,12 @@ class LlamaE2ETest(unittest.TestCase):
     return env
 
   def test_original_llama2_seed(self):
+    """test original llama2 output with different seed"""
     jax.config.update("jax_platform_name", "cpu")
-    x = jnp.square(2)
     print(f"---------> {jax.devices()}")
     torch.set_default_dtype(torch.bfloat16)
     env = self._make_env()
+    # pylint: disable-next=all
     model_arg = env._model_arg
     tokens = np.arange(10, dtype=np.int32)
     file_dir = os.path.dirname(__file__)
@@ -78,13 +83,16 @@ class LlamaE2ETest(unittest.TestCase):
             output_tokens_multiple[index], output_tokens_multiple[index - 1]
         )
 
+  # pylint: disable-next=all
   def test_jetstream_llama2_seed(self):
+    """test llama2 output with different seed on jetstream inference engine"""
     jax.config.update("jax_platform_name", "cpu")
-    x = jnp.square(2)
     print(f"---------> {jax.devices()}")
 
     torch.set_default_dtype(torch.bfloat16)
+    # pylint: disable-next=all
     env = self._make_env()
+    # pylint: disable-next=all
     model_arg = env._model_arg
     tokens = np.arange(10, dtype=np.int32)
     true_length = tokens.shape[-1]
@@ -110,20 +118,23 @@ class LlamaE2ETest(unittest.TestCase):
 
     output_tokens_multiple = []
     for i in [1, 2, 3]:
-      torch.manual_seed(1)
+      torch.manual_seed(i)
       model_ours = model_exportable.Transformer(model_arg, env)
       engine = PyTorchEngine(pt_model=model_ours, env=env)
 
       decode_state = engine.init_decode_state()
       slot = 0
+      # pylint: disable-next=all
       prefill_result = engine.prefill(
           params=params, padded_tokens=padded_tokens, true_length=true_length
       )
 
+      # pylint: disable-next=all
       decode_state = engine.insert(prefill_result, decode_state, slot=slot)
 
       out_tokens = []
       while True:
+        # pylint: disable-next=all
         decode_state, result_tokens = engine.generate(params, decode_state)
         slot_data = result_tokens.get_result_at_slot(slot)
         slot_tokens = slot_data.tokens
@@ -143,7 +154,9 @@ class LlamaE2ETest(unittest.TestCase):
             output_tokens_multiple[index], output_tokens_multiple[index - 1]
         )
 
+  # pylint: disable-next=all
   def _llama_e2e(self, env):
+    # pylint: disable-next=all
     model_arg = env._model_arg
     tokens = np.arange(10, dtype=np.int32)
     true_length = tokens.shape[-1]
@@ -178,15 +191,17 @@ class LlamaE2ETest(unittest.TestCase):
     params = self._to_jax(state_dict)
     decode_state = engine.init_decode_state()
     slot = 0
-
+    # pylint: disable-next=all
     prefill_result = engine.prefill(
         params=params, padded_tokens=padded_tokens, true_length=true_length
     )
 
+    # pylint: disable-next=all
     decode_state = engine.insert(prefill_result, decode_state, slot=slot)
 
     out_tokens = []
     while True:
+      # pylint: disable-next=all
       decode_state, result_tokens = engine.generate(params, decode_state)
       slot_data = result_tokens.get_result_at_slot(slot)
       slot_tokens = slot_data.tokens
@@ -199,6 +214,7 @@ class LlamaE2ETest(unittest.TestCase):
     return out_tokens, expected_output_tokens[0]
 
   def test_llama_e2e_float32(self):
+    """end to end jetstream llama test with float32"""
     jax.config.update("jax_platform_name", "cpu")
     print(f"---------> {jax.devices()}")
 
@@ -207,6 +223,7 @@ class LlamaE2ETest(unittest.TestCase):
     self.assertEqual(out_tokens, expected_output_tokens)
 
   def test_llama_e2e_bfloat16(self):
+    "end to end jetstream llama test with bfloat16"
     jax.config.update("jax_platform_name", "cpu")
     jax.config.update("jax_default_matmul_precision", jax.lax.Precision.HIGHEST)
     print(f"---------> {jax.devices()}")
@@ -215,13 +232,16 @@ class LlamaE2ETest(unittest.TestCase):
     out_tokens, expected_output_tokens = self._llama_e2e(env)
     self.assertNotEqual(out_tokens, expected_output_tokens)
 
+  # pylint: disable-next=all
   def test_llama_e2e_two_addtional_tokens(self):
+    """end to end jetstream llama with addtional tokens"""
     jax.config.update("jax_platform_name", "cpu")
-    x = jnp.square(2)
     print(f"---------> {jax.devices()}")
 
     torch.set_default_dtype(torch.bfloat16)
+    # pylint: disable-next=all
     env = self._make_env()
+    # pylint: disable-next=all
     model_arg = env._model_arg
     tokens = np.arange(10, dtype=np.int32)
     tokens = np.append(tokens, [15050, 3503], axis=-1)
@@ -258,14 +278,17 @@ class LlamaE2ETest(unittest.TestCase):
     decode_state = engine.init_decode_state()
     slot = 0
 
+    # pylint: disable-next=all
     prefill_result = engine.prefill(
         params=params, padded_tokens=padded_tokens, true_length=true_length
     )
 
+    # pylint: disable-next=all
     decode_state = engine.insert(prefill_result, decode_state, slot=slot)
 
     out_tokens = []
     while True:
+      # pylint: disable-next=all
       decode_state, result_tokens = engine.generate(params, decode_state)
       slot_data = result_tokens.get_result_at_slot(slot)
       slot_tokens = slot_data.tokens
@@ -281,13 +304,18 @@ class LlamaE2ETest(unittest.TestCase):
     )
     # self.assertEqual(out_tokens ,expected_output_tokens)
 
+    # pylint: disable-next=all
+
+  # pylint: disable-next=all
   def test_llama_e2e_four_addtional_tokens(self):
+    """Add four addtional token to end to end jetstream llama test"""
     jax.config.update("jax_platform_name", "cpu")
-    x = jnp.square(2)
     print(f"---------> {jax.devices()}")
 
     torch.set_default_dtype(torch.bfloat16)
+    # pylint: disable-next=all
     env = self._make_env()
+    # pylint: disable-next=all
     model_arg = env._model_arg
     tokens = np.arange(10, dtype=np.int32)
     tokens = np.append(tokens, [15050, 3503, 11833, 28551], axis=-1)
@@ -324,14 +352,17 @@ class LlamaE2ETest(unittest.TestCase):
     decode_state = engine.init_decode_state()
     slot = 0
 
+    # pylint: disable-next=all
     prefill_result = engine.prefill(
         params=params, padded_tokens=padded_tokens, true_length=true_length
     )
 
+    # pylint: disable-next=all
     decode_state = engine.insert(prefill_result, decode_state, slot=slot)
 
     out_tokens = []
     while True:
+      # pylint: disable-next=all
       decode_state, result_tokens = engine.generate(params, decode_state)
       slot_data = result_tokens.get_result_at_slot(slot)
       slot_tokens = slot_data.tokens
@@ -347,12 +378,15 @@ class LlamaE2ETest(unittest.TestCase):
     )
     # self.assertEqual(out_tokens ,expected_output_tokens)
 
+  # pylint: disable-next=all
   def test_llama_with_original_prefill_decode_32(self):
+    """test jetstream llama by comparing original prefill and decode steps"""
     jax.config.update("jax_platform_name", "cpu")
     print(f"---------> {jax.devices()}")
 
     torch.set_default_dtype(torch.float32)
     env = self._make_env(bf16_enable=False)
+    # pylint: disable-next=all
     model_arg = env._model_arg
     tokens = np.arange(10, dtype=np.int32)
     true_length = tokens.shape[-1]
@@ -377,7 +411,6 @@ class LlamaE2ETest(unittest.TestCase):
     engine = PyTorchEngine(pt_model=model_ours, env=env)
     params = self._to_jax(state_dict)
     slot = 0
-    expected_output_tokens = []
     out_tokens = []
 
     prompt_tokens = [tokens]
@@ -385,28 +418,34 @@ class LlamaE2ETest(unittest.TestCase):
         prompt_tokens, max_output_length
     )
 
+    # pylint: disable-next=all
     decode_state = engine.init_decode_state()
+    # pylint: disable-next=all
     prefill_result = engine.prefill(
         params=params, padded_tokens=padded_tokens, true_length=true_length
     )
     out_tokens = prefill_result.token
-    self.assertEquals(out_tokens, decode_state_original.out_tokens[0][0])
-    print(f"-------------------->: prefill step: --->")
+    self.assertEqual(out_tokens, decode_state_original.out_tokens[0][0])
+    print("-------------------->: prefill step: --->")
     print(
         f"-------------------->orginal out_tokens: {decode_state_original.out_tokens}"
     )
     print(f"-------------------->out_tokens: {out_tokens}")
 
-    # self._diff_value(prefill_result.logits[0:10, :], torch.squeeze(decode_state_original.logits), "prefill logits")
+    # self._diff_value(prefill_result.logits[0:10, :],
+    # torch.squeeze(decode_state_original.logits), "prefill logits")
+    # pylint: disable-next=all
     decode_state = engine.insert(prefill_result, decode_state, slot=slot)
 
     for i in range(0, max_output_length - 1):
+      # pylint: disable-next=all
       decode_state_original = llama_original.decode(decode_state_original)
-      decode_state, result_tokens = engine.generate(params, decode_state)
+      # pylint: disable-next=all
+      decode_state, _ = engine.generate(params, decode_state)
 
       # self._diff_value(decode_state.logits, decode_state_original.logits, "prefill logits")
 
-      self.assertEquals(
+      self.assertEqual(
           np.asanyarray(decode_state.tokens),
           np.array(decode_state_original.out_tokens),
       )
@@ -416,12 +455,15 @@ class LlamaE2ETest(unittest.TestCase):
       )
       print(f"-------------------->out_tokens: {decode_state.tokens}")
 
+  # pylint: disable-next=all
   def test_llama_with_original_prefill_decode(self):
+    """test jetstream llama by comparing original prefill and decode steps with float32"""
     jax.config.update("jax_platform_name", "cpu")
     print(f"---------> {jax.devices()}")
 
     torch.set_default_dtype(torch.float32)
     env = self._make_env()
+    # pylint: disable-next=all
     model_arg = env._model_arg
     tokens = np.arange(10, dtype=np.int32)
     true_length = tokens.shape[-1]
@@ -446,7 +488,6 @@ class LlamaE2ETest(unittest.TestCase):
     engine = PyTorchEngine(pt_model=model_ours, env=env)
     params = self._to_jax(state_dict)
     slot = 0
-    expected_output_tokens = []
     out_tokens = []
 
     prompt_tokens = [tokens]
@@ -454,22 +495,28 @@ class LlamaE2ETest(unittest.TestCase):
         prompt_tokens, max_output_length
     )
 
+    # pylint: disable-next=all
     decode_state = engine.init_decode_state()
+    # pylint: disable-next=all
     prefill_result = engine.prefill(
         params=params, padded_tokens=padded_tokens, true_length=true_length
     )
     out_tokens = prefill_result.token
-    print(f"-------------------->: prefill step: --->")
+    print("-------------------->: prefill step: --->")
     print(
         f"-------------------->orginal out_tokens: {decode_state_original.out_tokens}"
     )
     print(f"-------------------->out_tokens: {out_tokens}")
 
-    # self._diff_value(prefill_result.logits[0:10, :], torch.squeeze(decode_state_original.logits), "prefill logits")
+    # self._diff_value(prefill_result.logits[0:10, :],
+    # torch.squeeze(decode_state_original.logits), "prefill logits")
+    # pylint: disable-next=all
     decode_state = engine.insert(prefill_result, decode_state, slot=slot)
 
     for i in range(0, max_output_length - 1):
+      # pylint: disable-next=all
       decode_state_original = llama_original.decode(decode_state_original)
+      # pylint: disable-next=all
       decode_state, result_tokens = engine.generate(params, decode_state)
 
       # self._diff_value(decode_state.logits, decode_state_original.logits, "prefill logits")
