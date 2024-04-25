@@ -1,14 +1,15 @@
+import unittest
 import torch
 import torch_xla2
 import jax
 import jax.numpy as jnp
 
-import unittest
-
 
 class JaxTorchTest(unittest.TestCase):
+  """Unit test compare Jax and Torch gap with float precision"""
 
   def test_matmul_bfloat16_xla2(self):
+    """test jax vs torch matmul diff with bfloat16 on cpu"""
     jax.config.update("jax_platform_name", "cpu")
     torch.set_default_dtype(torch.bfloat16)
     r = c = 1000
@@ -28,6 +29,7 @@ class JaxTorchTest(unittest.TestCase):
     self.assertTrue(torch.allclose(target_result, result, atol=1))
 
   def test_matmul_bfloat32(self):
+    """test jax vs torch matmul diff with bfloat32 on cpu"""
     jax.config.update("jax_platform_name", "cpu")
     torch.set_default_dtype(torch.float32)
     r = c = 1000
