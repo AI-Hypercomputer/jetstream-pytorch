@@ -12,22 +12,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import jax
 import unittest
-from jetstream_pt import cache_manager
-from jetstream_pt import quantize
+import jax
+import jax.numpy as jnp
 import torch
 import torch_xla2
-import jax.numpy as jnp
+
+from jetstream_pt import cache_manager
+
 
 
 class QuantizationTest(unittest.TestCase):
+  """test kv cache quantization"""
 
   def _xla_tensor(self, shape):
     res = torch.randn(shape, dtype=torch.bfloat16)
     return torch_xla2.tensor.move_to_device(res)
 
   def test_kv_cache(self):
+    """test kv cache quantization"""
     cache_shape = (3, 2, 100, 2)  # bs, num heads, seqlen, dim
     with jax.default_device(jax.devices("cpu")[0]):
       cache = cache_manager.Int8KVCacheGenerate.empty(cache_shape, None, False)
