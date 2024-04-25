@@ -16,6 +16,7 @@ from jetstream.core.config_lib import ServerConfig
 from jetstream_pt.engine import create_pytorch_engine
 
 
+# pylint: disable-next=all
 def create_config(
     devices,
     tokenizer_path,
@@ -26,7 +27,9 @@ def create_config(
     batch_size,
     platform,
 ):
-  def func(a):
+  """Create a server config"""
+
+  def func():
     return create_pytorch_engine(
         devices=devices,
         tokenizer_path=tokenizer_path,
