@@ -12,24 +12,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from jetstream_pt.third_party.llama2 import model_exportable
-from jetstream_pt.third_party.llama2 import model_original
-from jetstream_pt import layers
-from jetstream_pt.third_party.llama2 import model_args
-from jetstream_pt import environment
-from jetstream_pt import cache_manager
+import unittest
+import jax
+import jax.numpy as jnp
 import torch
 from torch.utils import _pytree as pytree
 import torch_xla2
-import jax
-import jax.numpy as jnp
 
-import unittest
+from jetstream_pt.third_party.llama2 import model_exportable
+from jetstream_pt.third_party.llama2 import model_original
+from jetstream_pt import layers
+from jetstream_pt import environment
+from jetstream_pt import cache_manager
 
 
 class ModelComponentTest(unittest.TestCase):
+  """Test diff between original model and xla model for transformer,
+  transformer block, attention and other component in model"""
 
   def setup(self):
+    """setup torch env"""
     torch.set_default_dtype(torch.bfloat16)
 
   def _prefill_mask(self, seqlen, start_pos):
@@ -46,8 +48,10 @@ class ModelComponentTest(unittest.TestCase):
 
   def _make_freqs_cis(self, model_arg, seqlen, start_pos):
     freqs_cis = model_original.precompute_freqs_cis(
-        # Note that self.params.max_seq_len is multiplied by 2 because the token limit for the Llama 2 generation of models is 4096.
-        # Adding this multiplier instead of using 4096 directly allows for dynamism of token lengths while training or fine-tuning.
+        # Note that self.params.max_seq_len is multiplied by 2
+        # because the token limit for the Llama 2 generation of models is 4096.
+        # Adding this multiplier instead of using 4096 directly
+        # allows for dynamism of token lengths while training or fine-tuning.
         model_arg.dim // model_arg.n_heads,
         model_arg.max_seq_len * 2,
     )
@@ -86,7 +90,7 @@ class ModelComponentTest(unittest.TestCase):
     return torch_xla2.tensor.wrap(res)
 
   def _compare_cache(self, cache_torch, cache_jax):
-    batch, seq, _, _ = cache_torch.shape
+    _, seq, _, _ = cache_torch.shape
     cache_j = torch_xla2.tensor.j2t(cache_jax._elem)
     for s in range(seq):
       print("diff ", (cache_torch[0, s] - cache_j[0, :, s]).norm())
@@ -106,6 +110,7 @@ class ModelComponentTest(unittest.TestCase):
     )
     return cache_decode
 
+  # pylint: disable-next=all
   def test_attention(self):
     env = self._make_env()
     model_arg = env._model_arg
@@ -148,6 +153,7 @@ class ModelComponentTest(unittest.TestCase):
     cache_decode.cache_k._elem = cache_decode.cache_k._elem.at[
         :, :, :pos, :
     ].set(cache.cache_k._elem)
+
     cache_decode.cache_v._elem = cache_decode.cache_v._elem.at[
         :, :, :pos, :
     ].set(cache.cache_v._elem)
@@ -178,8 +184,10 @@ class ModelComponentTest(unittest.TestCase):
     )
     self.assertTrue(torch.allclose(result_torch, expected_out, atol=1e-4))
 
+  # pylint: disable-next=all
   def test_transformer_block(self):
     env = self._make_env()
+    # pylint: disable-next=all
     model_arg = env._model_arg
 
     block_orig = model_original.TransformerBlock(0, model_arg)
@@ -249,8 +257,11 @@ class ModelComponentTest(unittest.TestCase):
     )
     self.assertTrue(torch.allclose(result_torch, expected_out, atol=1e-4))
 
+  # pylint: disable-next=all
   def test_transformer(self):
+    """test transformer diff between original model vs xla_model"""
     env = self._make_env()
+    # pylint: disable-next=all
     model_arg = env._model_arg
 
     model_orig = model_original.Transformer(model_arg)
@@ -278,42 +289,6 @@ class ModelComponentTest(unittest.TestCase):
     result_torch = self._call_xla_model(model_ours, state_dict, input_ours)
 
     print("Transformer: Diff norm", (result_torch - expected_out).norm())
-    self.assertTrue(torch.allclose(result_torch, expected_out, atol=1e-4))
-    return
-    pos = 32  #
-    caches_decode = env.make_caches_generate()
-
-    for cache_decode, cache in zip(caches_decode, caches):
-      # insert prefilled cache entry
-      cache_decode.cache_k._elem = cache_decode.cache_k._elem.at[
-          :, :, :pos, :
-      ].set(cache.cache_k._elem)
-      cache_decode.cache_v._elem = cache_decode.cache_v._elem.at[
-          :, :, :pos, :
-      ].set(cache.cache_v._elem)
-
-    # Now do one with decode
-    x2 = torch.randn((1, 1, model_arg.dim))
-    freqs_cis = self._make_freqs_cis(model_arg, 1, 32)
-    inputs_orig2 = (
-        x2,
-        pos,
-        freqs_cis,
-        None,  # mask is none for decode
-    )
-    expected_out = block_orig(*inputs_orig2)
-    cache_decode.pos = [pos]  # next position to update
-    mask = self._generate_mask(env.cache_sequence_length, pos, seqlen)
-    mask = mask.reshape(1, 1, 1, -1)  # seq dim is the last one
-    input_ours2 = (x2, freqs_cis, mask, cache_decode)
-    result_torch = self._call_xla_model(
-        block_ours, block_orig.state_dict(), input_ours2
-    )
-
-    print(
-        "Single Attention: decode diff norm",
-        (result_torch - expected_out).norm(),
-    )
     self.assertTrue(torch.allclose(result_torch, expected_out, atol=1e-4))
 
 
