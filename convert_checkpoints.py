@@ -22,19 +22,23 @@ python convert_checkpoint.py \
     --output_checkpoint_dir=${output_ckpt_dir}
 """
 
-from jetstream_pt import quantize
-from collections.abc import Sequence
 import gc
 import hashlib
 import json
 import os
+import time
 
+from collections.abc import Sequence
 from absl import app
 from absl import flags
 from etils import epath
+
+from safetensors.torch import save_file
 import torch
 from google.cloud import storage
-import time
+
+from jetstream_pt import quantize
+
 
 _INPUT_CHECKPOINT_DIR = epath.DEFINE_path(
     "input_checkpoint_dir",
@@ -216,6 +220,7 @@ def _tensors_have_same_shape(tensors):
   return True
 
 
+# pylint: disable-next=all
 def _merge_weights(checkpoints, minimize_memory_footprint, enable_float32):
   print("Starting to merge weights.")
   state_dict = {}
@@ -288,10 +293,10 @@ def _merge_weights(checkpoints, minimize_memory_footprint, enable_float32):
 def _load_from_gcs(input_ckpt_dir: epath.Path):
   checkpoints = []
   input_ckpt_dir_str = str(input_ckpt_dir)
+  # pylint: disable-next=all
   bucket_name, blob_name = input_ckpt_dir_str.split("//")[-1].split("/", 1)
   print(f"Bucket {bucket_name}, blob {blob_name}")
   storage_client = storage.Client()
-  bucket = storage_client.bucket(bucket_name)
   input_blobs = storage_client.list_blobs(bucket_name, prefix=blob_name)
   for blob in input_blobs:
     if "params.json" in blob.name:
@@ -325,7 +330,7 @@ def _load_from_local(input_ckpt_dir: epath.Path):
 
 
 def _export_to_gcs(output_ckpt_dir: epath.Path, params, state_dict):
-  output_ckpt_dir_str = str(output_ckpt_dir)
+  # pylint: disable-next=all
   bucket_name, output_ckpt = str(output_ckpt_dir).split("//")[-1].split("/", 1)
   print(f"Export to bucket {bucket_name}, blob {output_ckpt}")
   storage_client = storage.Client()
@@ -349,8 +354,6 @@ def _export_to_local(output_ckpt_dir: epath.Path, params, state_dict):
   output_ckpt_dir.mkdir(parents=True, exist_ok=True)
   (output_ckpt_dir / "params.json").write_text(json.dumps(params))
   if _OUTPUT_SAFETENSORS.value:
-    from safetensors.torch import save_file
-
     save_file(state_dict, os.fspath(output_ckpt_dir / "model.safetensors"))
   else:
     torch.save(state_dict, os.fspath(output_ckpt_dir / "consolidated.00.pth"))
@@ -364,10 +367,12 @@ def merge_weights(
     minimize_memory_footprint: bool = True,
     enable_float32: bool = False,
 ) -> None:
+  """merge weights"""
   start = time.perf_counter()
   if "gs://" in str(input_ckpt_dir):
     print(
-        "WARNING: Loading data from gcs bucket takes a lont time. Suggest to download the data to local first!"
+        """WARNING: Loading data from gcs bucket takes a lont time. 
+        Suggest to download the data to local first!"""
     )
     checkpoints, params = _load_from_gcs(input_ckpt_dir)
   else:
@@ -399,6 +404,7 @@ def merge_weights(
 
 
 def main(argv: Sequence[str]) -> None:
+  """convert checkpoint main function"""
   if len(argv) > 1:
     raise app.UsageError("Too many command-line arguments.")
   merge_weights(
