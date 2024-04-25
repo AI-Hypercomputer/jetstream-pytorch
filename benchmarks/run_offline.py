@@ -23,6 +23,7 @@ import jax.numpy as jnp
 
 from jetstream.engine import token_utils
 from jetstream_pt import engine as je
+# pylint: disable-next=all
 from benchmarks import analyze_sharegpt
 
 
