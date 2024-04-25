@@ -21,7 +21,6 @@ import torch_xla2
 from jetstream_pt import cache_manager
 
 
-
 class QuantizationTest(unittest.TestCase):
   """test kv cache quantization"""
 

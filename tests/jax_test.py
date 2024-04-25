@@ -12,19 +12,28 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import time
-import jax
-import jax.numpy as jnp
 import functools
+import time
+
+import jax
+from jax.experimental import mesh_utils
+import jax.numpy as jnp
+from jax.sharding import PositionalSharding
+import torch
+import torch_xla2
+import torch_xla2.extra
 
 
 def test1():
+  """test jit cache size"""
+
   @functools.partial(jax.jit, static_argnums=(2,))
+  # pylint: disable-next=all
   def f(x, i, issum):
     if issum:
       return x + i
-    else:
-      return x - i
+
+    return x - i
 
   x = jnp.ones((10,))
   print(f(x, 0, True))
@@ -32,30 +41,30 @@ def test1():
   print(f(x, 1, False))
   print("cache", f._cache_size())
 
+  # pylint: disable-next=all
   class A:
 
     def __init__(self, a):
       self.a = a
 
     def incr(self):
+      """increase by 1"""
       self.a += 1
 
   @jax.jit
-  def f(x):
+  def f2(x):
     a = A(x)
     a.incr()
     return a.a
 
-  print(f(x))
-  print(f(x))
-  print(f(x))
+  print(f2(x))
+  print(f2(x))
+  print(f2(x))
 
 
-from jax.sharding import PositionalSharding
-from jax.experimental import mesh_utils
-
-
+# pylint: disable-next=all
 def test2():
+  """test insert cache"""
   batch, seq, heads, dim = 96, 2048, 40, 128
   sharding = PositionalSharding(mesh_utils.create_device_mesh((8,)))
   sharding = sharding.reshape((1, 8, 1, 1))
@@ -86,6 +95,7 @@ def test2():
         jnp.where(iota == pos.reshape(1, 1, seqlen, 1), caches_v, val),
     )
 
+  # pylint: disable-next=all
   def insert_cache3(caches_k, caches_v, pos, key, val):
     return (
         jax.lax.dynamic_update_slice(caches_k, key, (0, 0, pos, 0)),
@@ -101,6 +111,7 @@ def test2():
       jax.random.normal(subkey, (batch, heads, 1, dim), dtype=jnp.bfloat16),
       device=val_sharding,
   ).block_until_ready()
+  # pylint: disable-next=all
   j = jnp.int32(7).block_until_ready()
 
   print("====1====")
@@ -121,7 +132,7 @@ def test2():
   rng = jax.random.PRNGKey(0)
 
   for func in (insert_cache, insert_cache2, insert_cache3):
-    for i in range(10):
+    for _ in range(10):
       all_times = 0
       for j in range(40):
         rng, subkey = jax.random.split(rng)
@@ -137,8 +148,10 @@ def test2():
             ),
             device=val_sharding,
         ).block_until_ready()
+        # pylint: disable-next=all
         j = jnp.int32(j).block_until_ready()
         start = time.perf_counter()
+        # pylint: disable-next=all
         caches_k, caches_v = func(caches_k, caches_v, j, key, val)
         caches_k.block_until_ready()
         caches_v.block_until_ready()
@@ -148,13 +161,12 @@ def test2():
 
 
 def test3():
-  import torch
-  import torch_xla2
-  import torch_xla2.extra
+  """test einsum"""
 
   x = jnp.ones((10, 10, 10))
   y = jnp.ones((10, 10, 10))
 
+  # pylint: disable-next=all
   def f(x, y):
     return torch.einsum("ijm, ijn -> imn", [x, y])
 
@@ -162,53 +174,59 @@ def test3():
     return jnp.einsum("ijm, ijn -> imn", x, y)
 
   print("====== 1 ======")
+  # pylint: disable-next=all
   with torch_xla2.tensor.XLAFunctionMode():
     print(jax.jit(torch_xla2.extra.jax_view(f)).lower(x, y).as_text())
   print("====== 2 ======")
   print(jax.jit(g).lower(x, y).as_text())
 
 
-from flax import struct
-
-
+# pylint: disable-next=all
 class A:
+  """Define class to do plus"""
 
   def __init__(self, a):
     self.a = a
 
   def plus(self):
+    """plus"""
     self.a = self.a + 1
 
 
+# pylint: disable-next=all
 def flatten_A(x):
+  """flatten"""
   return (x.a,), None
 
 
+# pylint: disable-next=all
 def unflatten_A(aux_data, flat_content):
-  import pdb
+  """unflatten"""
 
-  pdb.set_trace()
+  # pdb.set_trace()
   return A(*flat_content)
 
 
 jax.tree_util.register_pytree_node(A, flatten_A, unflatten_A)
 
-import functools
-
 
 @functools.partial(jax.jit, donate_argnums=(0,))
 def f(a):
+  """plus"""
   a.plus()
   return a
 
 
 def test4():
+  """test plus"""
   a = A(a=jnp.zeros((2,)))
   b = f(a)
   print(b.a)
 
 
+# pylint: disable-next=all
 def test5():
+  """insert cache test"""
   batch, seq, heads, dim = 96, 2048, 40, 128
   sharding = PositionalSharding(mesh_utils.create_device_mesh((8,)))
   sharding = sharding.reshape((1, 8, 1, 1))
@@ -216,9 +234,7 @@ def test5():
   caches_k = jnp.zeros(
       (batch, heads, seq, dim), device=sharding, dtype=jnp.bfloat16
   )
-  caches_v = jnp.zeros(
-      (batch, heads, seq, dim), device=sharding, dtype=jnp.bfloat16
-  )
+  jnp.zeros((batch, heads, seq, dim), device=sharding, dtype=jnp.bfloat16)
 
   def insert_cache(cache, new_entry, slot, head_indexes, update_indexes):
     res = cache.at[slot, head_indexes, update_indexes.reshape(1, -1), :].set(
@@ -227,6 +243,7 @@ def test5():
     res = jax.lax.with_sharding_constraint(res, sharding)
     return res
 
+  # pylint: disable-next=all
   def insert_cache2(cache, new_entry, slot, head_indexes, update_indexes):
     res = cache.at[slot, :, update_indexes, :].set(
         jnp.transpose(new_entry.squeeze(0), (1, 0, 2))
@@ -234,6 +251,7 @@ def test5():
     res = jax.lax.with_sharding_constraint(res, sharding)
     return res
 
+  # pylint: disable-next=all
   def insert_cache3(cache, new_entry, slot, head_indexes, update_indexes):
 
     index = jnp.expand_dims(jnp.full_like(update_indexes, slot), -1)
@@ -268,10 +286,10 @@ def test5():
       ),
       device=val_sharding,
   ).block_until_ready()
+  # pylint: disable-next=all
   j = jnp.int32(7).block_until_ready()
 
   update_indexes = (jnp.arange(-insert_seqlen, 0) + 7) % 1024
-  update_indexes = update_indexes
   head_indexes = jnp.arange(heads).reshape(1, -1, 1)
 
   rng = jax.random.PRNGKey(0)
@@ -284,18 +302,20 @@ def test5():
     )
 
   for func in (insert_cache, insert_cache2, insert_cache3):
-    for i in range(10):
+    for _ in range(10):
       all_times = 0
       for j in range(40):
         rng, subkey = jax.random.split(rng)
-        key = jax.device_put(
+        jax.device_put(
             jax.random.normal(
                 subkey, (1, heads, insert_seqlen, dim), dtype=jnp.bfloat16
             ),
             device=val_sharding,
         ).block_until_ready()
+        # pylint: disable-next=all
         j = jnp.int32(j).block_until_ready()
         start = time.perf_counter()
+        # pylint: disable-next=all
         caches_k = func(caches_k, to_insert, j, head_indexes, update_indexes)
         caches_k.block_until_ready()
         end = time.perf_counter()
@@ -304,8 +324,7 @@ def test5():
 
 
 def test6():
-  import torch_xla2
-  import torch
+  """move device test"""
 
   x = torch.randn(10, 20, 20, 20)
   x = torch_xla2.tensor.move_to_device(x)
