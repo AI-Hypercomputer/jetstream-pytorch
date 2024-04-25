@@ -20,8 +20,9 @@ from absl import app
 from absl import flags
 
 from jetstream.core import server_lib
-import jetstream_pt
 from jetstream.core.config_lib import ServerConfig
+
+import jetstream_pt
 
 
 _PORT = flags.DEFINE_integer("port", 9000, "port to listen on")
@@ -82,6 +83,7 @@ _MAX_CACHE_LENGTH = flags.DEFINE_integer(
 )
 
 
+# pylint: disable-next=all
 def main(argv: Sequence[str]):
   del argv
   os.environ["XLA_FLAGS"] = "--xla_dump_to=/tmp/xla_logs --xla_dump_hlo_as_text"
@@ -107,7 +109,7 @@ def main(argv: Sequence[str]):
   print(f"server_config: {server_config}")
 
   # We separate credential from run so that we can unit test it with local credentials.
-  # TODO: Add grpc credentials for OSS.
+  # We would like to add grpc credentials for OSS.
   jetstream_server = server_lib.run(
       threads=_THREADS.value,
       port=_PORT.value,
