@@ -148,11 +148,11 @@ def main(argv):
         break
 
       sampled_tokens_list.append(token_id)
-      output = token_utils.mix_decode(vocab, token_id)
-      print(Fore.GREEN + output, end="", flush=True)
+    #   output = token_utils.mix_decode(vocab, token_id)
+    #   print(Fore.GREEN + output, end="", flush=True)
 
-    print(Style.RESET_ALL + "\n")
-    print("---- Streaming decode finished.")
+    # print(Style.RESET_ALL + "\n")
+    # print("---- Streaming decode finished.")
 
     print("---- All output tokens.")
     print(sampled_tokens_list)
