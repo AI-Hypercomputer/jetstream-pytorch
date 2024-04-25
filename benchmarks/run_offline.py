@@ -12,18 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import logging
+import os
+import time
 from absl import app
 from absl import flags
+
 import jax
 import jax.numpy as jnp
 
 from jetstream.engine import token_utils
-
-import os
-
 from jetstream_pt import engine as je
-import time
-import logging
+from benchmarks import analyze_sharegpt
+
+
 
 logging.getLogger().setLevel(logging.ERROR)
 
@@ -69,11 +71,10 @@ _MAX_CACHE_LENGTH = flags.DEFINE_integer(
 
 
 def create_engine():
+  """Create a pytorch engine."""
   jax.config.update("jax_default_prng_impl", "unsafe_rbg")
   os.environ["TF_CPP_MIN_LOG_LEVEL"] = "0"
 
-  max_prefill_predict_length = 1024
-  max_target_length = max_prefill_predict_length + 256
   devices = jax.devices()
   start = time.perf_counter()
   engine = je.create_pytorch_engine(
@@ -94,9 +95,9 @@ def create_engine():
 
 
 def run_prefill_time(engine, params, decode_state, seqlen):
+  """Run prefill and measure time."""
   metadata = engine.get_tokenizer()
   vocab = token_utils.load_vocab(metadata.path, metadata.extra_ids)
-  tokenizer = vocab.tokenizer
 
   text = "This is a beautiful day"
   tokens, true_length = token_utils.tokenize_and_pad(
@@ -136,8 +137,8 @@ MAXTEXT_PREFILL = {
 }
 
 
-def main(argv):
-
+def main():
+  """Main function to run engine offline."""
   engine = create_engine()
 
   start = time.perf_counter()
@@ -145,12 +146,11 @@ def main(argv):
   print("Load params ", time.perf_counter() - start)
 
   prefill_times = {}
-  slot = jnp.int32(1)
 
   if _PROFILING_OUTPUT.value:
     jax.profiler.start_trace(_PROFILING_OUTPUT.value)
   decode_state = engine.init_decode_state()
-  for batch in MAXTEXT_PREFILL.keys():
+  for batch, _ in MAXTEXT_PREFILL.items():
     runtime, decode_state = run_prefill_time(
         engine, params, decode_state, batch
     )
@@ -159,13 +159,15 @@ def main(argv):
   sampled_tokens_list = []
 
   for i in range(3):  # warm up
-    decode_state, sampled_tokens = engine.generate(params, decode_state)
+    #pylint: disable-next=all
+    decode_state, sampled_tokens = engine.generate(params=params, decode_state=decode_state)
     sampled_tokens_list.append(sampled_tokens)
 
   print("======= decode starting ===")
   dec_times = []
   for i in range(10):
     start = time.perf_counter()
+    #pylint: disable-next=all
     decode_state, sampled_tokens = engine.generate(params, decode_state)
     jax.block_until_ready(decode_state)
     sampled_tokens_list.append(sampled_tokens)
@@ -182,13 +184,11 @@ def main(argv):
   prefill_times_ms = {k: v * 1000 for k, v in prefill_times.items()}
   decode_time_ms = sum(dec_times) * 1000 / 10 / _BATCH_SIZE.value
 
-  import analyze_sharegpt
 
   analyze_sharegpt.do_simulation(prefill_times_ms, decode_time_ms)
 
 
 if __name__ == "__main__":
-  import os
 
   os.environ["TF_CPP_MIN_LOG_LEVEL"] = "0"
   app.run(main)
