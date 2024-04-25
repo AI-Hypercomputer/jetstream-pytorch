@@ -58,20 +58,20 @@ prefill_bucket_size_to_ms = {
 }
 
 # batch size 60, ful cache, bfloat
-system_time_per_decode_token_ms = 26.55 / 60
+SYSTEM_TIME_PER_DECODE_TOKEN_MS = 26.55 / 60
 
 # batch size 96, ful cache, quantized
-system_time_per_decode_token_ms = 26.0 / 96
+SYSTEM_TIME_PER_DECODE_TOKEN_MS = 26.0 / 96
 
 # batch size 96, rolling, bfloat
-system_time_per_decode_token_ms = 28.18 / 96
+SYSTEM_TIME_PER_DECODE_TOKEN_MS = 28.18 / 96
 
 # batch size 160, rolling, quantized
-system_time_per_decode_token_ms = 30 / 160
+SYSTEM_TIME_PER_DECODE_TOKEN_MS = 30 / 160
 
 
+#pylint: disable-next=all
 def do_simulation(prefill_bucket_size_to_ms, system_time_per_decode_token_ms):
-
   def next_power_of_2(x):
     return 1 if x == 0 else 2 ** (x - 1).bit_length()
 
@@ -83,6 +83,7 @@ def do_simulation(prefill_bucket_size_to_ms, system_time_per_decode_token_ms):
   convo_numbers = []
   # Please update with your own data file path
   loaded_share_gpt = json.load(
+      #pylint: disable-next=all
       open("~/data/ShareGPT_V3_unfiltered_cleaned_split.json", "r")
   )
   for example in loaded_share_gpt:
@@ -97,17 +98,17 @@ def do_simulation(prefill_bucket_size_to_ms, system_time_per_decode_token_ms):
       c for c in convo_numbers if c[0] <= CUTOFF_INPUT and c[1] <= CUTOFF_OUTPUT
   ]
 
-  mean_input = sum([c[0] for c in kept_convos]) / len(kept_convos)
-  mean_output = sum([c[1] for c in kept_convos]) / len(kept_convos)
+  mean_input = sum(c[0] for c in kept_convos) / len(kept_convos)
+  mean_output = sum(c[1] for c in kept_convos) / len(kept_convos)
 
   print(
-      f"Total {num_convos=} but only kept {kept_convos=}. Out of kept, {mean_input=}, {mean_output=}"
+      f"""Total {num_convos=} but only kept {kept_convos=}. 
+    Out of kept, {mean_input=}, {mean_output=}"""
   )
 
   total_prefill_system_ms = 0
   total_generate_system_ms = 0
 
-  total_system_output_tokens = 0
   for convo in kept_convos:
     input_tok, output_tok = convo
     bucket = max(128, next_power_of_2(input_tok))
@@ -122,18 +123,20 @@ def do_simulation(prefill_bucket_size_to_ms, system_time_per_decode_token_ms):
     total_generate_system_ms += generate_system_ms
 
   total_time_ms = total_prefill_system_ms + total_generate_system_ms
-  input_tokens = sum([c[0] for c in kept_convos])
+  input_tokens = sum(c[0] for c in kept_convos)
 
-  output_tokens = sum([c[1] for c in kept_convos])
+  output_tokens = sum(c[1] for c in kept_convos)
   print(
-      f"Output tokens {output_tokens} in {total_time_ms/1000:.2f} seconds, for {output_tokens/(total_time_ms/1000):.2f} out tok/s"
+      f"""Output tokens {output_tokens} in {total_time_ms/1000:.2f} seconds, 
+      for {output_tokens/(total_time_ms/1000):.2f} out tok/s"""
   )
 
   total_prefill_sec = total_prefill_system_ms / 1000
   total_generate_sec = total_generate_system_ms / 1000
 
   print(
-      f"Total time {total_time_ms/1000:.2f} seconds, split {total_prefill_sec=:.2f} seconds and {total_generate_sec=:.2f} seconds"
+      f"""Total time {total_time_ms/1000:.2f} seconds, 
+      split {total_prefill_sec=:.2f} seconds and {total_generate_sec=:.2f} seconds"""
   )
 
   idealized_prefill_sec = (
@@ -148,16 +151,21 @@ def do_simulation(prefill_bucket_size_to_ms, system_time_per_decode_token_ms):
   generate_savings_sec = total_generate_sec - idealized_generate_sec
 
   print(
-      f"we think prefill will take {total_prefill_sec=:.2f}, we could get it to {idealized_prefill_sec=:.2f} so we'd save {prefill_savings_sec=:.2f} seconds "
+    f"""we think prefill will take {total_prefill_sec=:.2f}, 
+    we could get it to {idealized_prefill_sec=:.2f} so we'd 
+    save {prefill_savings_sec=:.2f} seconds """
   )
   print(
-      f"with sparsity we could go from  {total_generate_sec=:.2f}, we could get it to {idealized_generate_sec=:.2f} so we'd save {generate_savings_sec=:.2f} seconds "
+    f"""with sparsity we could go from  {total_generate_sec=:.2f}, 
+    we could get it to {idealized_generate_sec=:.2f} so we'd save 
+    {generate_savings_sec=:.2f} seconds """
   )
 
   idealized_overall_time = idealized_generate_sec + idealized_prefill_sec
 
   print(
-      f"Idealized out tokens {output_tokens} in {idealized_overall_time:.2f} seconds, for {output_tokens/idealized_overall_time:.2f} out tok/s"
+    f"""Idealized out tokens {output_tokens} in {idealized_overall_time:.2f} seconds, 
+    for {output_tokens/idealized_overall_time:.2f} out tok/s"""
   )
   print("prfill", prefill_bucket_size_to_ms)
   print("decode step", system_time_per_decode_token_ms)
