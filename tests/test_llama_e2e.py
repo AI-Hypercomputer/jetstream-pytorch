@@ -45,14 +45,14 @@ class LlamaE2ETest(unittest.TestCase):
     torch.set_default_dtype(torch_dtype)
     jax.config.update("jax_dynamic_shapes", False)
     jax.config.update("jax_traceback_filtering", "off")
-    env_data = environment.JetEngineEnvironmentData()
-    env_data.max_input_sequence_length = 128
-    env_data.max_input_sequence_length = 128
-    env_data.cache_sequence_length = 128
-    env_data.model_type = "llama-2-tiny"
-    env_data.batch_size = 1
-    env_data.bf16_enable = bf16_enable
-    env = environment.JetEngineEnvironment(env_data)
+    environment_data = environment.JetEngineEnvironmentData()
+    environment_data.max_input_sequence_length = 128
+    environment_data.max_input_sequence_length = 128
+    environment_data.cache_sequence_length = 128
+    environment_data.bf16_enable = bf16_enable
+    environment_data.model_type = "llama-2-tiny"
+    environment_data.batch_size = 1
+    env = environment.JetEngineEnvironment(environment_data)
     env.apply_sharding = lambda *args, **kwargs: None  # don't shard on cpu
     return env
 
