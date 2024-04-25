@@ -26,7 +26,6 @@ from jetstream_pt import engine as je
 from benchmarks import analyze_sharegpt
 
 
-
 logging.getLogger().setLevel(logging.ERROR)
 
 
@@ -159,15 +158,17 @@ def main():
   sampled_tokens_list = []
 
   for i in range(3):  # warm up
-    #pylint: disable-next=all
-    decode_state, sampled_tokens = engine.generate(params=params, decode_state=decode_state)
+    # pylint: disable-next=all
+    decode_state, sampled_tokens = engine.generate(
+        params=params, decode_state=decode_state
+    )
     sampled_tokens_list.append(sampled_tokens)
 
   print("======= decode starting ===")
   dec_times = []
   for i in range(10):
     start = time.perf_counter()
-    #pylint: disable-next=all
+    # pylint: disable-next=all
     decode_state, sampled_tokens = engine.generate(params, decode_state)
     jax.block_until_ready(decode_state)
     sampled_tokens_list.append(sampled_tokens)
@@ -183,7 +184,6 @@ def main():
 
   prefill_times_ms = {k: v * 1000 for k, v in prefill_times.items()}
   decode_time_ms = sum(dec_times) * 1000 / 10 / _BATCH_SIZE.value
-
 
   analyze_sharegpt.do_simulation(prefill_times_ms, decode_time_ms)
 
