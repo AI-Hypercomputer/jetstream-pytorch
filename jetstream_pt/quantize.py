@@ -16,6 +16,7 @@ import torch
 
 
 def quantize_torch_int8(val, reduce_axis):
+  """quantize torch int8"""
   # val is (batch, heads, seqlen, dim)
   scale = torch.amax(val.abs(), axis=reduce_axis, keepdim=True)
   scale = scale / 127
@@ -24,4 +25,5 @@ def quantize_torch_int8(val, reduce_axis):
 
 
 def dequantize_torch_int8(val, scale):
+  """dequantize torch int8"""
   return val * scale
