@@ -70,7 +70,7 @@ SYSTEM_TIME_PER_DECODE_TOKEN_MS = 28.18 / 96
 SYSTEM_TIME_PER_DECODE_TOKEN_MS = 30 / 160
 
 
-#pylint: disable-next=all
+# pylint: disable-next=all
 def do_simulation(prefill_bucket_size_to_ms, system_time_per_decode_token_ms):
   def next_power_of_2(x):
     return 1 if x == 0 else 2 ** (x - 1).bit_length()
@@ -83,7 +83,7 @@ def do_simulation(prefill_bucket_size_to_ms, system_time_per_decode_token_ms):
   convo_numbers = []
   # Please update with your own data file path
   loaded_share_gpt = json.load(
-      #pylint: disable-next=all
+      # pylint: disable-next=all
       open("~/data/ShareGPT_V3_unfiltered_cleaned_split.json", "r")
   )
   for example in loaded_share_gpt:
@@ -151,12 +151,12 @@ def do_simulation(prefill_bucket_size_to_ms, system_time_per_decode_token_ms):
   generate_savings_sec = total_generate_sec - idealized_generate_sec
 
   print(
-    f"""we think prefill will take {total_prefill_sec=:.2f}, 
+      f"""we think prefill will take {total_prefill_sec=:.2f}, 
     we could get it to {idealized_prefill_sec=:.2f} so we'd 
     save {prefill_savings_sec=:.2f} seconds """
   )
   print(
-    f"""with sparsity we could go from  {total_generate_sec=:.2f}, 
+      f"""with sparsity we could go from  {total_generate_sec=:.2f}, 
     we could get it to {idealized_generate_sec=:.2f} so we'd save 
     {generate_savings_sec=:.2f} seconds """
   )
@@ -164,7 +164,7 @@ def do_simulation(prefill_bucket_size_to_ms, system_time_per_decode_token_ms):
   idealized_overall_time = idealized_generate_sec + idealized_prefill_sec
 
   print(
-    f"""Idealized out tokens {output_tokens} in {idealized_overall_time:.2f} seconds, 
+      f"""Idealized out tokens {output_tokens} in {idealized_overall_time:.2f} seconds, 
     for {output_tokens/idealized_overall_time:.2f} out tok/s"""
   )
   print("prfill", prefill_bucket_size_to_ms)
