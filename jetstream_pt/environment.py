@@ -12,19 +12,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from typing import Tuple, Dict
+
+import dataclasses
 import jax
 import jax.sharding as jsharding
 from jax.experimental import mesh_utils
-
-import dataclasses
-from typing import Tuple, Dict
-
-from jetstream_pt.third_party.llama2 import model_args
-from jetstream_pt import cache_manager
 import torch_xla2
 
 
+from jetstream_pt.third_party.llama2 import model_args
+from jetstream_pt import cache_manager
+
+
 @dataclasses.dataclass
+# pylint: disable-next=all
 class JetEngineEnvironmentData:
   checkpoint_path: str = ""  # if empty string then use model's state_dict()
   checkpoint_format: str = "safetensors"  # torch, safetensors
@@ -66,6 +68,7 @@ class JetEngineEnvironmentData:
   bf16_enable: bool = True
 
 
+# pylint: disable-next=all
 class JetEngineEnvironment:
 
   def __init__(self, data: JetEngineEnvironmentData):
@@ -88,10 +91,9 @@ class JetEngineEnvironment:
     self.cache_sequence_length = self._data.cache_sequence_length
     self.bf16_enable = self._data.bf16_enable
 
-    Mesh = jax.sharding.Mesh
     P = jax.sharding.PartitionSpec
 
-    num_of_partitions = jax.device_count()  # TODO
+    num_of_partitions = jax.device_count()
     # make mesh etc.
     self._mesh = jsharding.Mesh(
         mesh_utils.create_device_mesh((num_of_partitions, 1)),
@@ -115,16 +117,20 @@ class JetEngineEnvironment:
 
   @property
   def tokenizer_path(self):
+    """Return tokenizer path"""
     return self._data.tokenizer_path
 
   # This is used by model to add activation sharding.
   def apply_sharding(self, tensor, *, axis: int | None):
+    """Apply sharding for tensor"""
     if not isinstance(tensor, torch_xla2.tensor.XLATensor2):
       return
     sharding_spec = self.sharding_by_axis(axis)
+    # pylint: disable-next=all
     tensor._elem = jax.lax.with_sharding_constraint(tensor._elem, sharding_spec)
 
   def sharding_by_axis(self, axis):
+    """return sharding partition spc by axis, options are x, y, -1 or Noe"""
     if axis == -1 or axis is None:
       return jsharding.NamedSharding(self._mesh, jax.sharding.PartitionSpec())
     sharding = [None] * (axis + 1)
@@ -135,12 +141,14 @@ class JetEngineEnvironment:
     return sharding_spec
 
   def make_caches_prefill(self):
+    """Create kv caches for inference prefill"""
     caches = []
     for _ in range(self.num_layers):
       caches.append(cache_manager.KVCachePrefill())
     return caches
 
   def make_caches_generate(self):
+    """Create kv caches for inference generation"""
     caches = []
     shape = (
         self.batch_size,
