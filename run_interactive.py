@@ -156,6 +156,8 @@ def main(argv):
 
     print("---- All output tokens.")
     print(sampled_tokens_list)
+    print("---- All output text.")
+    print(vocab.tokenizer.decode(sampled_tokens_list))
 
   if _PROFILING_OUTPUT.value:
     jax.profiler.stop_trace()
