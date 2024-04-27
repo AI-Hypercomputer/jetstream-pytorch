@@ -22,7 +22,8 @@ pip3 show libtpu-nightly && pip3 uninstall -y libtpu-nightly
 pip3 install pip install jax[tpu] -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
 # torch cpu
 pip3 install torch --index-url https://download.pytorch.org/whl/cpu
-pip3 install tensorflow flatbuffers absl-py flax sentencepiece seqio google-cloud-storage safetensors colorama coverage
+pip3 install tensorflow flatbuffers absl-py flax sentencepiece seqio google-cloud-storage 
+pip3 safetensors colorama coverage ray[serve] humanize
 
 mkdir -p deps
 pushd deps
