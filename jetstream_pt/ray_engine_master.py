@@ -140,6 +140,12 @@ def create_pytorch_engine_ray_master(
   pod_name = tpu.get_current_pod_name()
   num_hosts = tpu.get_current_pod_worker_count()
   print(f"pod_name:{pod_name}, number of host: {num_hosts}")
+  assert (
+      pod_name is not None
+  ), f"TPU pod name (current value:{pod_name}) can not be None"
+  assert (
+      num_hosts > 0
+  ), f"num_hosts (current value {num_hosts}) should be a positive number"
   # pylint: disable-next=all
   engine_worker_with_tpu_resource = PyTorchEngineRayWorker.options(
       resources={"TPU": 4}
