@@ -6,7 +6,7 @@ import ray
 from ray.util.accelerators import tpu
 
 from jetstream.engine import engine_api, tokenizer_pb2
-from jetstream_pt.ray_engine_worker import PyTorchRayWorker
+from jetstream_pt.ray_worker import PyTorchRayWorker
 
 Params = Any
 Prefix = Any
