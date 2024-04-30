@@ -72,6 +72,8 @@ class PyTorchRayEngine(engine_api.Engine):
       )
       all_outputs.append(output)
     _ = ray.get(all_outputs)
+    # The prefill function does not return any values;
+    # the worker itself manages and maintains the prefill states.
     return None
 
   def insert(
@@ -87,6 +89,8 @@ class PyTorchRayEngine(engine_api.Engine):
       )
       all_outputs.append(output)
     _ = ray.get(all_outputs)
+    # The insert function does not return any values;
+    # the worker itself manages and maintains the DecodeState.
     return None
 
   def generate(
