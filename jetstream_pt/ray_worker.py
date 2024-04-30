@@ -75,8 +75,18 @@ class DecodeState:
 
 @ray.remote
 # pylint: disable-next=all
-class PyTorchEngineRayWorker:
-  """Wraps functions to the Jet Engine API format."""
+class PyTorchRayWorker:
+  """Ray actor representation for a PyTorch engine worker.
+
+  PyTorchRayWorker enables multi-host serving for models that exceed the memory
+  capabilities of single-host TPU VMs with Ray. PyTorchRayWorker should be used
+  with a "leader" engine, e.g. `PyTorchRayEngine`.
+
+  Note: For `PyTorchRayEngine` to return consistent results, it's important that
+  `PyTorchEngineRayWorker` is able to maintain its state within process and only
+  return results once its transferred to CPU device.
+
+  """
 
   # pylint: disable-next=all
   def __init__(

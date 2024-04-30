@@ -72,7 +72,7 @@ def create_engine():
   os.environ["TF_CPP_MIN_LOG_LEVEL"] = "0"
 
   start = time.perf_counter()
-  engine = ray_engine_master.create_pytorch_engine_ray_master(
+  engine = ray_engine_master.create_pytorch_ray_engine(
       tokenizer_path=_TOKENIZER_PATH.value,
       ckpt_path=_CKPT_PATH.value,
       bf16_enable=True,

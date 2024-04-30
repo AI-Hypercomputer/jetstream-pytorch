@@ -1,4 +1,4 @@
-from typing import Any, Optional, Union
+from typing import Any, Iterable, Optional, Union
 
 import numpy as np
 import jax
@@ -6,18 +6,28 @@ import ray
 from ray.util.accelerators import tpu
 
 from jetstream.engine import engine_api, tokenizer_pb2
-from jetstream_pt.ray_engine_worker import PyTorchEngineRayWorker
+from jetstream_pt.ray_engine_worker import PyTorchRayWorker
 
 Params = Any
 Prefix = Any
 DecodeState = Any
 
 
-class PyTorchEngineRayMaster(engine_api.Engine):
-  """Ray engine master to orchestrate requests and collect token response"""
+class PyTorchRayEngine(engine_api.Engine):
+  """Ray PyTorch Engine Implementation for Multi-Host Inference Serving.
+  Key Features:
+  1. Manages all Ray workers.
+  2. Initializes model parameters for each Ray worker.
+  3. Routes incoming inference requests to Ray workers.
+  4. Collects token responses fromthe Ray workers.
+  """
 
   def __init__(
-      self, engine_workers, tokenizer_path, context_length, batch_size
+      self,
+      engine_workers: Iterable[PyTorchRayWorker],
+      tokenizer_path: str,
+      context_length: int,
+      batch_size: int,
   ):
     self.engine_workers = engine_workers
     self.tokenizer_path = tokenizer_path
@@ -62,6 +72,7 @@ class PyTorchEngineRayMaster(engine_api.Engine):
       )
       all_outputs.append(output)
     _ = ray.get(all_outputs)
+    return None
 
   def insert(
       self,
@@ -76,6 +87,7 @@ class PyTorchEngineRayMaster(engine_api.Engine):
       )
       all_outputs.append(output)
     _ = ray.get(all_outputs)
+    return None
 
   def generate(
       self, params: Any, decode_state: DecodeState
@@ -86,6 +98,8 @@ class PyTorchEngineRayMaster(engine_api.Engine):
           params=params, decode_state=decode_state
       )
       all_outputs.append(output)
+    # All workers performed an all_gather operation. Since the results are
+    # identical across all workers, the result from worker 0 is returned.
     state, result_tokens = ray.get(all_outputs)[0]
     return state, result_tokens
 
@@ -121,7 +135,7 @@ class PyTorchEngineRayMaster(engine_api.Engine):
 
 
 # pylint: disable-next=all
-def create_pytorch_engine_ray_master(
+def create_pytorch_ray_engine(
     tokenizer_path: str,
     ckpt_path: Optional[str] = None,
     samples_per_slot: int = 1,
@@ -134,7 +148,7 @@ def create_pytorch_engine_ray_master(
     quantize_weights=False,
     quantize_kv=False,
     max_cache_length=1024,
-) -> PyTorchEngineRayMaster:
+) -> PyTorchRayEngine:
 
   ray.init(ignore_reinit_error=True)
   pod_name = tpu.get_current_pod_name()
@@ -147,7 +161,7 @@ def create_pytorch_engine_ray_master(
       num_hosts > 0
   ), f"num_hosts (current value {num_hosts}) should be a positive number"
   # pylint: disable-next=all
-  engine_worker_with_tpu_resource = PyTorchEngineRayWorker.options(
+  engine_worker_with_tpu_resource = PyTorchRayWorker.options(
       resources={"TPU": 4}
   )
   engine_workers = []
@@ -167,7 +181,7 @@ def create_pytorch_engine_ray_master(
         max_cache_length=max_cache_length,
     )
     engine_workers.append(engine_worker)
-  engine_master = PyTorchEngineRayMaster(
+  engine_master = PyTorchRayEngine(
       engine_workers=engine_workers,
       tokenizer_path=tokenizer_path,
       context_length=context_length,

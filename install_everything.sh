@@ -23,7 +23,7 @@ pip3 install pip install jax[tpu] -f https://storage.googleapis.com/jax-releases
 # torch cpu
 pip3 install torch --index-url https://download.pytorch.org/whl/cpu
 pip3 install tensorflow flatbuffers absl-py flax sentencepiece seqio google-cloud-storage 
-pip3 install safetensors colorama coverage ray[serve] humanize
+pip3 install safetensors colorama coverage ray[default] humanize
 
 mkdir -p deps
 pushd deps
