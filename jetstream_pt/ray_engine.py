@@ -19,7 +19,7 @@ class PyTorchRayEngine(engine_api.Engine):
   1. Manages all Ray workers.
   2. Initializes model parameters for each Ray worker.
   3. Routes incoming inference requests to Ray workers.
-  4. Collects token responses fromthe Ray workers.
+  4. Collects token responses from the Ray workers.
   """
 
   def __init__(
