@@ -24,7 +24,7 @@ from colorama import Fore, Style
 import jax
 
 from jetstream.engine import token_utils
-from jetstream_pt import ray_engine_master
+from jetstream_pt import ray_engine
 
 FLAGS = flags.FLAGS
 
@@ -72,7 +72,7 @@ def create_engine():
   os.environ["TF_CPP_MIN_LOG_LEVEL"] = "0"
 
   start = time.perf_counter()
-  engine = ray_engine_master.create_pytorch_ray_engine(
+  engine = ray_engine.create_pytorch_ray_engine(
       tokenizer_path=_TOKENIZER_PATH.value,
       ckpt_path=_CKPT_PATH.value,
       bf16_enable=True,
