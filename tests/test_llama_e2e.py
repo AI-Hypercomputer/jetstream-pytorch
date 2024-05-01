@@ -20,8 +20,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from jetstream_pt.engine import PyTorchEngine
-from jetstream_pt.third_party.llama2 import model_exportable
-from jetstream_pt.third_party.llama2.generation_original import LlamaOriginal
+from jetstream_pt.third_party.llama import model_exportable
+from jetstream_pt.third_party.llama.generation_original import LlamaOriginal
 from jetstream_pt import environment
 
 

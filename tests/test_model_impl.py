@@ -12,10 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from jetstream_pt.third_party.llama2 import model_exportable
-from jetstream_pt.third_party.llama2 import model_original
+from jetstream_pt.third_party.llama import model_exportable
+from jetstream_pt.third_party.llama import model_original
 from jetstream_pt import layers 
-from jetstream_pt.third_party.llama2 import model_args
+from jetstream_pt.third_party.llama import model_args
 from jetstream_pt import environment
 from jetstream_pt import cache_manager
 import torch

@@ -34,44 +34,49 @@ class ModelArgs:
   device = 'cpu'
   quantize = False
 
+  rope_theta: float = 10000.0
+
 
 def get_arg(
-    param_size: str,
+    model_name: str,
     seqlen,
     batch_size,
-    vocab_size: int,
     bf16_enable: bool = False,
 ) -> ModelArgs:
   """Gets model args."""
 
   data = {}
-  if param_size == "tiny":
+  if model_name == "llama-2-tiny":
     data = {
         "dim": 128,
+        "vocab_size": 32000,
         "multiple_of": 32,
         "n_heads": 8,
         "n_layers": 3,
         "norm_eps": 1e-05,
     }
-  elif param_size == "7b":
+  elif model_name == "llama-2-7b":
     data = {
         "dim": 4096,
+        "vocab_size": 32000,
         "multiple_of": 256,
         "n_heads": 32,
         "n_layers": 32,
         "norm_eps": 1e-05,
     }
-  elif param_size == "13b":
+  elif model_name == "llama-2-13b":
     data = {
         "dim": 5120,
+        "vocab_size": 32000,
         "multiple_of": 256,
         "n_heads": 40,
         "n_layers": 40,
         "norm_eps": 1e-05,
     }
-  elif param_size == "70b":
+  elif model_name == "llama-2-70b":
     data = {
         "dim": 8192,
+        "vocab_size": 32000,
         "multiple_of": 4096,
         "ffn_dim_multiplier": 1.3,
         "n_heads": 64,
@@ -79,20 +84,30 @@ def get_arg(
         "n_layers": 80,
         "norm_eps": 1e-05,
     }
+  elif model_name == 'llama-3-8b':
+    data = {
+        "dim": 4096,
+        "vocab_size": 128256,
+        "multiple_of": 1024,
+        "ffn_dim_multiplier": 1.3,
+        "n_layers": 32,
+        "n_heads": 32,
+        "n_kv_heads": 8,
+        "norm_eps": 1e-05,
+        "rope_theta": 500000.0,
+    }
   return ModelArgs(
       max_seq_len=seqlen,
       max_batch_size=batch_size,
-      vocab_size=vocab_size,
       bf16_enable=bf16_enable,
       **data,
   )
 
-def get_model_args(param_size, context_length, batch_size, vocab_size, bf16_enable):
+def get_model_args(model_name, context_length, batch_size, bf16_enable):
     model_args = get_arg(
-        param_size=param_size,
+        model_name=model_name,
         seqlen=context_length,
         batch_size=batch_size,
-        vocab_size=vocab_size,
         bf16_enable=bf16_enable,
     )
     model_args.n_kv_heads = (

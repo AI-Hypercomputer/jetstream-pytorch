@@ -20,7 +20,7 @@ import jax.numpy as jnp
 
 from jetstream_pt.environment import JetEngineEnvironment, JetEngineEnvironmentData
 from jetstream_pt.engine import PyTorchEngine, Prefix, DecodeState
-from jetstream_pt.third_party.llama2 import model_exportable, model_original
+from jetstream_pt.third_party.llama import model_exportable, model_original
 
 # This model will output tokens with value of 2
 # and will update caches with value of 1.0

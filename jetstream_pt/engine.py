@@ -24,17 +24,15 @@ from jax import numpy as jnp
 import torch
 import numpy as np
 
-from jetstream.engine import engine_api, tokenizer_pb2, token_utils
+from jetstream.engine import engine_api, tokenizer_api, tokenizer_pb2, token_utils
 import torch_xla2
-from jetstream_pt.third_party.llama2 import model_exportable, model_args
+from jetstream_pt.third_party.llama import model_exportable, model_args
 
 from jetstream_pt import cache_manager
 from jetstream_pt import quantize
 from jetstream_pt.environment import JetEngineEnvironment, JetEngineEnvironmentData
 
 from torch.utils import _pytree as pytree
-
-
 
 Mesh = jax.sharding.Mesh
 P = jax.sharding.PartitionSpec
@@ -476,6 +474,12 @@ class PyTorchEngine(engine_api.Engine):
   def get_tokenizer(self) -> tokenizer_pb2.TokenizerParameters:
     return tokenizer_pb2.TokenizerParameters(path=self.env.tokenizer_path)
 
+  def build_tokenizer(self, meta: tokenizer_pb2.TokenizerParameters) -> tokenizer_api.Tokenizer:
+    if 'llama-3' in self.env.model_type:
+      return token_utils.TikToken(meta)
+    else:
+      return token_utils.SentencePieceTokenizer(meta)
+
   def join_prefixes(
       self,
       prefix1: engine_api.Prefix,
@@ -592,13 +596,16 @@ def create_pytorch_engine(
     context_length: int = 1024,
     batch_size: int = 1,
     max_decode_length: int = 4096,
-    model_name = "llama",
+    model_name = "llama-2",
     quantize_weights = False,
     quantize_kv = False,
     max_cache_length = 1024,
 ) -> PyTorchEngine:
   """Returns: The pytorch engine."""
 
+  supported_models = ['llama-2', 'llama-3']
+  if model_name not in supported_models:
+    raise NotImplementedError('Model name should be one of {}'.format(','.join(supported_models)))
   # See issue b/309529778 if it's turned on.
   jax.config.update('jax_dynamic_shapes', False)
   # Pytorch exports has int64 constants.
@@ -630,7 +637,7 @@ def create_pytorch_engine(
     tokenizer_path=tokenizer_path,
     checkpoint_path = checkpoint_path,
     checkpoint_format = checkpoint_format,
-    model_type = 'llama-2-' + param_size,
+    model_type = model_name + '-' + param_size,
     batch_size = batch_size,
     max_decode_length = max_decode_length,
     max_input_sequence_length = context_length,
@@ -640,23 +647,18 @@ def create_pytorch_engine(
     bf16_enable = bf16_enable,
   )
   env = JetEngineEnvironment(env_data)
+  args = model_args.get_model_args(model_name + '-' + param_size, context_length, batch_size, bf16_enable)
+  args.device = 'meta'
+  args.quantize = quantize_weights
+  pt_model = model_exportable.Transformer(args, env)
 
-  tokenizer = token_utils.load_vocab(tokenizer_path)
-  pt_model = None
-  shard_weights_fn = None
-  if model_name == "llama":
-    args = model_args.get_model_args(param_size, context_length, batch_size, tokenizer.vocab_size, bf16_enable)
-    args.device = 'meta'
-    args.quantize = quantize_weights
-    pt_model = model_exportable.Transformer(args, env)
-
-    num_params_size = 0
-    num_params = 0
-    for k, v in pt_model.state_dict().items():
-      num_params += 1
-      num_params_size += np.prod(v.shape) * (1 if v.dtype == jnp.int8 else 2)
-    print('Number of param Gbytes:', num_params_size / (1 << 30))
-    print('Number of param: ', num_params)
+  num_params_size = 0
+  num_params = 0
+  for k, v in pt_model.state_dict().items():
+    num_params += 1
+    num_params_size += np.prod(v.shape) * (1 if v.dtype == jnp.int8 else 2)
+  print('Number of param Gbytes:', num_params_size / (1 << 30))
+  print('Number of param: ', num_params)
 
   return PyTorchEngine(
       pt_model=pt_model,

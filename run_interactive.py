@@ -21,15 +21,14 @@ import jax
 
 from jetstream.engine import token_utils
 from colorama import Fore, Style
-
+import numpy as np
 
 import os
 
 from jetstream_pt import engine as je
 import time
 
-
-logging.getLogger().setLevel(logging.ERROR)
+# logging.getLogger().setLevel(logging.ERROR)
 
 
 FLAGS = flags.FLAGS
@@ -64,7 +63,7 @@ _SIZE = flags.DEFINE_string('size', 'tiny', 'size of model')
 _QUANTIZE_WEIGHTS = flags.DEFINE_bool('quantize_weights', False, 'weight quantization')
 _QUANTIZE_KV_CACHE = flags.DEFINE_bool('quantize_kv_cache', False, 'kv_cache_quantize')
 _MAX_CACHE_LENGTH = flags.DEFINE_integer('max_cache_length', 1024, 'kv_cache_quantize')
-
+_MODEL_NAME = flags.DEFINE_string('model', 'llama-2', 'name of the model. Supported options are llama-2 and llama-3')
 
 def create_engine():
   jax.config.update('jax_default_prng_impl', 'unsafe_rbg')
@@ -82,6 +81,7 @@ def create_engine():
         param_size=_SIZE.value,
         context_length=_CONTEXT_LENGTH.value,
         batch_size=_BATCH_SIZE.value,
+        model_name = _MODEL_NAME.value,
         quantize_weights=_QUANTIZE_WEIGHTS.value,
         quantize_kv=_QUANTIZE_KV_CACHE.value,
         max_cache_length = _MAX_CACHE_LENGTH.value,
@@ -100,9 +100,7 @@ def main(argv):
   print('Load params ', time.perf_counter() - start)
 
   metadata = engine.get_tokenizer()
-  vocab = token_utils.load_vocab(
-    metadata.path, metadata.extra_ids)
-  stop_tokens = [vocab.eos_id, vocab.pad_id]
+  tokenizer = engine.build_tokenizer(metadata)
   max_output_length = 1024
 
   if _PROFILING_OUTPUT.value:
@@ -118,7 +116,7 @@ def main(argv):
   ]
   for prompt in prompts:
     slot = random.randint(0, _BATCH_SIZE.value) 
-    tokens, true_length = token_utils.tokenize_and_pad(prompt, vocab, is_bos=True)
+    tokens, true_length = tokenizer.encode(prompt, is_bos=True)
     print(f"---- Input prompts are: {prompt}")
     print(f"---- Encoded tokens are: {tokens}")
 
@@ -130,22 +128,18 @@ def main(argv):
     )
     sampled_tokens_list = []
     print(f"---- Streaming decode started on #slot{slot}.")
+    complete = np.zeros((1,), dtype=np.bool_)
     while True:
       decode_state, result_tokens = engine.generate(
         params, decode_state
       )
-
-      slot_data = result_tokens.get_result_at_slot(slot)
-      slot_tokens = slot_data.tokens
-      slot_lengths = slot_data.lengths
-      
-      token_id = slot_tokens[slot, 0].item()
-      if slot_lengths > max_output_length or token_id in stop_tokens:
+      result_tokens = result_tokens.convert_to_numpy()
+      output, complete = tokenizer.decode(slot, max_output_length, result_tokens, complete)
+      if complete[0]:
         break
-
-      sampled_tokens_list.append(token_id)
-      output = token_utils.mix_decode(vocab, token_id)
-      print(Fore.GREEN + output, end="", flush=True)
+      token_id = output[0][0]
+      output_str = tokenizer.decode_str([token_id])
+      print(Fore.GREEN + output_str, end="", flush=True)
 
     print(Style.RESET_ALL + "\n")
     print("---- Streaming decode finished.")

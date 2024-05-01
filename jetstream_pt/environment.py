@@ -19,7 +19,7 @@ from jax.experimental import mesh_utils
 import dataclasses
 from typing import Tuple, Dict
 
-from jetstream_pt.third_party.llama2 import model_args
+from jetstream_pt.third_party.llama import model_args
 from jetstream_pt import cache_manager
 import torch_xla2
 
@@ -65,10 +65,9 @@ class JetEngineEnvironment:
         self._data = data
         # Get 13b
         self._model_arg = model_args.get_model_args(
-            data.model_type.replace('llama-2-', ''),
+            data.model_type,
             context_length=data.max_input_sequence_length,
             batch_size=data.batch_size,
-            vocab_size=32000,  # ?
             bf16_enable=data.bf16_enable,
             )
 
