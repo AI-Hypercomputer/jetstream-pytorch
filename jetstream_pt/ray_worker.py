@@ -187,9 +187,6 @@ class PyTorchRayWorker:
     self.env = env
     self.default_dtype = jnp.bfloat16 if env.bf16_enable else jnp.float32
 
-    # NOTE: this is llama2 specific now.
-    self.param = pt_model.params
-
     self.y_sharding = env.sharding_by_axis(1)
     self.x_sharding = env.sharding_by_axis(0)
     self.replicated = env.sharding_by_axis(-1)  # replicated
@@ -682,7 +679,7 @@ class PyTorchRayWorker:
     )
 
     logits = multihost_utils.process_allgather(logits, tiled=True)
-    next_token = self._sampling(logits, self.param.max_batch_size)
+    next_token = self._sampling(logits, self.env.batch_size)
 
     data = np.concatenate(
         [
@@ -837,7 +834,7 @@ class PyTorchRayWorker:
   @property
   def max_concurrent_decodes(self) -> int:
     """Max batch size for decodes"""
-    return self.param.max_batch_size
+    return self.env.batch_size
 
   @property
   def samples_per_slot(self) -> int:
@@ -847,7 +844,7 @@ class PyTorchRayWorker:
   @property
   def max_prefill_length(self) -> int:
     """Maximum prefill length"""
-    return self.param.max_seq_len
+    return self.env.max_input_sequence_length
 
   @property
   def max_decode_length(self) -> int:

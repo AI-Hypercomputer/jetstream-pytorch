@@ -29,7 +29,6 @@ import numpy as np
 from jetstream.engine import engine_api, tokenizer_pb2, token_utils
 import torch_xla2
 from torch.utils import _pytree as pytree
-from jetstream_pt.third_party.llama2 import model_exportable, model_args
 
 from jetstream_pt import cache_manager
 from jetstream_pt import quantize
@@ -80,9 +79,6 @@ class PyTorchEngine(engine_api.Engine):
     self.pt_model = pt_model
     self.env = env
     self.default_dtype = jnp.bfloat16 if env.bf16_enable else jnp.float32
-
-    # NOTE: this is llama2 specific now.
-    self.param = pt_model.params
 
     self.y_sharding = env.sharding_by_axis(1)
     self.x_sharding = env.sharding_by_axis(0)
@@ -486,7 +482,7 @@ class PyTorchEngine(engine_api.Engine):
         mask,
         decode_state.input_pos,
     )
-    next_token = self._sampling(logits, self.param.max_batch_size)
+    next_token = self._sampling(logits, self.env.batch_size)
     lens = decode_state.lens + 1
     data = jnp.concatenate(
         [
@@ -621,7 +617,7 @@ class PyTorchEngine(engine_api.Engine):
 
   @property
   def max_concurrent_decodes(self) -> int:
-    return self.param.max_batch_size
+    return self.env.batch_size
 
   @property
   def samples_per_slot(self) -> int:
@@ -630,7 +626,7 @@ class PyTorchEngine(engine_api.Engine):
 
   @property
   def max_prefill_length(self) -> int:
-    return self.param.max_seq_len
+    return self.env.max_input_sequence_length
 
   @property
   def max_decode_length(self) -> int:
@@ -693,24 +689,12 @@ def create_pytorch_engine(
     checkpoint_format = "safetensors"
     checkpoint_path = paths[0]
 
-  env_data = JetEngineEnvironmentData(
-      tokenizer_path=tokenizer_path,
-      checkpoint_path=checkpoint_path,
-      checkpoint_format=checkpoint_format,
-      model_type="llama-2-" + param_size,
-      batch_size=batch_size,
-      max_decode_length=max_decode_length,
-      max_input_sequence_length=context_length,
-      enable_weight_quantization=quantize_weights,
-      enable_kv_quantization=quantize_kv,
-      cache_sequence_length=max_cache_length,
-      bf16_enable=bf16_enable,
-  )
-  env = JetEngineEnvironment(env_data)
-
   tokenizer = token_utils.load_vocab(tokenizer_path)
   pt_model = None
-  if model_name == "llama":
+
+  if model_name.startswith("llama"):
+    from jetstream_pt.third_party.llama2 import model_exportable, model_args
+
     args = model_args.get_model_args(
         param_size,
         context_length,
@@ -720,13 +704,34 @@ def create_pytorch_engine(
     )
     args.device = "meta"
     args.quantize = quantize_weights
+    env_data = JetEngineEnvironmentData(
+        tokenizer_path=tokenizer_path,
+        checkpoint_path=checkpoint_path,
+        checkpoint_format=checkpoint_format,
+        model_type="llama-2-" + param_size,
+        batch_size=batch_size,
+        max_decode_length=max_decode_length,
+        max_input_sequence_length=context_length,
+        enable_weight_quantization=quantize_weights,
+        enable_kv_quantization=quantize_kv,
+        cache_sequence_length=max_cache_length,
+        bf16_enable=bf16_enable,
+        num_layers=args.n_layers,
+        cache_shape=(
+            batch_size,
+            args.n_kv_heads,
+            max_cache_length,
+            args.dim // args.n_heads,
+        ),
+    )
+    env = JetEngineEnvironment(env_data)
     pt_model = model_exportable.Transformer(args, env)
 
     num_params_size = 0
     num_params = 0
     for _, v in pt_model.state_dict().items():
       num_params += 1
-      num_params_size += np.prod(v.shape) * (1 if v.dtype == jnp.int8 else 2)
+      num_params_size += np.prod(v.shape) * (1 if v.dtype == torch.int8 else 2)
     print("Number of param Gbytes:", num_params_size / (1 << 30))
     print("Number of param: ", num_params)
 
