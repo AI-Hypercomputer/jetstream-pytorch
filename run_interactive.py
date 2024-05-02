@@ -120,7 +120,7 @@ def main(argv):
       "<s>[INST] <<SYS>>\nYou are an AI assistant. You will be given a task. You must generate a detailed and long answer.\n<</SYS>>\n\nContinue the following story.\n\nKay didn't have shoes that fit her feet properly. She only wore sneakers, because the \nChoose from: [I] shoes  fitted badly. [II] sneakers  fitted badly. [/INST]",
   ]
   for prompt in prompts:
-    slot = random.randint(0, _BATCH_SIZE.value)
+    slot = random.randint(0, _BATCH_SIZE.value-1)
     tokens, true_length = token_utils.tokenize_and_pad(
         prompt, vocab, is_bos=True
     )
