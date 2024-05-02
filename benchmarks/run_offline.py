@@ -99,7 +99,7 @@ def run_prefill_time(engine, params, decode_state, seqlen):
   tokenizer = engine.build_tokenizer(metadata)
 
   text = "This is a beautiful day"
-  tokens, true_length = tokenizer.encode(text, is_bos=True, prefill_lengths=[])
+  tokens, true_length = tokenizer.encode(text, is_bos=True, prefill_lengths=[seqlen])
 
   for _ in range(3):
     prefill_result = engine.prefill(
