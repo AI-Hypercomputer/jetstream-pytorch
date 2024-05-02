@@ -530,7 +530,7 @@ class PyTorchEngine(engine_api.Engine):
     return tokenizer_pb2.TokenizerParameters(path=self.env.tokenizer_path)
 
   def build_tokenizer(
-      self, metadata: tokenizer_pb2.TokenizerParameters
+      self, metadata: tokenizer_pb2.TokenizerParameters  # pylint: disable=all
   ) -> tokenizer_api.Tokenizer:
     if "llama-3" in self.env.model_type:
       return token_utils.TikToken(metadata)
@@ -674,7 +674,7 @@ def create_pytorch_engine(
   if model_name not in supported_models:
     raise NotImplementedError(
         f"Model name should be one of{','.join(supported_models)}"
-    )   
+    )
   # See issue b/309529778 if it's turned on.
   jax.config.update("jax_dynamic_shapes", False)
   # Pytorch exports has int64 constants.
