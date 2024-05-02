@@ -13,6 +13,7 @@
 # limitations under the License.
 
 TORCHXLA_TAG=jetstream-pytorch
+JETSTREAM_TAG=v0.2.0
 
 # Uninstall existing jax
 pip3 show jax && pip3 uninstall -y jax
@@ -34,6 +35,7 @@ git checkout $TORCHXLA_TAG
 pip install .
 popd  # now at the folder deps
 pushd JetStream
+git checkout $JETSTREAM_TAG
 pip install .
 popd # now at the folder deps
 popd # now at the folder current file

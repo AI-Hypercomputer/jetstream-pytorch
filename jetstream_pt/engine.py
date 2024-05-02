@@ -33,6 +33,7 @@ from torch.utils import _pytree as pytree
 from jetstream_pt import cache_manager
 from jetstream_pt import quantize
 from jetstream_pt.environment import JetEngineEnvironment, JetEngineEnvironmentData
+from jetstream_pt.third_party.llama2 import model_exportable, model_args
 
 
 Mesh = jax.sharding.Mesh
@@ -693,7 +694,6 @@ def create_pytorch_engine(
   pt_model = None
 
   if model_name.startswith("llama"):
-    from jetstream_pt.third_party.llama2 import model_exportable, model_args
 
     args = model_args.get_model_args(
         param_size,
