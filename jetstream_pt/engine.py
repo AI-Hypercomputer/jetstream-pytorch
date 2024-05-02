@@ -529,11 +529,13 @@ class PyTorchEngine(engine_api.Engine):
     # pylint: disable-next=all
     return tokenizer_pb2.TokenizerParameters(path=self.env.tokenizer_path)
 
-  def build_tokenizer(self, meta: tokenizer_pb2.TokenizerParameters) -> tokenizer_api.Tokenizer:
-    if 'llama-3' in self.env.model_type:
-      return token_utils.TikToken(meta)
-    else:
-      return token_utils.SentencePieceTokenizer(meta)
+  def build_tokenizer(
+      self, metadata: tokenizer_pb2.TokenizerParameters
+  ) -> tokenizer_api.Tokenizer:
+    if "llama-3" in self.env.model_type:
+      return token_utils.TikToken(metadata)
+
+    return token_utils.SentencePieceTokenizer(metadata)
 
   def join_prefixes(
       self,
@@ -661,16 +663,18 @@ def create_pytorch_engine(
     context_length: int = 1024,
     batch_size: int = 1,
     max_decode_length: int = 4096,
-    model_name = "llama-2",
-    quantize_weights = False,
-    quantize_kv = False,
-    max_cache_length = 1024,
+    model_name="llama-2",
+    quantize_weights=False,
+    quantize_kv=False,
+    max_cache_length=1024,
 ) -> PyTorchEngine:
   """Returns: The pytorch engine."""
 
-  supported_models = ['llama-2', 'llama-3']
+  supported_models = ["llama-2", "llama-3"]
   if model_name not in supported_models:
-    raise NotImplementedError('Model name should be one of {}'.format(','.join(supported_models)))
+    raise NotImplementedError(
+        f"Model name should be one of{','.join(supported_models)}"
+    )   
   # See issue b/309529778 if it's turned on.
   jax.config.update("jax_dynamic_shapes", False)
   # Pytorch exports has int64 constants.
@@ -703,30 +707,32 @@ def create_pytorch_engine(
     checkpoint_path = paths[0]
 
   env_data = JetEngineEnvironmentData(
-    tokenizer_path=tokenizer_path,
-    checkpoint_path = checkpoint_path,
-    checkpoint_format = checkpoint_format,
-    model_type = model_name + '-' + param_size,
-    batch_size = batch_size,
-    max_decode_length = max_decode_length,
-    max_input_sequence_length = context_length,
-    enable_weight_quantization = quantize_weights,
-    enable_kv_quantization = quantize_kv,
-    cache_sequence_length = max_cache_length,
-    bf16_enable = bf16_enable,
+      tokenizer_path=tokenizer_path,
+      checkpoint_path=checkpoint_path,
+      checkpoint_format=checkpoint_format,
+      model_type=model_name + "-" + param_size,
+      batch_size=batch_size,
+      max_decode_length=max_decode_length,
+      max_input_sequence_length=context_length,
+      enable_weight_quantization=quantize_weights,
+      enable_kv_quantization=quantize_kv,
+      cache_sequence_length=max_cache_length,
+      bf16_enable=bf16_enable,
   )
   env = JetEngineEnvironment(env_data)
-  args = model_args.get_model_args(model_name + '-' + param_size, context_length, batch_size, bf16_enable)
-  args.device = 'meta'
+  args = model_args.get_model_args(
+      model_name + "-" + param_size, context_length, batch_size, bf16_enable
+  )
+  args.device = "meta"
   args.quantize = quantize_weights
   pt_model = model_exportable.Transformer(args, env)
 
   num_params_size = 0
   num_params = 0
-  for k, v in pt_model.state_dict().items():
+  for _, v in pt_model.state_dict().items():
     num_params += 1
     num_params_size += np.prod(v.shape) * (1 if v.dtype == jnp.int8 else 2)
-  print('Number of param Gbytes:', num_params_size / (1 << 30))
-  print('Number of param: ', num_params)
+  print("Number of param Gbytes:", num_params_size / (1 << 30))
+  print("Number of param: ", num_params)
 
   return PyTorchEngine(pt_model=pt_model, env=env)

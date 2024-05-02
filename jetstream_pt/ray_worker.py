@@ -34,7 +34,7 @@ import torch_xla2
 
 from jetstream.engine import engine_api, tokenizer_pb2, token_utils
 
-from jetstream_pt.third_party.llama2 import model_exportable, model_args
+from jetstream_pt.third_party.llama import model_exportable, model_args
 
 from jetstream_pt import cache_manager
 from jetstream_pt import quantize

@@ -67,7 +67,7 @@ class LlamaE2ETest(unittest.TestCase):
     tokens = np.arange(10, dtype=np.int32)
     file_dir = os.path.dirname(__file__)
     tokenizer_path = os.path.join(
-        file_dir, "../jetstream_pt/third_party/llama2/tokenizer.model"
+        file_dir, "../jetstream_pt/third_party/llama/tokenizer.model"
     )
     output_tokens_multiple = []
     for i in [1, 999, 99999]:
@@ -104,7 +104,7 @@ class LlamaE2ETest(unittest.TestCase):
 
     file_dir = os.path.dirname(__file__)
     tokenizer_path = os.path.join(
-        file_dir, "../jetstream_pt/third_party/llama2/tokenizer.model"
+        file_dir, "../jetstream_pt/third_party/llama/tokenizer.model"
     )
 
     seed = 1
@@ -169,7 +169,7 @@ class LlamaE2ETest(unittest.TestCase):
 
     file_dir = os.path.dirname(__file__)
     tokenizer_path = os.path.join(
-        file_dir, "../jetstream_pt/third_party/llama2/tokenizer.model"
+        file_dir, "../jetstream_pt/third_party/llama/tokenizer.model"
     )
 
     # orginal
@@ -255,7 +255,7 @@ class LlamaE2ETest(unittest.TestCase):
 
     file_dir = os.path.dirname(__file__)
     tokenizer_path = os.path.join(
-        file_dir, "../jetstream_pt/third_party/llama2/tokenizer.model"
+        file_dir, "../jetstream_pt/third_party/llama/tokenizer.model"
     )
 
     # orginal
@@ -329,7 +329,7 @@ class LlamaE2ETest(unittest.TestCase):
 
     file_dir = os.path.dirname(__file__)
     tokenizer_path = os.path.join(
-        file_dir, "../jetstream_pt/third_party/llama2/tokenizer.model"
+        file_dir, "../jetstream_pt/third_party/llama/tokenizer.model"
     )
 
     # orginal
@@ -399,7 +399,7 @@ class LlamaE2ETest(unittest.TestCase):
 
     file_dir = os.path.dirname(__file__)
     tokenizer_path = os.path.join(
-        file_dir, "../jetstream_pt/third_party/llama2/tokenizer.model"
+        file_dir, "../jetstream_pt/third_party/llama/tokenizer.model"
     )
 
     # orginal
@@ -476,7 +476,7 @@ class LlamaE2ETest(unittest.TestCase):
 
     file_dir = os.path.dirname(__file__)
     tokenizer_path = os.path.join(
-        file_dir, "../jetstream_pt/third_party/llama2/tokenizer.model"
+        file_dir, "../jetstream_pt/third_party/llama/tokenizer.model"
     )
 
     # orginal
