@@ -71,15 +71,14 @@ class JetEngineEnvironmentData:
 # pylint: disable-next=all
 class JetEngineEnvironment:
 
-    def __init__(self, data: JetEngineEnvironmentData):
-        self._data = data
-        # Get 13b
-        self._model_arg = model_args.get_model_args(
-            data.model_type,
-            context_length=data.max_input_sequence_length,
-            batch_size=data.batch_size,
-            bf16_enable=data.bf16_enable,
-            )
+  def __init__(self, data: JetEngineEnvironmentData):
+    self._data = data
+    self._model_arg = model_args.get_model_args(
+        data.model_type,
+        context_length=data.max_input_sequence_length,
+        batch_size=data.batch_size,
+        bf16_enable=data.bf16_enable,
+    )
 
     self.batch_size = self._data.batch_size
     self.seq_len = self._data.max_input_sequence_length

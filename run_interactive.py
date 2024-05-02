@@ -148,12 +148,9 @@ def main(argv):
       if complete[0]:
         break
       token_id = output[0][0]
-      output_str = tokenizer.decode_str([token_id])
-      print(Fore.GREEN + output_str, end="", flush=True)
-
       sampled_tokens_list.append(token_id)
-    #   output = token_utils.mix_decode(vocab, token_id)
-    #   print(Fore.GREEN + output, end="", flush=True)
+      # output_str = tokenizer.decode_str([token_id])
+      # print(Fore.GREEN + output_str, end="", flush=True)
 
     # print(Style.RESET_ALL + "\n")
     # print("---- Streaming decode finished.")
@@ -161,7 +158,7 @@ def main(argv):
     print("---- All output tokens.")
     print(sampled_tokens_list)
     print("---- All output text.")
-    print(vocab.tokenizer.decode(sampled_tokens_list))
+    print(tokenizer.decode_str(sampled_tokens_list))
 
   if _PROFILING_OUTPUT.value:
     jax.profiler.stop_trace()
