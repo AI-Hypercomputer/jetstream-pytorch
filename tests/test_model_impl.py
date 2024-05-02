@@ -18,6 +18,7 @@ import jax.numpy as jnp
 import torch
 from torch.utils import _pytree as pytree
 import torch_xla2
+from . import helpers
 
 from jetstream_pt.third_party.llama import model_exportable
 from jetstream_pt.third_party.llama import model_original
@@ -32,7 +33,8 @@ class ModelComponentTest(unittest.TestCase):
 
   def setup(self):
     """setup torch env"""
-    torch.set_default_dtype(torch.bfloat16)
+    jax.config.update("jax_platform_name", "cpu")
+    torch.set_default_dtype(torch.float32)
 
   def _prefill_mask(self, seqlen, start_pos):
     mask = torch.full((seqlen, seqlen), float("-inf"))
@@ -63,19 +65,6 @@ class ModelComponentTest(unittest.TestCase):
         torch.Tensor, torch_xla2.tensor.move_to_device, tree
     )
 
-  def _make_env(self):
-    jax.config.update("jax_platform_name", "cpu")
-    torch.set_default_dtype(torch.float32)
-    env_data = environment.JetEngineEnvironmentData()
-    env_data.max_input_sequence_length = 128
-    env_data.max_input_sequence_length = 128
-    env_data.cache_sequence_length = 128
-    env_data.model_type = "llama-2-tiny"
-    env_data.batch_size = 1
-    env = environment.JetEngineEnvironment(env_data)
-    env.apply_sharding = lambda *args, **kwargs: None  # don't shard on cpu
-    return env
-
   def _call_xla_model(self, model, weights, args):
     with jax.default_device(jax.devices("cpu")[0]):
       xla_weights, xla_inputs = self._to_xla_tensor((weights, args))
@@ -96,12 +85,9 @@ class ModelComponentTest(unittest.TestCase):
       print("diff ", (cache_torch[0, s] - cache_j[0, :, s]).norm())
 
   def _make_one_cache_for_generate(self, env, pos):
-    cache_array_k = jnp.zeros(
-        (1, env.num_heads, env.cache_sequence_length, env.head_dim)
-    )
-    cache_array_v = jnp.zeros(
-        (1, env.num_heads, env.cache_sequence_length, env.head_dim)
-    )
+    cache_array_k = jnp.zeros(env.cache_shape)
+
+    cache_array_v = jnp.zeros(env.cache_shape)
     cache_array_k, cache_array_v = torch_xla2.tensor.wrap(
         (cache_array_k, cache_array_v)
     )
@@ -112,8 +98,7 @@ class ModelComponentTest(unittest.TestCase):
 
   # pylint: disable-next=all
   def test_attention(self):
-    env = self._make_env()
-    model_arg = env._model_arg
+    env, model_arg = helpers.make_env_tiny(False)
 
     attention_orig = model_original.Attention(model_arg)
     attention_ours = layers.Attention(model_arg, env)
@@ -186,9 +171,7 @@ class ModelComponentTest(unittest.TestCase):
 
   # pylint: disable-next=all
   def test_transformer_block(self):
-    env = self._make_env()
-    # pylint: disable-next=all
-    model_arg = env._model_arg
+    env, model_arg = helpers.make_env_tiny(False)
 
     block_orig = model_original.TransformerBlock(0, model_arg)
     block_ours = model_exportable.TransformerBlock(0, model_arg, env)
@@ -260,9 +243,7 @@ class ModelComponentTest(unittest.TestCase):
   # pylint: disable-next=all
   def test_transformer(self):
     """test transformer diff between original model vs xla_model"""
-    env = self._make_env()
-    # pylint: disable-next=all
-    model_arg = env._model_arg
+    env, model_arg = helpers.make_env_tiny(False)
 
     model_orig = model_original.Transformer(model_arg)
     state_dict = dict(model_orig.state_dict())
