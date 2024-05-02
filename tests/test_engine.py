@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# pylint: disable=all
 from typing import List, Any
 import unittest
 import torch
@@ -41,8 +42,6 @@ from jetstream_pt.third_party.llama import model_exportable, model_original
 #         for cache in caches:
 #             cache.update(torch.ones((batch_size, seqlen)))
 #         return torch.ones((batch_size, seqlen), dtype=torch.int32) * 2
-    
-
 
 
 # class EngineTest(unittest.TestCase):
@@ -124,7 +123,7 @@ from jetstream_pt.third_party.llama import model_exportable, model_original
 #             decode_state.tokens,
 #             decode_state.caches,
 #             decode_state.cache_scales,
-#             10, # current position 
+#             10, # current position
 #             decode_state.lens,
 #             decode_state.validity,
 #             decode_state.true_length,
@@ -170,7 +169,7 @@ from jetstream_pt.third_party.llama import model_exportable, model_original
 #             decode_state.tokens,
 #             decode_state.caches,
 #             decode_state.cache_scales,
-#             10, # current position 
+#             10, # current position
 #             decode_state.lens,
 #         )
 #         updated = engine.insert(
@@ -185,8 +184,8 @@ from jetstream_pt.third_party.llama import model_exportable, model_original
 #                         inflated = k * k_scale
 #                         index = s + 10
 #                         self.assertTrue(
-#                             jnp.allclose(inflated[1, h, index, d], 
-#                             seqlen + jnp.bfloat16(s), atol=0.1, rtol=0.01), 
+#                             jnp.allclose(inflated[1, h, index, d],
+#                             seqlen + jnp.bfloat16(s), atol=0.1, rtol=0.01),
 #                             f"{inflated[1, h, index, d]} vs. {seqlen + jnp.bfloat16(s)}")
 
 #     def test_insert4(self):
@@ -222,8 +221,8 @@ from jetstream_pt.third_party.llama import model_exportable, model_original
 #                     for d in range(dl):
 #                         inflated = k * k_scale
 #                         self.assertTrue(
-#                             jnp.allclose(inflated[1, h, s, d], 
-#                             seqlen + jnp.bfloat16(s), atol=0.1, rtol=0.01), 
+#                             jnp.allclose(inflated[1, h, s, d],
+#                             seqlen + jnp.bfloat16(s), atol=0.1, rtol=0.01),
 #                             f"{inflated[1, h, s, d]} vs. {seqlen + jnp.bfloat16(s)}")
 
 #     def test_tiny(self):
@@ -236,7 +235,6 @@ from jetstream_pt.third_party.llama import model_exportable, model_original
 #         engine.pt_model = model_ours
 
 #         # prefill
-        
 
 
 # if __name__ == '__main__':

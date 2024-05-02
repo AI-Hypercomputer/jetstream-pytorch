@@ -24,12 +24,7 @@ from colorama import Fore, Style
 import jax
 
 from jetstream.engine import token_utils
-from colorama import Fore, Style
-import numpy as np
-
-import os
-
-from jetstream_pt import engine as je
+from jetstream_pt import ray_engine
 
 FLAGS = flags.FLAGS
 
@@ -69,24 +64,21 @@ _QUANTIZE_KV_CACHE = flags.DEFINE_bool(
 _MAX_CACHE_LENGTH = flags.DEFINE_integer(
     "max_cache_length", 1024, "kv_cache_quantize"
 )
-_MODEL_NAME = flags.DEFINE_string('model', 'llama-2', 'name of the model. Supported options are llama-2 and llama-3')
+
 
 def create_engine():
   """create a pytorch engine"""
   jax.config.update("jax_default_prng_impl", "unsafe_rbg")
   os.environ["TF_CPP_MIN_LOG_LEVEL"] = "0"
 
-  devices = jax.devices()
   start = time.perf_counter()
-  engine = je.create_pytorch_engine(
-      devices=devices,
+  engine = ray_engine.create_pytorch_ray_engine(
       tokenizer_path=_TOKENIZER_PATH.value,
       ckpt_path=_CKPT_PATH.value,
       bf16_enable=True,
       param_size=_SIZE.value,
       context_length=_CONTEXT_LENGTH.value,
       batch_size=_BATCH_SIZE.value,
-      model_name = _MODEL_NAME.value,
       quantize_weights=_QUANTIZE_WEIGHTS.value,
       quantize_kv=_QUANTIZE_KV_CACHE.value,
       max_cache_length=_MAX_CACHE_LENGTH.value,
@@ -102,17 +94,18 @@ def main(argv):
   engine = create_engine()
 
   start = time.perf_counter()
-  params = engine.load_params()
+  engine.load_params()
   print("Load params ", time.perf_counter() - start)
 
   metadata = engine.get_tokenizer()
-  tokenizer = engine.build_tokenizer(metadata)
+  vocab = token_utils.load_vocab(metadata.path, metadata.extra_ids)
+  stop_tokens = [vocab.eos_id, vocab.pad_id]
   max_output_length = 1024
 
   if _PROFILING_OUTPUT.value:
     jax.profiler.start_trace(_PROFILING_OUTPUT.value)
 
-  decode_state = engine.init_decode_state()
+  engine.init_decode_state()
   prompts: List[str] = [
       "I believe the meaning of life is",
       # pylint: disable-next=all
@@ -125,38 +118,33 @@ def main(argv):
       "<s>[INST] <<SYS>>\nYou are an AI assistant. You will be given a task. You must generate a detailed and long answer.\n<</SYS>>\n\nContinue the following story.\n\nKay didn't have shoes that fit her feet properly. She only wore sneakers, because the \nChoose from: [I] shoes  fitted badly. [II] sneakers  fitted badly. [/INST]",
   ]
   for prompt in prompts:
-    slot = random.randint(0, _BATCH_SIZE.value) 
-    tokens, true_length = tokenizer.encode(prompt, is_bos=True)
+    slot = random.randint(0, _BATCH_SIZE.value - 1)
+    tokens, true_length = token_utils.tokenize_and_pad(
+        prompt, vocab, is_bos=True, jax_padding=False
+    )
     print(f"---- Input prompts are: {prompt}")
     print(f"---- Encoded tokens are: {tokens}")
 
     # pylint: disable-next=all
     prefill_result = engine.prefill(
-        params=params, padded_tokens=tokens, true_length=true_length
+        params=None, padded_tokens=tokens, true_length=true_length
     )
     # pylint: disable-next=all
-    decode_state = engine.insert(prefill_result, decode_state, slot=slot)
+    decode_state = engine.insert(prefill_result, None, slot=slot)
     sampled_tokens_list = []
-    print(f"---- Streaming decode started on #slot{slot}.")
-    complete = np.zeros((1,), dtype=np.bool_)
     while True:
-      decode_state, result_tokens = engine.generate(
-        params, decode_state
-      )
-      result_tokens = result_tokens.convert_to_numpy()
-      output, complete = tokenizer.decode(slot, max_output_length, result_tokens, complete)
-      if complete[0]:
+      # pylint: disable-next=all
+      decode_state, result_tokens = engine.generate(None, decode_state)
+
+      slot_data = result_tokens.get_result_at_slot(slot)
+      slot_tokens = slot_data.tokens
+      slot_lengths = slot_data.lengths
+
+      token_id = slot_tokens[slot, 0].item()
+      if slot_lengths > max_output_length or token_id in stop_tokens:
         break
-      token_id = output[0][0]
-      output_str = tokenizer.decode_str([token_id])
-      print(Fore.GREEN + output_str, end="", flush=True)
 
       sampled_tokens_list.append(token_id)
-    #   output = token_utils.mix_decode(vocab, token_id)
-    #   print(Fore.GREEN + output, end="", flush=True)
-
-    # print(Style.RESET_ALL + "\n")
-    # print("---- Streaming decode finished.")
 
     print("---- All output tokens.")
     print(sampled_tokens_list)
