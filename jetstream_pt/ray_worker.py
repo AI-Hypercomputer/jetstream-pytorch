@@ -160,9 +160,9 @@ class PyTorchRayWorker:
     env = JetEngineEnvironment(env_data)
 
     pt_model = None
-    if 'llama' in model_name :
+    if "llama" in model_name:
       args = model_args.get_model_args(
-          model_name + '-' + param_size,
+          model_name + "-" + param_size,
           context_length,
           batch_size,
           bf16_enable,

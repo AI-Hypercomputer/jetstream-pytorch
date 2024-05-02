@@ -31,7 +31,7 @@ class ModelArgs:
   bf16_enable: bool = False
   head_dim = -1
   infer_length = 0
-  device = 'cpu'
+  device = "cpu"
   quantize = False
 
   rope_theta: float = 10000.0
@@ -84,7 +84,7 @@ def get_arg(
         "n_layers": 80,
         "norm_eps": 1e-05,
     }
-  elif model_name == 'llama-3-8b':
+  elif model_name == "llama-3-8b":
     data = {
         "dim": 4096,
         "vocab_size": 128256,
@@ -103,17 +103,18 @@ def get_arg(
       **data,
   )
 
+
 def get_model_args(model_name, context_length, batch_size, bf16_enable):
-    model_args = get_arg(
-        model_name=model_name,
-        seqlen=context_length,
-        batch_size=batch_size,
-        bf16_enable=bf16_enable,
-    )
-    model_args.n_kv_heads = (
-        model_args.n_heads
-        if model_args.n_kv_heads is None
-        else model_args.n_kv_heads
-    )
-    model_args.head_dim = model_args.dim // model_args.n_heads
-    return model_args
+  model_args = get_arg(
+      model_name=model_name,
+      seqlen=context_length,
+      batch_size=batch_size,
+      bf16_enable=bf16_enable,
+  )
+  model_args.n_kv_heads = (
+      model_args.n_heads
+      if model_args.n_kv_heads is None
+      else model_args.n_kv_heads
+  )
+  model_args.head_dim = model_args.dim // model_args.n_heads
+  return model_args

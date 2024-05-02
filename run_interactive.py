@@ -69,7 +69,12 @@ _QUANTIZE_KV_CACHE = flags.DEFINE_bool(
 _MAX_CACHE_LENGTH = flags.DEFINE_integer(
     "max_cache_length", 1024, "kv_cache_quantize"
 )
-_MODEL_NAME = flags.DEFINE_string('model', 'llama-2', 'name of the model. Supported options are llama-2 and llama-3')
+_MODEL_NAME = flags.DEFINE_string(
+    "model",
+    "llama-2",
+    "name of the model. Supported options are llama-2 and llama-3",
+)
+
 
 def create_engine():
   """create a pytorch engine"""
@@ -86,7 +91,7 @@ def create_engine():
       param_size=_SIZE.value,
       context_length=_CONTEXT_LENGTH.value,
       batch_size=_BATCH_SIZE.value,
-      model_name = _MODEL_NAME.value,
+      model_name=_MODEL_NAME.value,
       quantize_weights=_QUANTIZE_WEIGHTS.value,
       quantize_kv=_QUANTIZE_KV_CACHE.value,
       max_cache_length=_MAX_CACHE_LENGTH.value,
@@ -125,7 +130,7 @@ def main(argv):
       "<s>[INST] <<SYS>>\nYou are an AI assistant. You will be given a task. You must generate a detailed and long answer.\n<</SYS>>\n\nContinue the following story.\n\nKay didn't have shoes that fit her feet properly. She only wore sneakers, because the \nChoose from: [I] shoes  fitted badly. [II] sneakers  fitted badly. [/INST]",
   ]
   for prompt in prompts:
-    slot = random.randint(0, _BATCH_SIZE.value) 
+    slot = random.randint(0, _BATCH_SIZE.value)
     tokens, true_length = tokenizer.encode(prompt, is_bos=True)
     print(f"---- Input prompts are: {prompt}")
     print(f"---- Encoded tokens are: {tokens}")
@@ -140,11 +145,11 @@ def main(argv):
     print(f"---- Streaming decode started on #slot{slot}.")
     complete = np.zeros((1,), dtype=np.bool_)
     while True:
-      decode_state, result_tokens = engine.generate(
-        params, decode_state
-      )
+      decode_state, result_tokens = engine.generate(params, decode_state)
       result_tokens = result_tokens.convert_to_numpy()
-      output, complete = tokenizer.decode(slot, max_output_length, result_tokens, complete)
+      output, complete = tokenizer.decode(
+          slot, max_output_length, result_tokens, complete
+      )
       if complete[0]:
         break
       token_id = output[0][0]
