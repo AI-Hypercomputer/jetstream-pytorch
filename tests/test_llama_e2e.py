@@ -77,7 +77,7 @@ class LlamaE2ETest(unittest.TestCase):
         file_dir, "../jetstream_pt/third_party/llama/tokenizer.model"
     )
     output_tokens_multiple = []
-    model_arg = model_args.get_model_args("tiny", 128, 1, 32000, True)
+    model_arg = model_args.get_model_args("llama-2-tiny", 128, 1, True)
     for i in [1, 999, 99999]:
       llama_original = LlamaOriginal.build(tokenizer_path, model_arg, i)
       prompt_tokens = [tokens]

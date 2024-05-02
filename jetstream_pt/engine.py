@@ -709,11 +709,7 @@ def create_pytorch_engine(
   if model_name.startswith("llama"):
 
     args = model_args.get_model_args(
-        param_size,
-        context_length,
-        batch_size,
-        tokenizer.vocab_size,
-        bf16_enable,
+      model_name + "-" + param_size, context_length, batch_size, bf16_enable
     )
     args.device = "meta"
     args.quantize = quantize_weights
