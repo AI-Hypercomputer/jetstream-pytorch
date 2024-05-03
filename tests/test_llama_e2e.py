@@ -34,10 +34,6 @@ from jetstream_pt import environment
 class LlamaE2ETest(unittest.TestCase):
   """This test class includes all E2E test for llama2"""
 
-  def setup(self):
-    """setup torch env"""
-    torch.set_default_dtype(torch.bfloat16)
-
   def _to_jax(self, tree):
     return pytree.tree_map_only(torch.Tensor, torch_xla2.tensor.t2j, tree)
 
@@ -225,6 +221,7 @@ class LlamaE2ETest(unittest.TestCase):
     print(f"---------> {jax.devices()}")
 
     env, model_arg = helpers.make_env_tiny(bf16_enable=False)
+    torch.set_default_dtype(torch.float32)
     out_tokens, expected_output_tokens = self._llama_e2e(env, model_arg)
     self.assertEqual(out_tokens, expected_output_tokens)
 
@@ -235,6 +232,7 @@ class LlamaE2ETest(unittest.TestCase):
     print(f"---------> {jax.devices()}")
 
     env, model_arg = helpers.make_env_tiny(bf16_enable=True)
+    torch.set_default_dtype(torch.bfloat16)
     out_tokens, expected_output_tokens = self._llama_e2e(env, model_arg)
     self.assertNotEqual(out_tokens, expected_output_tokens)
 
@@ -388,8 +386,8 @@ class LlamaE2ETest(unittest.TestCase):
     jax.config.update("jax_platform_name", "cpu")
     print(f"---------> {jax.devices()}")
 
-    torch.set_default_dtype(torch.float32)
     env, model_arg = helpers.make_env_tiny(bf16_enable=False)
+    torch.set_default_dtype(torch.float32)
     # pylint: disable-next=all
     tokens = np.arange(10, dtype=np.int32)
     true_length = tokens.shape[-1]
@@ -464,7 +462,7 @@ class LlamaE2ETest(unittest.TestCase):
     jax.config.update("jax_platform_name", "cpu")
     print(f"---------> {jax.devices()}")
 
-    torch.set_default_dtype(torch.float32)
+    torch.set_default_dtype(torch.bfloat16)
     env, model_arg = helpers.make_env_tiny()
     # pylint: disable-next=all
     tokens = np.arange(10, dtype=np.int32)

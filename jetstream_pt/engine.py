@@ -34,6 +34,7 @@ from jetstream_pt import cache_manager
 from jetstream_pt import quantize
 from jetstream_pt.environment import JetEngineEnvironment, JetEngineEnvironmentData
 from jetstream_pt.third_party.llama import model_exportable, model_args
+from jetstream_pt.third_party.gemma import config as gemma_config, model as gemma_model
 
 
 Mesh = jax.sharding.Mesh
@@ -107,32 +108,6 @@ class PyTorchEngine(engine_api.Engine):
     #      donate_argnums=(0, 1),
     #      out_shardings=self.get_decode_state_sharding())
     self._lock = threading.RLock()
-
-  # pylint: disable-next=all
-  def sharding_by_name(self, name):
-
-    # This allows easier way to edit shardings
-    """
-    for key, val in self.env._data.experimental_sharding_axis_override.items():
-      if name.endswith(key):
-        return self.env.sharding_by_axis(val)
-    """
-
-    if "weight_scaler" in name:
-      return self.x_sharding
-    if "tok_embeddings." in name:
-      return self.y_sharding
-    if "attention." in name:
-      if "wo" in name:
-        return self.y_sharding
-      return self.x_sharding
-    if "feed_forward." in name:
-      if "w2" in name:
-        return self.y_sharding
-      return self.x_sharding
-    if "output" in name:
-      return self.x_sharding
-    return self.replicated
 
   # pylint: disable-next=all
   def init_decode_state(
@@ -561,7 +536,7 @@ class PyTorchEngine(engine_api.Engine):
       for key, model_weights in self.pt_model.state_dict().items():
         if key == "freqs_cis":
           continue
-        arr = jax.device_put(f.get_tensor(key), self.sharding_by_name(key))
+        arr = jax.device_put(f.get_tensor(key), self.env.sharding_by_name(key))
         assert tuple(model_weights.shape) == tuple(
             arr.shape
         ), f"key: {key} error: {model_weights.shape} != {arr.shape}"
@@ -587,7 +562,7 @@ class PyTorchEngine(engine_api.Engine):
       else:
         jax_weights = self._make_state_dict_jax(self.pt_model.state_dict())
     jax_weights = {
-        key: jax.device_put(value, self.sharding_by_name(key))
+        key: jax.device_put(value, self.env.sharding_by_name(key))
         for key, value in jax_weights.items()
     }
     for k, v in jax_weights.items():
@@ -664,6 +639,7 @@ def create_pytorch_engine(
     quantize_weights=False,
     quantize_kv=False,
     max_cache_length=1024,
+    sharding_config=None,
 ) -> PyTorchEngine:
   """Returns: The pytorch engine."""
 
@@ -706,6 +682,20 @@ def create_pytorch_engine(
   tokenizer = token_utils.load_vocab(tokenizer_path)
   pt_model = None
 
+  env_data = JetEngineEnvironmentData(
+      tokenizer_path=tokenizer_path,
+      checkpoint_path=checkpoint_path,
+      checkpoint_format=checkpoint_format,
+      batch_size=batch_size,
+      max_decode_length=max_decode_length,
+      max_input_sequence_length=context_length,
+      enable_weight_quantization=quantize_weights,
+      enable_kv_quantization=quantize_kv,
+      cache_sequence_length=max_cache_length,
+      bf16_enable=bf16_enable,
+      sharding_config_path=sharding_config,
+  )
+
   if model_name.startswith("llama"):
 
     args = model_args.get_model_args(
@@ -713,35 +703,37 @@ def create_pytorch_engine(
     )
     args.device = "meta"
     args.quantize = quantize_weights
-    env_data = JetEngineEnvironmentData(
-        tokenizer_path=tokenizer_path,
-        checkpoint_path=checkpoint_path,
-        checkpoint_format=checkpoint_format,
-        model_type="llama-2-" + param_size,
-        batch_size=batch_size,
-        max_decode_length=max_decode_length,
-        max_input_sequence_length=context_length,
-        enable_weight_quantization=quantize_weights,
-        enable_kv_quantization=quantize_kv,
-        cache_sequence_length=max_cache_length,
-        bf16_enable=bf16_enable,
-        num_layers=args.n_layers,
-        cache_shape=(
-            batch_size,
-            args.n_kv_heads,
-            max_cache_length,
-            args.dim // args.n_heads,
-        ),
+    env_data.cache_shape = (
+        batch_size,
+        args.n_kv_heads,
+        max_cache_length,
+        args.dim // args.n_heads,
     )
+    env_data.model_type = "llama-2-" + param_size
+    env_data.num_layers = args.n_layers
     env = JetEngineEnvironment(env_data)
     pt_model = model_exportable.Transformer(args, env)
+  elif model_name == "gemma":
+    args = gemma_config.get_model_config(param_size)
+    env_data.cache_shape = (
+        batch_size,
+        args.num_key_value_heads,
+        max_cache_length,
+        args.head_dim,
+    )
+    env_data.model_type = "gemma-" + param_size
+    env_data.num_layers = args.num_hidden_layers
+    env = JetEngineEnvironment(env_data)
+    pt_model = gemma_model.GemmaModel(args, env)
+  else:
+    raise RuntimeError(f"Model with name {model_name} not found")
 
-    num_params_size = 0
-    num_params = 0
-    for _, v in pt_model.state_dict().items():
-      num_params += 1
-      num_params_size += np.prod(v.shape) * (1 if v.dtype == torch.int8 else 2)
-    print("Number of param Gbytes:", num_params_size / (1 << 30))
-    print("Number of param: ", num_params)
+  num_params_size = 0
+  num_params = 0
+  for _, v in pt_model.state_dict().items():
+    num_params += 1
+    num_params_size += np.prod(v.shape) * (1 if v.dtype == torch.int8 else 2)
+  print("Number of param Gbytes:", num_params_size / (1 << 30))
+  print("Number of param: ", num_params)
 
   return PyTorchEngine(pt_model=pt_model, env=env)
