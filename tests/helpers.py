@@ -9,7 +9,7 @@ def make_env_tiny(bf16_enable=True):
   torch.set_default_dtype(torch_dtype)
   jax.config.update("jax_dynamic_shapes", False)
   jax.config.update("jax_traceback_filtering", "off")
-  config = model_args.get_model_args("tiny", 128, 1, 32000, True)
+  config = model_args.get_model_args("llama-2-tiny", 128, 1, True)
   environment_data = environment.JetEngineEnvironmentData()
   environment_data.max_input_sequence_length = 128
   environment_data.max_input_sequence_length = 128
