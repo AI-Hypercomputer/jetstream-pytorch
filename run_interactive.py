@@ -132,6 +132,7 @@ def main(argv):
   for prompt in prompts:
     slot = random.randint(0, _BATCH_SIZE.value - 1)
     tokens, true_length = tokenizer.encode(prompt, is_bos=True)
+
     print(f"---- Input prompts are: {prompt}")
     print(f"---- Encoded tokens are: {tokens}")
 
