@@ -21,7 +21,6 @@ from absl import flags
 import jax
 import jax.numpy as jnp
 
-from jetstream.engine import token_utils
 from jetstream_pt import engine as je
 # pylint: disable-next=all
 from benchmarks import analyze_sharegpt
@@ -97,11 +96,11 @@ def create_engine():
 def run_prefill_time(engine, params, decode_state, seqlen):
   """Run prefill and measure time."""
   metadata = engine.get_tokenizer()
-  vocab = token_utils.load_vocab(metadata.path, metadata.extra_ids)
+  tokenizer = engine.build_tokenizer(metadata)
 
   text = "This is a beautiful day"
-  tokens, true_length = token_utils.tokenize_and_pad(
-      text, vocab, is_bos=True, prefill_lengths=[seqlen]
+  tokens, true_length = tokenizer.encode(
+      text, is_bos=True, prefill_lengths=[seqlen]
   )
 
   for _ in range(3):

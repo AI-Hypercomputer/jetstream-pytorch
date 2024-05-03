@@ -32,9 +32,9 @@ import ray
 from torch.utils import _pytree as pytree
 import torch_xla2
 
-from jetstream.engine import engine_api, tokenizer_pb2, token_utils
+from jetstream.engine import engine_api, tokenizer_pb2
 
-from jetstream_pt.third_party.llama2 import model_exportable, model_args
+from jetstream_pt.third_party.llama import model_exportable, model_args
 
 from jetstream_pt import cache_manager
 from jetstream_pt import quantize
@@ -99,7 +99,7 @@ class PyTorchRayWorker:
       context_length: int = 1024,
       batch_size: int = 1,
       max_decode_length: int = 4096,
-      model_name="llama",
+      model_name="llama-2",
       quantize_weights=False,
       quantize_kv=False,
       max_cache_length=1024,
@@ -159,14 +159,12 @@ class PyTorchRayWorker:
     )
     env = JetEngineEnvironment(env_data)
 
-    tokenizer = token_utils.load_vocab(tokenizer_path)
     pt_model = None
-    if model_name == "llama":
+    if "llama" in model_name:
       args = model_args.get_model_args(
-          param_size,
+          model_name + "-" + param_size,
           context_length,
           batch_size,
-          tokenizer.vocab_size,
           bf16_enable,
       )
       args.device = "meta"

@@ -13,7 +13,7 @@
 # limitations under the License.
 
 TORCHXLA_TAG=jetstream-pytorch
-JETSTREAM_TAG=v0.2.0
+JETSTREAM_TAG=v0.2.1
 
 # Uninstall existing jax
 pip3 show jax && pip3 uninstall -y jax

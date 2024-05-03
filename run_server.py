@@ -71,6 +71,11 @@ _PARAM_SIZE = flags.DEFINE_string(
     "The model size the server runs on.",
     required=False,
 )
+_MODEL_NAME = flags.DEFINE_string(
+    "model",
+    "llama-2",
+    "name of the model. Supported options are llama-2 and llama-3",
+)
 
 _QUANTIZE_WEIGHTS = flags.DEFINE_bool(
     "quantize_weights", False, "weight quantization"
@@ -98,6 +103,7 @@ def main(argv: Sequence[str]):
       param_size=_PARAM_SIZE.value,
       context_length=_CONTEXT_LENGTH.value,
       batch_size=_BATCH_SIZE.value,
+      model_name=_MODEL_NAME.value,
       quantize_weights=_QUANTIZE_WEIGHTS.value,
       quantize_kv=_QUANTIZE_KV_CACHE.value,
       max_cache_length=_MAX_CACHE_LENGTH.value,

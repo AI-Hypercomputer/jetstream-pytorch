@@ -20,8 +20,8 @@ from torch.utils import _pytree as pytree
 import torch_xla2
 from . import helpers
 
-from jetstream_pt.third_party.llama2 import model_exportable
-from jetstream_pt.third_party.llama2 import model_original
+from jetstream_pt.third_party.llama import model_exportable
+from jetstream_pt.third_party.llama import model_original
 from jetstream_pt import layers
 from jetstream_pt import environment
 from jetstream_pt import cache_manager

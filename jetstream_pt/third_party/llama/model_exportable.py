@@ -157,7 +157,9 @@ class Transformer(nn.Module):
     )
     # TODO what to do with this
     freqs_cis = precompute_freqs_cis(
-        self.params.dim // self.params.n_heads, self.params.max_seq_len * 2
+        self.params.dim // self.params.n_heads,
+        self.params.max_seq_len * 2,
+        theta=self.params.rope_theta,
     )
 
     self.register_buffer("freqs_cis", freqs_cis)

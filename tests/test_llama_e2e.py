@@ -26,8 +26,8 @@ from . import helpers
 
 
 from jetstream_pt.engine import PyTorchEngine
-from jetstream_pt.third_party.llama2 import model_exportable, model_args
-from jetstream_pt.third_party.llama2.generation_original import LlamaOriginal
+from jetstream_pt.third_party.llama import model_exportable, model_args
+from jetstream_pt.third_party.llama.generation_original import LlamaOriginal
 from jetstream_pt import environment
 
 
@@ -74,10 +74,10 @@ class LlamaE2ETest(unittest.TestCase):
     tokens = np.arange(10, dtype=np.int32)
     file_dir = os.path.dirname(__file__)
     tokenizer_path = os.path.join(
-        file_dir, "../jetstream_pt/third_party/llama2/tokenizer.model"
+        file_dir, "../jetstream_pt/third_party/llama/tokenizer.model"
     )
     output_tokens_multiple = []
-    model_arg = model_args.get_model_args("tiny", 128, 1, 32000, True)
+    model_arg = model_args.get_model_args("llama-2-tiny", 128, 1, True)
     for i in [1, 999, 99999]:
       llama_original = LlamaOriginal.build(tokenizer_path, model_arg, i)
       prompt_tokens = [tokens]
@@ -111,7 +111,7 @@ class LlamaE2ETest(unittest.TestCase):
 
     file_dir = os.path.dirname(__file__)
     tokenizer_path = os.path.join(
-        file_dir, "../jetstream_pt/third_party/llama2/tokenizer.model"
+        file_dir, "../jetstream_pt/third_party/llama/tokenizer.model"
     )
 
     seed = 1
@@ -175,7 +175,7 @@ class LlamaE2ETest(unittest.TestCase):
 
     file_dir = os.path.dirname(__file__)
     tokenizer_path = os.path.join(
-        file_dir, "../jetstream_pt/third_party/llama2/tokenizer.model"
+        file_dir, "../jetstream_pt/third_party/llama/tokenizer.model"
     )
 
     # orginal
@@ -260,7 +260,7 @@ class LlamaE2ETest(unittest.TestCase):
 
     file_dir = os.path.dirname(__file__)
     tokenizer_path = os.path.join(
-        file_dir, "../jetstream_pt/third_party/llama2/tokenizer.model"
+        file_dir, "../jetstream_pt/third_party/llama/tokenizer.model"
     )
 
     # orginal
@@ -333,7 +333,7 @@ class LlamaE2ETest(unittest.TestCase):
 
     file_dir = os.path.dirname(__file__)
     tokenizer_path = os.path.join(
-        file_dir, "../jetstream_pt/third_party/llama2/tokenizer.model"
+        file_dir, "../jetstream_pt/third_party/llama/tokenizer.model"
     )
 
     # orginal
@@ -402,7 +402,7 @@ class LlamaE2ETest(unittest.TestCase):
 
     file_dir = os.path.dirname(__file__)
     tokenizer_path = os.path.join(
-        file_dir, "../jetstream_pt/third_party/llama2/tokenizer.model"
+        file_dir, "../jetstream_pt/third_party/llama/tokenizer.model"
     )
 
     # orginal
@@ -478,7 +478,7 @@ class LlamaE2ETest(unittest.TestCase):
 
     file_dir = os.path.dirname(__file__)
     tokenizer_path = os.path.join(
-        file_dir, "../jetstream_pt/third_party/llama2/tokenizer.model"
+        file_dir, "../jetstream_pt/third_party/llama/tokenizer.model"
     )
 
     # orginal

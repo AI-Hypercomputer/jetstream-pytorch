@@ -26,14 +26,14 @@ from safetensors import safe_open
 import torch
 import numpy as np
 
-from jetstream.engine import engine_api, tokenizer_pb2, token_utils
+from jetstream.engine import engine_api, tokenizer_api, tokenizer_pb2, token_utils
 import torch_xla2
 from torch.utils import _pytree as pytree
 
 from jetstream_pt import cache_manager
 from jetstream_pt import quantize
 from jetstream_pt.environment import JetEngineEnvironment, JetEngineEnvironmentData
-from jetstream_pt.third_party.llama2 import model_exportable, model_args
+from jetstream_pt.third_party.llama import model_exportable, model_args
 
 
 Mesh = jax.sharding.Mesh
@@ -526,6 +526,14 @@ class PyTorchEngine(engine_api.Engine):
     # pylint: disable-next=all
     return tokenizer_pb2.TokenizerParameters(path=self.env.tokenizer_path)
 
+  def build_tokenizer(
+      self, metadata: tokenizer_pb2.TokenizerParameters  # pylint: disable=all
+  ) -> tokenizer_api.Tokenizer:
+    if "llama-3" in self.env.model_type:
+      return token_utils.TikToken(metadata)
+
+    return token_utils.SentencePieceTokenizer(metadata)
+
   def join_prefixes(
       self,
       prefix1: engine_api.Prefix,
@@ -652,13 +660,18 @@ def create_pytorch_engine(
     context_length: int = 1024,
     batch_size: int = 1,
     max_decode_length: int = 4096,
-    model_name="llama",
+    model_name="llama-2",
     quantize_weights=False,
     quantize_kv=False,
     max_cache_length=1024,
 ) -> PyTorchEngine:
   """Returns: The pytorch engine."""
 
+  supported_models = ["llama-2", "llama-3"]
+  if model_name not in supported_models:
+    raise NotImplementedError(
+        f"Model name should be one of{','.join(supported_models)}"
+    )
   # See issue b/309529778 if it's turned on.
   jax.config.update("jax_dynamic_shapes", False)
   # Pytorch exports has int64 constants.
@@ -696,11 +709,7 @@ def create_pytorch_engine(
   if model_name.startswith("llama"):
 
     args = model_args.get_model_args(
-        param_size,
-        context_length,
-        batch_size,
-        tokenizer.vocab_size,
-        bf16_enable,
+        model_name + "-" + param_size, context_length, batch_size, bf16_enable
     )
     args.device = "meta"
     args.quantize = quantize_weights
