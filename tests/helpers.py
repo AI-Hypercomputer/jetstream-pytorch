@@ -1,6 +1,6 @@
 import torch
 import jax
-from jetstream_pt.third_party.llama2 import model_args
+from jetstream_pt.third_party.llama import model_args
 from jetstream_pt import environment
 
 
