@@ -132,57 +132,53 @@ def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
 class Attention(nn.Module):
   """Attention module."""
 
-  def __init__(self, args, env):
+  def __init__(self, n_heads, n_kv_heads, head_dim, hidden_size, device, env):
     super().__init__()
-
-    self.n_kv_heads = (
-        args.n_heads if args.n_kv_heads is None else args.n_kv_heads
-    )
-    self.n_local_heads = args.n_heads
-    self.n_local_kv_heads = self.n_kv_heads
-    self.n_rep = self.n_local_heads // self.n_local_kv_heads
-    self.head_dim = args.dim // args.n_heads
-    self.max_seq_len = args.max_seq_len
-    self.n_heads = args.n_heads
-
+    self.n_heads = n_heads
+    self.n_kv_heads = n_kv_heads
+    self.head_dim = head_dim
+    self.n_rep = self.n_heads // self.n_kv_heads
     self.env = env
+    self.hidden_size = hidden_size
 
-    LinearLayer = WeightOnlyInt8Linear if args.quantize else nn.Linear
+    LinearLayer = (
+        WeightOnlyInt8Linear if env.enable_weight_quantization else nn.Linear
+    )
 
     self.wo = LinearLayer(
-        args.n_heads * self.head_dim,
-        args.dim,
+        n_heads * self.head_dim,
+        hidden_size,
         bias=False,
-        device=args.device,
+        device=device,
     )
-    self.q_size = args.n_heads * self.head_dim
+    self.q_size = n_heads * self.head_dim
     self.kv_size = self.n_kv_heads * self.head_dim
     if self.env.qkv_fusion:
       self._register_load_state_dict_pre_hook(self.load_hook)
       self.wqkv = LinearLayer(
-          args.dim,
-          (args.n_heads + 2 * self.n_kv_heads) * self.head_dim,
+          hidden_size,
+          (n_heads + 2 * self.n_kv_heads) * self.head_dim,
           bias=False,
-          device=args.device,
+          device=device,
       )
     else:
       self.wq = LinearLayer(
-          args.dim,
-          args.n_heads * self.head_dim,
+          hidden_size,
+          n_heads * self.head_dim,
           bias=False,
-          device=args.device,
+          device=device,
       )
       self.wk = LinearLayer(
-          args.dim,
+          hidden_size,
           self.n_kv_heads * self.head_dim,
           bias=False,
-          device=args.device,
+          device=device,
       )
       self.wv = LinearLayer(
-          args.dim,
+          hidden_size,
           self.n_kv_heads * self.head_dim,
           bias=False,
-          device=args.device,
+          device=device,
       )
 
   def load_hook(self, state_dict, prefix, *args):
@@ -210,9 +206,9 @@ class Attention(nn.Module):
         )
       else:
         xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
-      xq = xq.view(bsz, seqlen, self.n_local_heads, self.head_dim)
-      xk = xk.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
-      xv = xv.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
+      xq = xq.view(bsz, seqlen, self.n_heads, self.head_dim)
+      xk = xk.view(bsz, seqlen, self.n_kv_heads, self.head_dim)
+      xv = xv.view(bsz, seqlen, self.n_kv_heads, self.head_dim)
 
       self.env.apply_sharding(xq, axis=2)
       self.env.apply_sharding(xk, axis=2)
@@ -262,7 +258,8 @@ class Attention(nn.Module):
         self.env.apply_sharding(output, axis=1)
         output = output.transpose(-3, -2).contiguous().view(bsz, seqlen, -1)
         self.env.apply_sharding(output, axis=2)
-      return self.wo(output)
+      output = self.wo(output)
+      return output
     else:
       with jax.named_scope("attn_insert_cache"):
         keys, values, k_scaler, v_scaler = cache.update(xk, xv)

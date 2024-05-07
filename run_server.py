@@ -86,6 +86,12 @@ _QUANTIZE_KV_CACHE = flags.DEFINE_bool(
 _MAX_CACHE_LENGTH = flags.DEFINE_integer(
     "max_cache_length", 1024, "kv_cache_quantize"
 )
+_SHARDING_CONFIG = flags.DEFINE_string(
+    "sharding_config", "", "config file for sharding"
+)
+_MODEL_NAME = flags.DEFINE_string(
+    "model_name", "llama-2", "model name, defaults to llama-2"
+)
 
 
 # pylint: disable-next=all
@@ -95,6 +101,11 @@ def main(argv: Sequence[str]):
   # No devices for local cpu test. A None for prefill and a None for generate.
   devices = server_lib.get_devices()
   print(f"devices: {devices}")
+  sharding_config_path = _SHARDING_CONFIG.value
+  if not sharding_config_path:
+    sharding_config_path = os.path.join(
+        "default_shardings", _MODEL_NAME.value + ".yaml"
+    )
   engine = jetstream_pt.create_pytorch_engine(
       devices=devices,
       tokenizer_path=_TOKENIZER_PATH.value,
@@ -107,6 +118,8 @@ def main(argv: Sequence[str]):
       quantize_weights=_QUANTIZE_WEIGHTS.value,
       quantize_kv=_QUANTIZE_KV_CACHE.value,
       max_cache_length=_MAX_CACHE_LENGTH.value,
+      sharding_config=sharding_config_path,
+      model_name=_MODEL_NAME.value,
   )
   server_config = ServerConfig(
       interleaved_slices=(_PLATFORM.value,),

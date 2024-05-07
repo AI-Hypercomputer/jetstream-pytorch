@@ -75,7 +75,14 @@ class TransformerBlock(nn.Module):
     self.dim = args.dim
     self.head_dim = args.dim // args.n_heads
 
-    self.attention = Attention(args, env)
+    self.attention = Attention(
+        args.n_heads,
+        args.n_kv_heads or args.n_heads,
+        args.dim // args.n_heads,
+        args.dim,
+        env=env,
+        device=args.device,
+    )
     self.feed_forward = FeedForward(
         dim=args.dim,
         hidden_dim=4 * args.dim,

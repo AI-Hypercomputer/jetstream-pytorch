@@ -2,12 +2,7 @@
 """The original Llama2 model."""
 
 import dataclasses
-import math
-from typing import Optional, Tuple
-
-import torch
-from torch import nn
-import torch.nn.functional as F
+from typing import Optional
 
 
 @dataclasses.dataclass

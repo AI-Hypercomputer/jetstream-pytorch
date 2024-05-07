@@ -39,6 +39,9 @@ _TOKENIZER_PATH = flags.DEFINE_string(
     "The tokenizer model path",
     required=False,
 )
+_MODEL_NAME = flags.DEFINE_string(
+    "model_name", None, "model type", required=False
+)
 _CKPT_PATH = flags.DEFINE_string(
     "checkpoint_path", None, "Directory for .pth checkpoints", required=False
 )
@@ -74,6 +77,9 @@ _MODEL_NAME = flags.DEFINE_string(
     "llama-2",
     "name of the model. Supported options are llama-2 and llama-3",
 )
+_SHARDING_CONFIG = flags.DEFINE_string(
+    "sharding_config", "", "config file for sharding"
+)
 
 
 def create_engine():
@@ -84,6 +90,7 @@ def create_engine():
   devices = jax.devices()
   start = time.perf_counter()
   engine = je.create_pytorch_engine(
+      model_name=_MODEL_NAME.value,
       devices=devices,
       tokenizer_path=_TOKENIZER_PATH.value,
       ckpt_path=_CKPT_PATH.value,
@@ -95,6 +102,7 @@ def create_engine():
       quantize_weights=_QUANTIZE_WEIGHTS.value,
       quantize_kv=_QUANTIZE_KV_CACHE.value,
       max_cache_length=_MAX_CACHE_LENGTH.value,
+      sharding_config=_SHARDING_CONFIG.value,
   )
 
   print("Initialize engine", time.perf_counter() - start)

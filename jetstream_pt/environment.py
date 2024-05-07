@@ -15,6 +15,8 @@
 from typing import Tuple, Dict
 
 import dataclasses
+import yaml
+
 import jax
 import jax.sharding as jsharding
 from jax.experimental import mesh_utils
@@ -71,6 +73,8 @@ class JetEngineEnvironmentData:
   # If Ture, use bfloat16 as dtype. If False, use float32 as dtype
   bf16_enable: bool = True
 
+  sharding_config_path: str = ""
+
 
 # pylint: disable-next=all
 class JetEngineEnvironment:
@@ -100,6 +104,15 @@ class JetEngineEnvironment:
     self.cache_sharding = jsharding.NamedSharding(
         self._mesh, P(*cache_sharding)
     )
+    self._load_sharding_config()
+
+  def _load_sharding_config(self):
+    """Load sharding config"""
+    if self._data.sharding_config_path:
+      with open(self._data.sharding_config_path, encoding="utf-8") as f:
+        self._sharding_config = yaml.safe_load(f)
+    else:
+      self._sharding_config = {}
 
   def __getattr__(self, name):
     return getattr(self._data, name)
@@ -150,3 +163,35 @@ class JetEngineEnvironment:
             )
         )
     return caches
+
+  def sharding_by_name(self, name):
+    """Create sharding specified in the config."""
+    if name in self._sharding_config:
+      return self.sharding_by_axis(self._sharding_config[name])
+
+    name = process_sharding_name(name)
+    if name in self._sharding_config:
+      return self.sharding_by_axis(self._sharding_config[name])
+
+    raise RuntimeError("Sharding for name: ", name, " not specified")
+
+
+def process_sharding_name(name):
+  """Replace integers in param name with *.
+
+  Presumably all layers should have the same sharding.
+  """
+
+  def is_integer(t):
+    try:
+      int(t)
+      return True
+    # pylint: disable-next=all
+    except:  # noqa: E722
+      return False
+
+  tokens = name.split(".")
+  for i, t in enumerate(tokens):
+    if is_integer(t):
+      tokens[i] = "*"
+  return ".".join(tokens)

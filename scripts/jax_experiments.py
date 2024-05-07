@@ -331,4 +331,70 @@ def test6():
   print(x[:, :, 0:1, :])
 
 
-test6()
+# pylint: disable-next=all
+def test7():
+  """insert cache test"""
+  batch, seq, heads, dim = 96, 2048, 40, 128
+  sharding = PositionalSharding(mesh_utils.create_device_mesh((8,)))
+  sharding = sharding.reshape((1, 8, 1, 1))
+  val_sharding = sharding.reshape((1, 8, 1, 1))
+  caches_k = jnp.zeros(
+      (batch, heads, seq, dim), device=sharding, dtype=jnp.bfloat16
+  )
+  jnp.zeros((batch, heads, seq, dim), device=sharding, dtype=jnp.bfloat16)
+
+  def insert_cache(cache, index, new_entry):
+    res = cache.at[:, :, index, :].set(new_entry)
+    res = jax.lax.with_sharding_constraint(res, sharding)
+    return res
+
+  # pylint: disable-next=all
+  def insert_cache2(cache, index, new_entry):
+    res = cache.at[jnp.arange(batch), :, index, :].set(new_entry)
+    res = jax.lax.with_sharding_constraint(res, sharding)
+    return res
+
+  insert_cache = jax.jit(insert_cache, donate_argnums=(0, 1))
+  insert_cache2 = jax.jit(insert_cache2, donate_argnums=(0, 1))
+  insert_seqlen = 1024
+
+  subkey = jax.random.PRNGKey(234)
+  to_insert = jax.device_put(
+      jax.random.normal(
+          subkey, (1, heads, insert_seqlen, dim), dtype=jnp.bfloat16
+      ),
+      device=val_sharding,
+  ).block_until_ready()
+  # pylint: disable-next=all
+  j = jnp.int32(7).block_until_ready()
+
+  update_indexes = (jnp.arange(-insert_seqlen, 0) + 7) % 1024
+  head_indexes = jnp.arange(heads).reshape(1, -1, 1)
+
+  rng = jax.random.PRNGKey(0)
+
+  jax.profiler.start_trace("/tmp/insert_trace")
+  for func in (insert_cache, insert_cache2):
+    for _ in range(10):
+      all_times = 0
+      for j in range(40):
+        rng, subkey = jax.random.split(rng)
+        val = jax.device_put(
+            jax.random.normal(subkey, (batch, heads, dim), dtype=jnp.bfloat16),
+            device=sharding.reshape((1, 8, 1)),
+        ).block_until_ready()
+        # pylint: disable-next=all
+        j = jnp.int32(j).block_until_ready()
+        if func == insert_cache2:
+          j = jnp.broadcast_to(j, (batch,)).block_until_ready()
+        start = time.perf_counter()
+        # pylint: disable-next=all
+        caches_k = func(caches_k, j, val)
+        caches_k.block_until_ready()
+        end = time.perf_counter()
+        all_times += end - start
+      print(func.__name__, "time is", all_times)
+  jax.profiler.stop_trace()
+
+
+test7()

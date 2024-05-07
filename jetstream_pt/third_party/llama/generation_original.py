@@ -2,7 +2,7 @@
 # This software may be used and distributed according to the terms of the Llama 2 Community License Agreement.
 
 import os
-from typing import List, Literal, Optional, Tuple, TypedDict
+from typing import List, Literal, Optional, TypedDict
 
 import torch
 from jetstream_pt.third_party.llama import model_original
