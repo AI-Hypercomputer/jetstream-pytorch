@@ -553,12 +553,16 @@ class PyTorchEngine(engine_api.Engine):
     return weights
 
   def _load_from_state_dict(self, path):
-    
-    state_dict = torch.load(path, map_location=torch.device("cpu"))['model_state_dict']
+
+    state_dict = torch.load(path, map_location=torch.device("cpu"))[
+        "model_state_dict"
+    ]
     weights = {}
     for key, model_weights in self.pt_model.state_dict().items():
-      assert key in state_dict , f"key: {key} not found"
-      arr = jax.device_put(torch_xla2.tensor.t2j(state_dict[key]), self.env.sharding_by_name(key))
+      assert key in state_dict, f"key: {key} not found"
+      arr = jax.device_put(
+          torch_xla2.tensor.t2j(state_dict[key]), self.env.sharding_by_name(key)
+      )
       assert tuple(model_weights.shape) == tuple(
           arr.shape
       ), f"key: {key} error: {model_weights.shape} != {arr.shape}"
