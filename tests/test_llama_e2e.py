@@ -22,13 +22,13 @@ import jax.numpy as jnp
 import torch
 import torch_xla2
 from torch.utils import _pytree as pytree
-from . import helpers
 
 
 from jetstream_pt.engine import PyTorchEngine
 from jetstream_pt.third_party.llama import model_exportable, model_args
 from jetstream_pt.third_party.llama.generation_original import LlamaOriginal
 from jetstream_pt import environment
+from tests import helpers
 
 
 class LlamaE2ETest(unittest.TestCase):
@@ -93,9 +93,8 @@ class LlamaE2ETest(unittest.TestCase):
     jax.config.update("jax_platform_name", "cpu")
     print(f"---------> {jax.devices()}")
 
-    torch.set_default_dtype(torch.bfloat16)
     # pylint: disable-next=all
-    env, model_arg = helpers.make_env_tiny()
+    env, model_arg = helpers.make_env_tiny(bf16_enable=True)
     # pylint: disable-next=all
     tokens = np.arange(10, dtype=np.int32)
     true_length = tokens.shape[-1]
@@ -221,7 +220,6 @@ class LlamaE2ETest(unittest.TestCase):
     print(f"---------> {jax.devices()}")
 
     env, model_arg = helpers.make_env_tiny(bf16_enable=False)
-    torch.set_default_dtype(torch.float32)
     out_tokens, expected_output_tokens = self._llama_e2e(env, model_arg)
     self.assertEqual(out_tokens, expected_output_tokens)
 
@@ -232,7 +230,6 @@ class LlamaE2ETest(unittest.TestCase):
     print(f"---------> {jax.devices()}")
 
     env, model_arg = helpers.make_env_tiny(bf16_enable=True)
-    torch.set_default_dtype(torch.bfloat16)
     out_tokens, expected_output_tokens = self._llama_e2e(env, model_arg)
     self.assertNotEqual(out_tokens, expected_output_tokens)
 
@@ -242,9 +239,8 @@ class LlamaE2ETest(unittest.TestCase):
     jax.config.update("jax_platform_name", "cpu")
     print(f"---------> {jax.devices()}")
 
-    torch.set_default_dtype(torch.bfloat16)
     # pylint: disable-next=all
-    env, model_arg = helpers.make_env_tiny()
+    env, model_arg = helpers.make_env_tiny(bf16_enable=True)
     # pylint: disable-next=all
     tokens = np.arange(10, dtype=np.int32)
     tokens = np.append(tokens, [15050, 3503], axis=-1)
@@ -315,9 +311,8 @@ class LlamaE2ETest(unittest.TestCase):
     jax.config.update("jax_platform_name", "cpu")
     print(f"---------> {jax.devices()}")
 
-    torch.set_default_dtype(torch.bfloat16)
     # pylint: disable-next=all
-    env, model_arg = helpers.make_env_tiny()
+    env, model_arg = helpers.make_env_tiny(bf16_enable=True)
     # pylint: disable-next=all
     tokens = np.arange(10, dtype=np.int32)
     tokens = np.append(tokens, [15050, 3503, 11833, 28551], axis=-1)
@@ -387,7 +382,6 @@ class LlamaE2ETest(unittest.TestCase):
     print(f"---------> {jax.devices()}")
 
     env, model_arg = helpers.make_env_tiny(bf16_enable=False)
-    torch.set_default_dtype(torch.float32)
     # pylint: disable-next=all
     tokens = np.arange(10, dtype=np.int32)
     true_length = tokens.shape[-1]
@@ -458,12 +452,11 @@ class LlamaE2ETest(unittest.TestCase):
 
   # pylint: disable-next=all
   def test_llama_with_original_prefill_decode(self):
-    """test jetstream llama by comparing original prefill and decode steps with float32"""
+    """test jetstream llama by comparing original prefill and decode steps with bf16"""
     jax.config.update("jax_platform_name", "cpu")
     print(f"---------> {jax.devices()}")
 
-    torch.set_default_dtype(torch.bfloat16)
-    env, model_arg = helpers.make_env_tiny()
+    env, model_arg = helpers.make_env_tiny(bf16_enable=True)
     # pylint: disable-next=all
     tokens = np.arange(10, dtype=np.int32)
     true_length = tokens.shape[-1]
