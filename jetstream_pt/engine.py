@@ -552,6 +552,25 @@ class PyTorchEngine(engine_api.Engine):
 
     return weights
 
+  def _load_from_state_dict(self, path):
+    
+    state_dict = torch.load(path, map_location=torch.device("cpu"))['model_state_dict']
+    weights = {}
+    for key, model_weights in self.pt_model.state_dict().items():
+      assert key in state_dict , f"key: {key} not found"
+      arr = jax.device_put(torch_xla2.tensor.t2j(state_dict[key]), self.env.sharding_by_name(key))
+      assert tuple(model_weights.shape) == tuple(
+          arr.shape
+      ), f"key: {key} error: {model_weights.shape} != {arr.shape}"
+      weights[key] = arr
+
+    for k, v in weights.items():
+      if k.startswith("layers") and not k.startswith("layers.0"):
+        continue
+      print(f"Name: {k}, shape: {v.shape} x {v.dtype}")
+
+    return weights
+
   # pylint: disable-next=all
   def load_params(self) -> Params:
     # We want to fix this: load from files
@@ -559,6 +578,8 @@ class PyTorchEngine(engine_api.Engine):
       if self.env.checkpoint_path:
         if self.env.checkpoint_format == "safetensors":
           return self._load_from_safetensors(self.env.checkpoint_path)
+        elif self.env.checkpoint_format == "state_dict":
+          return self._load_from_state_dict(self.env.checkpoint_path)
       else:
         jax_weights = self._make_state_dict_jax(self.pt_model.state_dict())
     jax_weights = {
@@ -643,7 +664,7 @@ def create_pytorch_engine(
 ) -> PyTorchEngine:
   """Returns: The pytorch engine."""
 
-  supported_models = ["llama-2", "llama-3"]
+  supported_models = ["llama-2", "llama-3", "gemma"]
   if model_name not in supported_models:
     raise NotImplementedError(
         f"Model name should be one of{','.join(supported_models)}"
@@ -668,6 +689,9 @@ def create_pytorch_engine(
     raise NotImplementedError(
         "Loading from Pytorch raw checkpoint is not supported!"
     )
+  elif ".ckpt" in ckpt_path:
+    checkpoint_format = "state_dict"
+    checkpoint_path = ckpt_path
   else:
     path = epath.Path(ckpt_path) if ckpt_path and ckpt_path is not None else ""
     if not path.exists():

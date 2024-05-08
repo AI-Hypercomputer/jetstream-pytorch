@@ -72,6 +72,11 @@ _OUTPUT_SAFETENSORS = flags.DEFINE_bool(
 _QUANTIZE = flags.DEFINE_bool(
     "quantize", False, "When set to true, produces quantized weights"
 )
+_MODEL_TYPE = flags.DEFINE_string(
+  "model_type",
+  "llama",
+  "Type of the model."
+)
 
 # ParallelEmbedding is col partitioned across the shards.
 # ColumnParallelLinear is row partitioned across shards due to transpose.
@@ -403,11 +408,57 @@ def merge_weights(
   print(f"Export outputs takes {end - start} seconds")
 
 
+def convert_hf_gemma_weights(input_ckpt_dir: epath.Path,
+                          output_ckpt_dir: epath.Path):
+  """Convert gemma weights from Huggingface to be compatible with JetStream
+  1. Map attention weights to new names.
+  2. Split qkv fusion.
+  """
+  ckpt_file = list(input_ckpt_dir.glob("*.ckpt"))
+  assert len(ckpt_file) == 1
+  ckpt_file = ckpt_file[0]
+  state_dict = torch.load(ckpt_file, map_location=torch.device("cpu"))['model_state_dict']
+  model_config = json.loads((input_ckpt_dir / "config.json").read_text())
+  for key in list(state_dict.keys()):
+    prefix_to_remove = 'model.'
+    new_key = key
+    if key.startswith(prefix_to_remove):
+      new_key = new_key.removeprefix(prefix_to_remove)
+    if 'qkv_proj' in key:
+      q_dim = model_config['num_attention_heads'] * model_config['head_dim']
+      kv_dim = model_config['num_key_value_heads'] * model_config['head_dim']
+      qkv = state_dict.pop(key)
+      q, k, v = qkv.split(
+          [
+              q_dim,
+              kv_dim,
+              kv_dim,
+          ],
+          dim=0,
+      )
+      state_dict[new_key.replace('qkv_proj', 'wq')] = q
+      state_dict[new_key.replace('qkv_proj', 'wk')] = k
+      state_dict[new_key.replace('qkv_proj', 'wv')] = v
+      continue
+    if 'o_proj' in key:
+      new_key = new_key.replace('o_proj', 'wo')
+    if new_key != key:
+      state_dict[new_key] = state_dict.pop(key)
+  
+  ckpt_basename = os.path.basename(ckpt_file)
+  output_ckpt_dir.mkdir(parents=True, exist_ok=True)
+  torch.save({'model_state_dict':state_dict},
+              os.fspath(output_ckpt_dir / ckpt_basename))
+  (output_ckpt_dir / "config.json").write_text(json.dumps(model_config))
+
 def main(argv: Sequence[str]) -> None:
   """convert checkpoint main function"""
   if len(argv) > 1:
     raise app.UsageError("Too many command-line arguments.")
-  merge_weights(
+  if "gemma" in _MODEL_TYPE.value:
+    convert_hf_gemma_weights(_INPUT_CHECKPOINT_DIR.value, _OUTPUT_CHECKPOINT_DIR.value)
+  else:
+    merge_weights(
       _INPUT_CHECKPOINT_DIR.value,
       _OUTPUT_CHECKPOINT_DIR.value,
       _MINIMIZE_MEMORY_FOOTPRINT.value,
