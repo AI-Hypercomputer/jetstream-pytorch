@@ -65,6 +65,14 @@ _MAX_CACHE_LENGTH = flags.DEFINE_integer(
     "max_cache_length", 1024, "kv_cache_quantize"
 )
 
+_MODEL_NAME = flags.DEFINE_string(
+    "model_name", None, "model type", required=False
+)
+
+_SHARDING_CONFIG = flags.DEFINE_string(
+    "sharding_config", "", "config file for sharding"
+)
+
 
 def create_engine():
   """create a pytorch engine"""
@@ -73,6 +81,7 @@ def create_engine():
 
   start = time.perf_counter()
   engine = ray_engine.create_pytorch_ray_engine(
+      model_name=_MODEL_NAME.value,
       tokenizer_path=_TOKENIZER_PATH.value,
       ckpt_path=_CKPT_PATH.value,
       bf16_enable=True,
@@ -82,6 +91,7 @@ def create_engine():
       quantize_weights=_QUANTIZE_WEIGHTS.value,
       quantize_kv=_QUANTIZE_KV_CACHE.value,
       max_cache_length=_MAX_CACHE_LENGTH.value,
+      sharding_config=_SHARDING_CONFIG.value,
   )
 
   print("Initialize engine", time.perf_counter() - start)
