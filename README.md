@@ -54,7 +54,7 @@ the tokenizer that we will use.
 ## Gemma
 ### Get Gemma Checkpoint from HuggingFace
 
-Download Gemma PyTorch checkpoint using huggingface-cli. Gemma Tokenizer is included in the checkpoint.
+Please sign agreement on Huggingface website to access Gemma checkpoints. Download Gemma PyTorch checkpoint using huggingface-cli. Gemma Tokenizer is included in the checkpoint.
 
 ```bash
 huggingface-cli download google/gemma-7b-pytorch --local-dir $input_ckpt_dir
