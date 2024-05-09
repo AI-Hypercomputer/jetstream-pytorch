@@ -72,6 +72,7 @@ _OUTPUT_SAFETENSORS = flags.DEFINE_bool(
 _QUANTIZE = flags.DEFINE_bool(
     "quantize", False, "When set to true, produces quantized weights"
 )
+_MODEL_TYPE = flags.DEFINE_string("model_name", "llama", "Type of the model.")
 
 # ParallelEmbedding is col partitioned across the shards.
 # ColumnParallelLinear is row partitioned across shards due to transpose.
@@ -403,16 +404,71 @@ def merge_weights(
   print(f"Export outputs takes {end - start} seconds")
 
 
+def convert_hf_gemma_weights(
+    input_ckpt_dir: epath.Path, output_ckpt_dir: epath.Path
+):
+  """Convert gemma weights from Huggingface to be compatible with JetStream
+  1. Map attention weights to new names.
+  2. Split qkv fusion.
+  """
+  ckpt_file = list(input_ckpt_dir.glob("*.ckpt"))
+  assert len(ckpt_file) == 1, "only expect 1 ckpt file for Gemma model."
+  ckpt_file = ckpt_file[0]
+  state_dict = torch.load(ckpt_file, map_location=torch.device("cpu"))[
+      "model_state_dict"
+  ]
+  model_config = json.loads((input_ckpt_dir / "config.json").read_text())
+  for key in list(state_dict.keys()):
+    if state_dict[key].dtype.is_complex and _OUTPUT_SAFETENSORS.value:
+      assert (
+          key == "freqs_cis"
+      ), "Only expect key 'freqs_cis' in the state_dict has complex dtype."
+      # Remove "freqs_cis" since it has complex dtype, and safetensor doesn't support it.
+      # The "freqs_cis" will be reconstructed when it's loaded by inference engine.
+      state_dict.pop(key)
+      continue
+    prefix_to_remove = "model."
+    new_key = key
+    if key.startswith(prefix_to_remove):
+      new_key = new_key.removeprefix(prefix_to_remove)
+    if "qkv_proj" in key:
+      q_dim = model_config["num_attention_heads"] * model_config["head_dim"]
+      kv_dim = model_config["num_key_value_heads"] * model_config["head_dim"]
+      qkv = state_dict.pop(key)
+      q, k, v = qkv.split(
+          [
+              q_dim,
+              kv_dim,
+              kv_dim,
+          ],
+          dim=0,
+      )
+      state_dict[new_key.replace("qkv_proj", "wq")] = q
+      state_dict[new_key.replace("qkv_proj", "wk")] = k
+      state_dict[new_key.replace("qkv_proj", "wv")] = v
+      continue
+    if "o_proj" in key:
+      new_key = new_key.replace("o_proj", "wo")
+    if new_key != key:
+      state_dict[new_key] = state_dict.pop(key)
+  _export_to_local(output_ckpt_dir, model_config, state_dict)
+
+
 def main(argv: Sequence[str]) -> None:
   """convert checkpoint main function"""
   if len(argv) > 1:
     raise app.UsageError("Too many command-line arguments.")
-  merge_weights(
-      _INPUT_CHECKPOINT_DIR.value,
-      _OUTPUT_CHECKPOINT_DIR.value,
-      _MINIMIZE_MEMORY_FOOTPRINT.value,
-      _ENABLE_FLOAT32.value,
-  )
+  if "gemma" in _MODEL_TYPE.value:
+    convert_hf_gemma_weights(
+        _INPUT_CHECKPOINT_DIR.value, _OUTPUT_CHECKPOINT_DIR.value
+    )
+  else:
+    merge_weights(
+        _INPUT_CHECKPOINT_DIR.value,
+        _OUTPUT_CHECKPOINT_DIR.value,
+        _MINIMIZE_MEMORY_FOOTPRINT.value,
+        _ENABLE_FLOAT32.value,
+    )
 
 
 if __name__ == "__main__":

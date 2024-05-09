@@ -72,11 +72,6 @@ _QUANTIZE_KV_CACHE = flags.DEFINE_bool(
 _MAX_CACHE_LENGTH = flags.DEFINE_integer(
     "max_cache_length", 1024, "kv_cache_quantize"
 )
-_MODEL_NAME = flags.DEFINE_string(
-    "model",
-    "llama-2",
-    "name of the model. Supported options are llama-2 and llama-3",
-)
 _SHARDING_CONFIG = flags.DEFINE_string(
     "sharding_config", "", "config file for sharding"
 )
@@ -98,7 +93,6 @@ def create_engine():
       param_size=_SIZE.value,
       context_length=_CONTEXT_LENGTH.value,
       batch_size=_BATCH_SIZE.value,
-      model_name=_MODEL_NAME.value,
       quantize_weights=_QUANTIZE_WEIGHTS.value,
       quantize_kv=_QUANTIZE_KV_CACHE.value,
       max_cache_length=_MAX_CACHE_LENGTH.value,

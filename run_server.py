@@ -89,9 +89,6 @@ _MAX_CACHE_LENGTH = flags.DEFINE_integer(
 _SHARDING_CONFIG = flags.DEFINE_string(
     "sharding_config", "", "config file for sharding"
 )
-_MODEL_NAME = flags.DEFINE_string(
-    "model_name", "llama-2", "model name, defaults to llama-2"
-)
 
 
 # pylint: disable-next=all
@@ -119,7 +116,6 @@ def main(argv: Sequence[str]):
       quantize_kv=_QUANTIZE_KV_CACHE.value,
       max_cache_length=_MAX_CACHE_LENGTH.value,
       sharding_config=sharding_config_path,
-      model_name=_MODEL_NAME.value,
   )
   server_config = ServerConfig(
       interleaved_slices=(_PLATFORM.value,),

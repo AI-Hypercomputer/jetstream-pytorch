@@ -45,7 +45,7 @@ class Int8Embedding(torch.nn.Module):
 
 class WeightOnlyInt8Linear(torch.nn.Module):
 
-  def __init__(self, in_features, out_features, bias, device):
+  def __init__(self, in_features, out_features, bias=None, device=None):
     super().__init__()
     self.in_features = in_features
     self.out_features = out_features

@@ -43,12 +43,24 @@ NOTE: the above script will export PYTHONPATH, so sourcing will make it to take 
 
 # Download and convert weights
 
-## Get official llama weights from meta-llama
+## LLaMA
+### Get official llama weights from meta-llama
 
 Following instructions here: https://github.com/meta-llama/llama#download
 
 After you have downloaded the weights, it will also download a `tokenizer.model` file that is 
 the tokenizer that we will use.
+
+## Gemma
+### Get Gemma Checkpoint from HuggingFace
+
+Please sign agreement on Huggingface website to access Gemma checkpoints. Download Gemma PyTorch checkpoint using huggingface-cli. Gemma Tokenizer is included in the checkpoint.
+
+```bash
+huggingface-cli download google/gemma-7b-pytorch --local-dir $input_ckpt_dir
+```
+
+Need to manually modify the `config.json` in the checkpoint folder to make it a valid JSON file. (Replace `'` with `"`, remove the excessive `,` after the last item in the JSON object)
 
 ## Run weight safetensor convert
 
@@ -56,7 +68,8 @@ the tokenizer that we will use.
 export input_ckpt_dir=Original llama weights directory
 export output_ckpt_dir=The output directory
 export quantize=True #whether to quantize
-python -m convert_checkpoints --input_checkpoint_dir=$input_ckpt_dir --output_checkpoint_dir=$output_ckpt_dir --quantize=$quantize
+export model_name="llama-2" # or "gemma"
+python -m convert_checkpoints --model_name=$model_name --input_checkpoint_dir=$input_ckpt_dir --output_checkpoint_dir=$output_ckpt_dir --quantize=$quantize
 ```
 
 
@@ -64,17 +77,23 @@ python -m convert_checkpoints --input_checkpoint_dir=$input_ckpt_dir --output_ch
 
 Set tokenizer path
 ```bash
-export tokenizer_path=tokenizer model file path from meta-llama
+export tokenizer_path=tokenizer model file path
 ```
 
 ## Llama 7b
 ```bash
-python run_interactive.py --size=7b --batch_size=128 --max_cache_length=2048 --quantize_weights=$quantize --quantize_kv_cache=$quantize --checkpoint_path=$output_ckpt_dir --tokenizer_path=$tokenizer_path
+python run_interactive.py --size=7b --batch_size=128 --max_cache_length=2048 --quantize_weights=$quantize --quantize_kv_cache=$quantize --checkpoint_path=$output_ckpt_dir --tokenizer_path=$tokenizer_path --sharding_config=default_shardings/$model_name.yaml
 ```
 
 ## Llama 13b
 ```bash
-python run_interactive.py --size=13b --batch_size=64 --max_cache_length=2048 --quantize_weights=$quantize --quantize_kv_cache=$quantize --checkpoint_path=$output_ckpt_dir --tokenizer_path=$tokenizer_path
+python run_interactive.py --size=13b --batch_size=64 --max_cache_length=2048 --quantize_weights=$quantize --quantize_kv_cache=$quantize --checkpoint_path=$output_ckpt_dir --tokenizer_path=$tokenizer_path --sharding_config=default_shardings/$model_name.yaml
+```
+
+
+## Gemma 7b
+```bash
+python run_interactive.py --model_name=$model_name --size=7b --batch_size=64 --max_cache_length=2048 --quantize_weights=$quantize --quantize_kv_cache=$quantize --checkpoint_path=$output_ckpt_dir --tokenizer_path=$tokenizer_path --sharding_config=default_shardings/$model_name.yaml
 ```
 
 
@@ -82,7 +101,7 @@ python run_interactive.py --size=13b --batch_size=64 --max_cache_length=2048 --q
 NOTE: the `--platform=tpu=8` need to specify number of tpu devices (which is 4 for v4-8 and 8 for v5light-8`)
 
 ```bash
-python run_server.py --param_size=7b --batch_size=128 --max_cache_length=2048 --quantize_weights=$quantize --quantize_kv_cache=$quantize --checkpoint_path=$output_ckpt_dir   --tokenizer_path=$tokenizer_path --platform=tpu=8
+python run_server.py --param_size=7b --batch_size=128 --max_cache_length=2048 --quantize_weights=$quantize --quantize_kv_cache=$quantize --checkpoint_path=$output_ckpt_dir   --tokenizer_path=$tokenizer_path --platform=tpu=8 --model=$model_name
 ```
 Now you can fire gRPC to it
 

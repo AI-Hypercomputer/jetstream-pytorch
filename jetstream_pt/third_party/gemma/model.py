@@ -76,9 +76,15 @@ class GemmaMLP(nn.Module):
         if env.enable_weight_quantization
         else torch.nn.Linear
     )
-    self.gate_proj = Linear(hidden_size, intermediate_size, device)
-    self.up_proj = Linear(hidden_size, intermediate_size, device)
-    self.down_proj = Linear(intermediate_size, hidden_size, device)
+    self.gate_proj = Linear(
+        hidden_size, intermediate_size, bias=False, device=device
+    )
+    self.up_proj = Linear(
+        hidden_size, intermediate_size, bias=False, device=device
+    )
+    self.down_proj = Linear(
+        intermediate_size, hidden_size, bias=False, device=device
+    )
 
   def forward(self, x):
     gate = self.gate_proj(x)
