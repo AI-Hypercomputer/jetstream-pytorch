@@ -72,7 +72,7 @@ _OUTPUT_SAFETENSORS = flags.DEFINE_bool(
 _QUANTIZE = flags.DEFINE_bool(
     "quantize", False, "When set to true, produces quantized weights"
 )
-_MODEL_TYPE = flags.DEFINE_string("model_type", "llama", "Type of the model.")
+_MODEL_TYPE = flags.DEFINE_string("model_name", "llama", "Type of the model.")
 
 # ParallelEmbedding is col partitioned across the shards.
 # ColumnParallelLinear is row partitioned across shards due to transpose.
@@ -412,13 +412,21 @@ def convert_hf_gemma_weights(
   2. Split qkv fusion.
   """
   ckpt_file = list(input_ckpt_dir.glob("*.ckpt"))
-  assert len(ckpt_file) == 1
+  assert len(ckpt_file) == 1, "only expect 1 ckpt file for Gemma model."
   ckpt_file = ckpt_file[0]
   state_dict = torch.load(ckpt_file, map_location=torch.device("cpu"))[
       "model_state_dict"
   ]
   model_config = json.loads((input_ckpt_dir / "config.json").read_text())
   for key in list(state_dict.keys()):
+    if state_dict[key].dtype.is_complex and _OUTPUT_SAFETENSORS.value:
+      assert (
+          key == "freqs_cis"
+      ), "Only expect key 'freqs_cis' in the state_dict has complex dtype."
+      # Remove "freqs_cis" since it has complex dtype, and safetensor doesn't support it.
+      # The "freqs_cis" will be reconstructed when it's loaded by inference engine.
+      state_dict.pop(key)
+      continue
     prefix_to_remove = "model."
     new_key = key
     if key.startswith(prefix_to_remove):
@@ -443,14 +451,7 @@ def convert_hf_gemma_weights(
       new_key = new_key.replace("o_proj", "wo")
     if new_key != key:
       state_dict[new_key] = state_dict.pop(key)
-
-  ckpt_basename = os.path.basename(ckpt_file)
-  output_ckpt_dir.mkdir(parents=True, exist_ok=True)
-  torch.save(
-      {"model_state_dict": state_dict},
-      os.fspath(output_ckpt_dir / ckpt_basename),
-  )
-  (output_ckpt_dir / "config.json").write_text(json.dumps(model_config))
+  _export_to_local(output_ckpt_dir, model_config, state_dict)
 
 
 def main(argv: Sequence[str]) -> None:

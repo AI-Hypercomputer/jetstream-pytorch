@@ -553,10 +553,7 @@ class PyTorchEngine(engine_api.Engine):
     return weights
 
   def _load_from_state_dict(self, path):
-
-    state_dict = torch.load(path, map_location=torch.device("cpu"))[
-        "model_state_dict"
-    ]
+    state_dict = torch.load(path, map_location=torch.device("cpu"))
     weights = {}
     for key, model_weights in self.pt_model.state_dict().items():
       assert key in state_dict, f"key: {key} not found"
@@ -689,11 +686,7 @@ def create_pytorch_engine(
   elif ".safetensors" in ckpt_path:
     checkpoint_format = "safetensors"
     checkpoint_path = ckpt_path
-  elif ".pth" in ckpt_path:
-    raise NotImplementedError(
-        "Loading from Pytorch raw checkpoint is not supported!"
-    )
-  elif ".ckpt" in ckpt_path:
+  elif ".pth" in ckpt_path or ".ckpt" in ckpt_path:
     checkpoint_format = "state_dict"
     checkpoint_path = ckpt_path
   else:
