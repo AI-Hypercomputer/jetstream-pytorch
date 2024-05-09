@@ -705,7 +705,7 @@ def create_pytorch_engine(
   pt_model = None
 
   if not sharding_config:
-    sharding_config = os.path.join('default_shardings', model_name + '.yaml')
+    sharding_config = os.path.join("default_shardings", model_name + ".yaml")
 
   env_data = JetEngineEnvironmentData(
       tokenizer_path=tokenizer_path,

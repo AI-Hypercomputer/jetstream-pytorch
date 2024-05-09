@@ -414,11 +414,12 @@ def convert_hf_gemma_weights(
   ckpt_file = list(input_ckpt_dir.glob("*.ckpt"))
   assert len(ckpt_file) == 1, "only expect 1 ckpt file for Gemma model."
   ckpt_file = ckpt_file[0]
-  state_dict = torch.load(ckpt_file, map_location=torch.device("cpu"))[
+  state_dict = torch.load(str(ckpt_file), map_location=torch.device("cpu"))[
       "model_state_dict"
   ]
   model_config = json.loads((input_ckpt_dir / "config.json").read_text())
   for key in list(state_dict.keys()):
+    print(key)
     if state_dict[key].dtype.is_complex and _OUTPUT_SAFETENSORS.value:
       assert (
           key == "freqs_cis"
@@ -431,14 +432,26 @@ def convert_hf_gemma_weights(
     new_key = key
     if key.startswith(prefix_to_remove):
       new_key = new_key.removeprefix(prefix_to_remove)
+    if "qkv_proj" in key:
+      q_dim = model_config["num_attention_heads"] * model_config["head_dim"]
+      kv_dim = model_config["num_key_value_heads"] * model_config["head_dim"]
+      qkv = state_dict.pop(key)
+      q, k, v = qkv.split(
+          [
+              q_dim,
+              kv_dim,
+              kv_dim,
+          ],
+          dim=0,
+      )
+      state_dict[new_key.replace("qkv_proj", "wq")] = q
+      state_dict[new_key.replace("qkv_proj", "wk")] = k
+      state_dict[new_key.replace("qkv_proj", "wv")] = v
+      continue
+
     if new_key != key:
       state_dict[new_key] = state_dict.pop(key)
-  
-  ckpt_basename = os.path.basename(ckpt_file)
   output_ckpt_dir.mkdir(parents=True, exist_ok=True)
-
-  del state_dict['freqs_cis']
-
   _export_to_local(output_ckpt_dir, model_config, state_dict)
 
 
