@@ -17,6 +17,7 @@
 from typing import Any, List, Optional, Tuple, Union
 import threading
 import functools
+import os
 
 from etils import epath
 from flax import struct
@@ -702,6 +703,9 @@ def create_pytorch_engine(
 
   tokenizer = token_utils.load_vocab(tokenizer_path)
   pt_model = None
+
+  if not sharding_config:
+    sharding_config = os.path.join("default_shardings", model_name + ".yaml")
 
   env_data = JetEngineEnvironmentData(
       tokenizer_path=tokenizer_path,

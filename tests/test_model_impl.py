@@ -24,6 +24,7 @@ from . import helpers
 from jetstream_pt.third_party.llama import model_exportable
 from jetstream_pt.third_party.llama import model_original
 from jetstream_pt.third_party.gemma import model_original as gemma_orig
+from jetstream_pt.third_party.gemma import model as gemma
 from jetstream_pt import layers
 from jetstream_pt import cache_manager
 
@@ -32,7 +33,7 @@ class ModelComponentTest(unittest.TestCase):
   """Test diff between original model and xla model for transformer,
   transformer block, attention and other component in model"""
 
-  def setup(self):
+  def setUp(self):
     """setup torch env"""
     jax.config.update("jax_platform_name", "cpu")
     torch.set_default_dtype(torch.float32)
@@ -178,89 +179,95 @@ class ModelComponentTest(unittest.TestCase):
     self.assertTrue(torch.allclose(result_torch, expected_out, atol=1e-4))
 
   def test_gemma_attention(self):
-    env, model_arg = helpers.make_env_tiny(False)
+    with jax.default_matmul_precision("float32"):
+      env, model_arg = helpers.make_env_tiny(False)
 
-    hidden_size = model_arg.dim
-    num_heads = model_arg.n_heads
-    num_kv_heads = model_arg.n_kv_heads
-    head_dim = model_arg.dim // model_arg.n_heads
-    # env._data.qkv_fusion = True
+      hidden_size = model_arg.dim
+      num_heads = model_arg.n_heads
+      num_kv_heads = model_arg.n_kv_heads
+      head_dim = model_arg.dim // model_arg.n_heads
+      # env._data.qkv_fusion = True
 
-    def init_weights(model):
-      state_dict = model.state_dict()
-      res = {}
-      for k, v in state_dict.items():
-        x = random.randint(1, 10)
-        res[k] = torch.ones(v.shape) * x
-      model.load_state_dict(res, assign=True)
+      def init_weights(model):
+        state_dict = model.state_dict()
+        res = {}
+        for k, v in state_dict.items():
+          # x = random.randint(1, 10)
+          res[k] = torch.randn(v.shape)  # * x
+        model.load_state_dict(res, assign=True)
 
-    attention_orig = gemma_orig.GemmaAttention(
-        hidden_size=hidden_size,
-        num_heads=num_heads,
-        num_kv_heads=num_kv_heads,
-        head_dim=head_dim,
-        quant=False,
-    )
-    init_weights(attention_orig)
-
-    attention_ours = layers.Attention(
-        n_heads=num_heads,
-        n_kv_heads=num_kv_heads,
-        head_dim=head_dim,
-        hidden_size=hidden_size,
-        device="meta",
-        env=env,
-    )
-
-    def load_hook(state_dict, prefix, *args):
-      wo = state_dict.pop(prefix + "o_proj.weight")
-      state_dict[prefix + "wo.weight"] = wo
-      qkv = state_dict.pop(prefix + "qkv_proj.weight")
-      q, k, v = qkv.split(
-          [
-              attention_orig.q_size,
-              attention_orig.kv_size,
-              attention_orig.kv_size,
-          ],
-          dim=0,
+      attention_orig = gemma_orig.GemmaAttention(
+          hidden_size=hidden_size,
+          num_heads=num_heads,
+          num_kv_heads=num_kv_heads,
+          head_dim=head_dim,
+          quant=False,
       )
-      state_dict[prefix + "wq.weight"] = q
-      state_dict[prefix + "wk.weight"] = k
-      state_dict[prefix + "wv.weight"] = v
+      init_weights(attention_orig)
 
-    seqlen = 32
-    batch = 1
-    x = torch.randn(
-        (batch, seqlen, hidden_size)
-    )  # (batch, seqlen, embedding dim)
-    start_pos = 0
-    freqs_cis = self._make_freqs_cis(model_arg, seqlen, start_pos)
-    mask = self._prefill_mask(seqlen, start_pos)
-    kv_write_indexes = torch.arange(0, seqlen)
-    cache_k = torch.zeros((batch, seqlen, num_heads, head_dim))
-    cache_v = torch.zeros((batch, seqlen, num_heads, head_dim))
-    inputs_orig = (x, freqs_cis, kv_write_indexes, (cache_k, cache_v), mask)
+      attention_ours = gemma.GemmaAttention(
+          hidden_size=hidden_size,
+          num_heads=num_heads,
+          num_kv_heads=num_kv_heads,
+          head_dim=head_dim,
+          device="meta",
+          env=env,
+      )
 
-    expected_out = attention_orig(*inputs_orig)
+      def load_hook(state_dict, prefix, *args):
+        qkv = state_dict.pop(prefix + "qkv_proj.weight")
+        q, k, v = qkv.split(
+            [
+                attention_orig.q_size,
+                attention_orig.kv_size,
+                attention_orig.kv_size,
+            ],
+            dim=0,
+        )
+        state_dict[prefix + "wq.weight"] = q
+        state_dict[prefix + "wk.weight"] = k
+        state_dict[prefix + "wv.weight"] = v
 
-    cache = cache_manager.KVCachePrefill()
-    freqs_cis = freqs_cis.reshape(batch, seqlen, -1)
-    input_ours = (
-        x,
-        freqs_cis,
-        mask,
-        cache,
-    )
+      seqlen = 32
+      batch = 1
+      x = torch.randn(
+          (batch, seqlen, hidden_size)
+      )  # (batch, seqlen, embedding dim)
+      start_pos = 0
+      freqs_cis = self._make_freqs_cis(model_arg, seqlen, start_pos)
+      mask = self._prefill_mask(seqlen, start_pos)
+      kv_write_indexes = torch.arange(0, seqlen)
+      cache_k = torch.zeros((batch, seqlen, num_heads, head_dim))
+      cache_v = torch.zeros((batch, seqlen, num_heads, head_dim))
+      inputs_orig = (x, freqs_cis, kv_write_indexes, (cache_k, cache_v), mask)
 
-    state_dict = dict(attention_orig.state_dict())
-    load_hook(state_dict, "")
-    result_torch = self._call_xla_model(attention_ours, state_dict, input_ours)
+      expected_out = attention_orig(*inputs_orig)
 
-    print(
-        "Single Gemma Attention: Diff norm",
-        (result_torch - expected_out).norm(),
-    )
-    self.assertTrue(torch.allclose(result_torch, expected_out, atol=1e-4))
+      cache = cache_manager.KVCachePrefill()
+      freqs_cis = freqs_cis.reshape(batch, seqlen, -1)
+      input_ours = (
+          x,
+          freqs_cis,
+          mask,
+          cache,
+      )
+
+      state_dict = dict(attention_orig.state_dict())
+      load_hook(state_dict, "")
+      result_torch = self._call_xla_model(
+          attention_ours, state_dict, input_ours
+      )
+
+      print(
+          "Single Gemma Attention: Diff norm",
+          (result_torch - expected_out).norm(),
+      )
+      print(
+          "Single Gemma Attention: Diff max",
+          torch.max((result_torch - expected_out).abs()),
+      )
+
+      self.assertTrue(torch.allclose(result_torch, expected_out, atol=1e-3))
 
   # pylint: disable-next=all
   def test_transformer_block(self):

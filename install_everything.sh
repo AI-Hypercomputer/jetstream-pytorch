@@ -16,15 +16,15 @@ TORCHXLA_TAG=jetstream-pytorch
 JETSTREAM_TAG=v0.2.1
 
 # Uninstall existing jax
-pip3 show jax && pip3 uninstall -y jax
-pip3 show jaxlib && pip3 uninstall -y jaxlib
-pip3 show libtpu-nightly && pip3 uninstall -y libtpu-nightly
+pip show jax && pip uninstall -y jax
+pip show jaxlib && pip uninstall -y jaxlib
+pip show libtpu-nightly && pip uninstall -y libtpu-nightly
 
-pip3 install pip install jax[tpu] -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+pip install pip install jax[tpu] -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
 # torch cpu
-pip3 install torch --index-url https://download.pytorch.org/whl/cpu
-pip3 install tensorflow flatbuffers absl-py flax sentencepiece seqio google-cloud-storage 
-pip3 install safetensors colorama coverage ray[default] humanize
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+pip install tensorflow flatbuffers absl-py flax sentencepiece seqio google-cloud-storage 
+pip install safetensors colorama coverage ray[default] humanize
 
 mkdir -p deps
 pushd deps

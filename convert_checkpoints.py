@@ -414,7 +414,7 @@ def convert_hf_gemma_weights(
   ckpt_file = list(input_ckpt_dir.glob("*.ckpt"))
   assert len(ckpt_file) == 1, "only expect 1 ckpt file for Gemma model."
   ckpt_file = ckpt_file[0]
-  state_dict = torch.load(ckpt_file, map_location=torch.device("cpu"))[
+  state_dict = torch.load(str(ckpt_file), map_location=torch.device("cpu"))[
       "model_state_dict"
   ]
   model_config = json.loads((input_ckpt_dir / "config.json").read_text())
@@ -447,8 +447,7 @@ def convert_hf_gemma_weights(
       state_dict[new_key.replace("qkv_proj", "wk")] = k
       state_dict[new_key.replace("qkv_proj", "wv")] = v
       continue
-    if "o_proj" in key:
-      new_key = new_key.replace("o_proj", "wo")
+
     if new_key != key:
       state_dict[new_key] = state_dict.pop(key)
   _export_to_local(output_ckpt_dir, model_config, state_dict)

@@ -129,6 +129,117 @@ def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
   )
 
 
+class AttentionKernel:
+
+  def __init__(self, env):
+    self.env = env
+
+  def __call__(self, xq, xk, xv, mask, cache):
+    """
+    Args:
+      xq: torch.Tensor of (batch size, num_heads, seqlen, head_dim)
+      xk: torch.Tensor of (batch size, num_heads, seqlen, head_dim)
+      xv: torch.Tensor of (batch size, num_heads, seqlen, head_dim)
+      mask: mask with 0 and -inf, or None
+      cache: CacheManagerInterface object
+    """
+    bsz, num_heads, seqlen, head_dim = xq.shape
+    _, _, _, kv_head_dim = xk.shape
+    n_rep = head_dim // kv_head_dim
+    if seqlen == 1:
+      xq = torch.broadcast_to(xq, (xq.shape[0], xq.shape[1], 2, xq.shape[3]))
+
+    with jax.named_scope("attn_insert_cache"):
+      keys, values = cache.update(xk, xv)
+      self.env.apply_sharding(keys, axis=1)
+      self.env.apply_sharding(values, axis=1)
+      keys = repeat_kv(keys, n_rep)
+      values = repeat_kv(values, n_rep)
+    with jax.named_scope("attn_mat1"):
+      ## Attention start
+      # scores = torch.einsum(jnp.einsum, "ijkl,ikml->ikjm", xq, keys) / math.sqrt(self.head_dim)
+      scores = torch_xla2.extra.call_jax(
+          jnp.einsum, "ikjl,ikml->ikjm", xq, keys
+      ) / math.sqrt(head_dim)
+      self.env.apply_sharding(scores, axis=1)
+      if mask is not None:
+        # if mask.shape != (1,1,16,16):
+        #   breakpoint()
+        scores = scores + mask  # (bs, n_local_heads, seqlen, max_seqlen)
+    with jax.named_scope("attn_soft"):
+      scores = F.softmax(scores.float(), dim=-1).type_as(xq)
+
+    with jax.named_scope("attn_mat2"):
+      # output = torch.einsum(
+      #    "ikjm,ikml->ikjl", scores, values
+      # )  # (bs, n_local_heads, seqlen, head_dim)
+      output = torch_xla2.extra.call_jax(
+          jnp.einsum, "ikjm,ikml->ikjl", scores, values
+      )
+      if seqlen == 1:
+        output = output[:, :, 0:1, :]
+      # For XLA matmul performance boost
+      # output = torch.matmul(scores, values)
+      self.env.apply_sharding(output, axis=1)
+      return output
+
+
+class Int8KVAttentionKernel:
+
+  def __init__(self, env):
+    self.env = env
+
+  def __call__(self, xq, xk, xv, mask, cache):
+    """
+    Args:
+      xq: torch.Tensor of (batch size, num_heads, seqlen, head_dim)
+      xk: torch.Tensor of (batch size, num_heads, seqlen, head_dim)
+      xv: torch.Tensor of (batch size, num_heads, seqlen, head_dim)
+      mask: mask with 0 and -inf, or None
+      cache: CacheManagerInterface object
+    """
+    bsz, num_heads, seqlen, head_dim = xq.shape
+    _, _, _, kv_head_dim = xk.shape
+    n_rep = head_dim // kv_head_dim
+    if seqlen == 1:
+      xq = torch.broadcast_to(xq, (xq.shape[0], xq.shape[1], 2, xq.shape[3]))
+
+    with jax.named_scope("attn_insert_cache"):
+      keys, values, k_scaler, v_scaler = cache.update(xk, xv)
+      self.env.apply_sharding(keys, axis=1)
+      self.env.apply_sharding(values, axis=1)
+      keys = repeat_kv(keys, n_rep)
+      values = repeat_kv(values, n_rep)
+    with jax.named_scope("attn_mat1"):
+      ## Attention start
+      # scores = torch.einsum(jnp.einsum, "ijkl,ikml->ikjm", xq, keys) / math.sqrt(self.head_dim)
+      scores = (
+          torch_xla2.extra.call_jax(jnp.einsum, "ikjl,ikml->ikjm", xq, keys)
+          / math.sqrt(head_dim)
+          * (k_scaler.reshape(bsz, 1, 1, keys.shape[2]))
+      )
+      self.env.apply_sharding(scores, axis=1)
+      if mask is not None:
+        scores = scores + mask  # (bs, n_local_heads, seqlen, max_seqlen)
+    with jax.named_scope("attn_soft"):
+      scores = F.softmax(scores.float(), dim=-1).type_as(xq)
+      scores = scores * v_scaler.reshape((bsz, 1, 1, keys.shape[2]))
+      self.env.apply_sharding(scores, axis=1)
+
+    with jax.named_scope("attn_mat2"):
+      # output = torch.einsum(
+      #    "ikjm,ikml->ikjl", scores, values
+      # )  # (bs, n_local_heads, seqlen, head_dim)
+      output = torch_xla2.extra.call_jax(
+          jnp.einsum, "ikjm,ikml->ikjl", scores, values
+      )
+      if seqlen == 1:
+        output = output[:, :, 0:1, :]
+      # output = torch.matmul(scores, values)
+      self.env.apply_sharding(output, axis=1)
+      return output
+
+
 class Attention(nn.Module):
   """Attention module."""
 
@@ -151,6 +262,12 @@ class Attention(nn.Module):
         bias=False,
         device=device,
     )
+
+    Kernel = (
+        Int8KVAttentionKernel if env.enable_kv_quantization else AttentionKernel
+    )
+    self.attention_kernel = Kernel(env)
+
     self.q_size = n_heads * self.head_dim
     self.kv_size = self.n_kv_heads * self.head_dim
     if self.env.qkv_fusion:
@@ -219,81 +336,8 @@ class Attention(nn.Module):
 
     xk = xk.transpose(1, 2)
     xv = xv.transpose(1, 2)
+    xq = xq.transpose(1, 2)
 
-    if seqlen == 1:
-      xq = torch.broadcast_to(xq, (xq.shape[0], 2, xq.shape[2], xq.shape[3]))
-
-    if not self.env.enable_kv_quantization:
-      with jax.named_scope("attn_insert_cache"):
-        keys, values = cache.update(xk, xv)
-        self.env.apply_sharding(keys, axis=1)
-        self.env.apply_sharding(values, axis=1)
-        keys = repeat_kv(keys, self.n_rep)
-        values = repeat_kv(values, self.n_rep)
-      with jax.named_scope("attn_mat1"):
-        ## Attention start
-        # scores = torch.einsum(jnp.einsum, "ijkl,ikml->ikjm", xq, keys) / math.sqrt(self.head_dim)
-        scores = torch_xla2.extra.call_jax(
-            jnp.einsum, "ijkl,ikml->ikjm", xq, keys
-        ) / math.sqrt(self.head_dim)
-        self.env.apply_sharding(scores, axis=1)
-        if mask is not None:
-          # if mask.shape != (1,1,16,16):
-          #   breakpoint()
-          scores = scores + mask  # (bs, n_local_heads, seqlen, max_seqlen)
-      with jax.named_scope("attn_soft"):
-        scores = F.softmax(scores.float(), dim=-1).type_as(xq)
-
-      with jax.named_scope("attn_mat2"):
-        # output = torch.einsum(
-        #    "ikjm,ikml->ikjl", scores, values
-        # )  # (bs, n_local_heads, seqlen, head_dim)
-        output = torch_xla2.extra.call_jax(
-            jnp.einsum, "ikjm,ikml->ikjl", scores, values
-        )
-        if seqlen == 1:
-          output = output[:, :, 0:1, :]
-        # For XLA matmul performance boost
-        # output = torch.matmul(scores, values)
-        self.env.apply_sharding(output, axis=1)
-        output = output.transpose(-3, -2).contiguous().view(bsz, seqlen, -1)
-        self.env.apply_sharding(output, axis=2)
-      output = self.wo(output)
-      return output
-    else:
-      with jax.named_scope("attn_insert_cache"):
-        keys, values, k_scaler, v_scaler = cache.update(xk, xv)
-        self.env.apply_sharding(keys, axis=1)
-        self.env.apply_sharding(values, axis=1)
-        keys = repeat_kv(keys, self.n_rep)
-        values = repeat_kv(values, self.n_rep)
-      with jax.named_scope("attn_mat1"):
-        ## Attention start
-        # scores = torch.einsum(jnp.einsum, "ijkl,ikml->ikjm", xq, keys) / math.sqrt(self.head_dim)
-        scores = (
-            torch_xla2.extra.call_jax(jnp.einsum, "ijkl,ikml->ikjm", xq, keys)
-            / math.sqrt(self.head_dim)
-            * (k_scaler.reshape(bsz, 1, 1, keys.shape[2]))
-        )
-        self.env.apply_sharding(scores, axis=1)
-        if mask is not None:
-          scores = scores + mask  # (bs, n_local_heads, seqlen, max_seqlen)
-      with jax.named_scope("attn_soft"):
-        scores = F.softmax(scores.float(), dim=-1).type_as(xq)
-        scores = scores * v_scaler.reshape((bsz, 1, 1, keys.shape[2]))
-        self.env.apply_sharding(scores, axis=1)
-
-      with jax.named_scope("attn_mat2"):
-        # output = torch.einsum(
-        #    "ikjm,ikml->ikjl", scores, values
-        # )  # (bs, n_local_heads, seqlen, head_dim)
-        output = torch_xla2.extra.call_jax(
-            jnp.einsum, "ikjm,ikml->ikjl", scores, values
-        )
-        if seqlen == 1:
-          output = output[:, :, 0:1, :]
-        # output = torch.matmul(scores, values)
-        self.env.apply_sharding(output, axis=1)
-        output = output.transpose(-3, -2).contiguous().view(bsz, seqlen, -1)
-        self.env.apply_sharding(output, axis=2)
-      return self.wo(output)
+    output = self.attention_kernel(xq, xk, xv, mask, cache)
+    output = output.transpose(-3, -2).contiguous().view(bsz, seqlen, -1)
+    return self.wo(output)
