@@ -190,8 +190,8 @@ class ModelComponentTest(unittest.TestCase):
       state_dict = model.state_dict()
       res = {}
       for k, v in state_dict.items():
-        x = random.randint(1, 10)
-        res[k] = torch.ones(v.shape) * x
+        #x = random.randint(1, 10)
+        res[k] = torch.randn(v.shape) #* x
       model.load_state_dict(res, assign=True)
 
     attention_orig = gemma_orig.GemmaAttention(
@@ -260,6 +260,7 @@ class ModelComponentTest(unittest.TestCase):
         "Single Gemma Attention: Diff norm",
         (result_torch - expected_out).norm(),
     )
+
     self.assertTrue(torch.allclose(result_torch, expected_out, atol=1e-4))
 
   # pylint: disable-next=all

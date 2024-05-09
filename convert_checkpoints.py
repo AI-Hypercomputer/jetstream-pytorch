@@ -431,26 +431,14 @@ def convert_hf_gemma_weights(
     new_key = key
     if key.startswith(prefix_to_remove):
       new_key = new_key.removeprefix(prefix_to_remove)
-    if "qkv_proj" in key:
-      q_dim = model_config["num_attention_heads"] * model_config["head_dim"]
-      kv_dim = model_config["num_key_value_heads"] * model_config["head_dim"]
-      qkv = state_dict.pop(key)
-      q, k, v = qkv.split(
-          [
-              q_dim,
-              kv_dim,
-              kv_dim,
-          ],
-          dim=0,
-      )
-      state_dict[new_key.replace("qkv_proj", "wq")] = q
-      state_dict[new_key.replace("qkv_proj", "wk")] = k
-      state_dict[new_key.replace("qkv_proj", "wv")] = v
-      continue
-    if "o_proj" in key:
-      new_key = new_key.replace("o_proj", "wo")
     if new_key != key:
       state_dict[new_key] = state_dict.pop(key)
+  
+  ckpt_basename = os.path.basename(ckpt_file)
+  output_ckpt_dir.mkdir(parents=True, exist_ok=True)
+
+  del state_dict['freqs_cis']
+
   _export_to_local(output_ckpt_dir, model_config, state_dict)
 
 

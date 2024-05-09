@@ -3,7 +3,9 @@
 # "replicated" to signify "replicated".
 # Integer signify axis to shard: 0 <= shard axis < rank
 
-freqs_cis : -1 #  torch.complex64 (16384, 128)
+freqs_cis : null #  torch.complex64 (16384, 128)
+layers.*.self_attn.qkv_proj.weight: 0
+layers.*.self_attn.o_proj.weight: 1
 layers.*.self_attn.wo.weight : 1 # 1, -1] #  torch.float32 (2048, 2048)
 layers.*.self_attn.wq.weight : 0 # -1, 1] #  torch.float32 (2048, 2048)
 layers.*.self_attn.wk.weight : 0 # -1, 1] #  torch.float32 (256, 2048)

@@ -35,6 +35,137 @@ def precompute_freqs_cis(
   return freqs_cis
 
 
+def reshape_for_broadcast(
+    freqs_cis: torch.Tensor, x: torch.Tensor
+) -> torch.Tensor:
+  ndim = x.ndim
+  assert 1 < ndim
+  assert freqs_cis.shape == (
+      x.shape[0],
+      x.shape[2],
+      x.shape[3],
+  ), f"freqs_cis: {freqs_cis.shape }, x: {x.shape}"
+  shape = [d if i != 1 else 1 for i, d in enumerate(x.shape)]
+  return freqs_cis.view(*shape)
+
+
+def apply_rotary_emb(x: torch.Tensor, freqs_cis: torch.Tensor) -> torch.Tensor:
+    """Applies the rotary embedding to the query and key tensors."""
+    x_ = torch.view_as_complex(
+        torch.stack(torch.chunk(x.transpose(1, 2).float(), 2, dim=-1),
+                    dim=-1))
+    freqs_cis = reshape_for_broadcast(freqs_cis, x_)
+    x_out = torch.view_as_real(x_ * freqs_cis).type_as(x)
+    x_out = torch.cat(torch.chunk(x_out, 2, dim=-1), dim=-2)
+    x_out = x_out.reshape(x_out.shape[0], x_out.shape[1], x_out.shape[2],
+                          -1).transpose(1, 2)
+    return x_out
+
+
+
+
+class GemmaAttention(nn.Module):
+
+  def __init__(
+      self,
+      hidden_size: int,
+      num_heads: int,
+      num_kv_heads: int,
+      head_dim: int,
+      device,
+      env,
+  ):
+    super().__init__()
+
+    self.env = env
+
+    self.num_heads = num_heads
+    self.num_kv_heads = num_kv_heads
+
+    assert self.num_heads % self.num_kv_heads == 0
+    self.num_queries_per_kv = self.num_heads // self.num_kv_heads
+
+    self.hidden_size = hidden_size
+    self.head_dim = head_dim
+
+    self.q_size = self.num_heads * self.head_dim
+    self.kv_size = self.num_kv_heads * self.head_dim
+
+    self.scaling = self.head_dim**-0.5
+
+    Linear = (
+        layers.WeightOnlyInt8Linear
+        if env.enable_weight_quantization
+        else torch.nn.Linear
+    )
+    self.qkv_proj = Linear(
+        self.hidden_size,
+        (self.num_heads + 2 * self.num_kv_heads) * self.head_dim,
+        bias=False,
+        device=device,
+    )
+    self.o_proj = Linear(
+        self.num_heads * self.head_dim, self.hidden_size, bias=False, device=device
+    )
+
+  def forward(
+      self,
+      hidden_states,
+      freqs_cis,
+      mask,
+      cache,
+  ) -> torch.Tensor:
+    hidden_states_shape = hidden_states.shape
+    assert len(hidden_states_shape) == 3
+    batch_size, input_len, _ = hidden_states_shape
+    qkv = self.qkv_proj(hidden_states)
+    xq, xk, xv = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
+
+    xq = xq.view(batch_size, -1, self.num_heads, self.head_dim)
+    xk = xk.view(batch_size, -1, self.num_kv_heads, self.head_dim)
+    xv = xv.view(batch_size, -1, self.num_kv_heads, self.head_dim)
+
+    # Positional embedding.
+    xq = apply_rotary_emb(xq, freqs_cis=freqs_cis)
+    xk = apply_rotary_emb(xk, freqs_cis=freqs_cis)
+
+    # Write new kv cache.
+    # [batch_size, input_len, n_local_kv_heads, head_dim]
+
+    xk = xk.transpose(1, 2)
+    xv = xv.transpose(1, 2)
+
+    # [batch_size, n_local_kv_heads, seq len, head_dim]
+    key, value = cache.update(xk, xv)
+
+    key = key.transpose(1, 2)
+    value = value.transpose(1, 2)
+
+    if self.num_kv_heads != self.num_heads:
+      # [batch_size, max_seq_len, n_local_heads, head_dim]
+      key = torch.repeat_interleave(key, self.num_queries_per_kv, dim=2)
+      value = torch.repeat_interleave(value, self.num_queries_per_kv, dim=2)
+
+    # [batch_size, n_local_heads, input_len, head_dim]
+    q = xq.transpose(1, 2)
+    # [batch_size, n_local_heads, max_seq_len, head_dim]
+    k = key.transpose(1, 2)
+    v = value.transpose(1, 2)
+
+    # [batch_size, n_local_heads, input_len, max_seq_len]
+    scores = torch.matmul(q, k.transpose(2, 3)) * self.scaling
+    scores = scores + mask
+    scores = F.softmax(scores.float(), dim=-1).type_as(q)
+
+    # [batch_size, n_local_heads, input_len, head_dim]
+    output = torch.matmul(scores, v)
+
+    # [batch_size, input_len, hidden_dim]
+    output = output.transpose(1, 2).contiguous().view(batch_size, input_len, -1)
+    output = self.o_proj(output)
+    return output
+
+
 class RMSNorm(torch.nn.Module):
 
   def __init__(
@@ -99,14 +230,15 @@ class GemmaDecoderLayer(nn.Module):
 
   def __init__(self, config: gemma_config.GemmaConfig, env):
     super().__init__()
-    self.self_attn = layers.Attention(
+    self.self_attn = GemmaAttention(
+        config.hidden_size,
         config.num_attention_heads,
         config.num_key_value_heads,
         config.head_dim,
-        config.hidden_size,
         config.device,
         env,
     )
+    
     self.mlp = GemmaMLP(
         hidden_size=config.hidden_size,
         intermediate_size=config.intermediate_size,
