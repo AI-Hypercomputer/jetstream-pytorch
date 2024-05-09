@@ -17,6 +17,7 @@ import queue
 from typing import Any, List, Optional, Tuple, Union
 import threading
 import functools
+import os
 import humanize
 
 
@@ -39,6 +40,7 @@ from jetstream_pt.third_party.llama import model_exportable, model_args
 from jetstream_pt import cache_manager
 from jetstream_pt import quantize
 from jetstream_pt.environment import JetEngineEnvironment, JetEngineEnvironmentData
+from jetstream_pt.third_party.gemma import config as gemma_config, model as gemma_model
 
 
 Mesh = jax.sharding.Mesh
@@ -103,6 +105,7 @@ class PyTorchRayWorker:
       quantize_weights=False,
       quantize_kv=False,
       max_cache_length=1024,
+      sharding_config=None,
   ):
 
     jax.config.update("jax_default_prng_impl", "unsafe_rbg")
@@ -144,11 +147,13 @@ class PyTorchRayWorker:
       checkpoint_format = "safetensors"
       checkpoint_path = paths[0]
 
+    if not sharding_config:
+      sharding_config = os.path.join("default_shardings", model_name + ".yaml")
+
     env_data = JetEngineEnvironmentData(
         tokenizer_path=tokenizer_path,
         checkpoint_path=checkpoint_path,
         checkpoint_format=checkpoint_format,
-        model_type="llama-2-" + param_size,
         batch_size=batch_size,
         max_decode_length=max_decode_length,
         max_input_sequence_length=context_length,
@@ -156,26 +161,47 @@ class PyTorchRayWorker:
         enable_kv_quantization=quantize_kv,
         cache_sequence_length=max_cache_length,
         bf16_enable=bf16_enable,
+        sharding_config_path=sharding_config,
     )
     env = JetEngineEnvironment(env_data)
 
-    pt_model = None
-    if "llama" in model_name:
+    if model_name.startswith("llama"):
+
       args = model_args.get_model_args(
-          model_name + "-" + param_size,
-          context_length,
-          batch_size,
-          bf16_enable,
+          model_name + "-" + param_size, context_length, batch_size, bf16_enable
       )
       args.device = "meta"
       args.quantize = quantize_weights
+      env_data.cache_shape = (
+          batch_size,
+          args.n_kv_heads,
+          max_cache_length,
+          args.dim // args.n_heads,
+      )
+      env_data.model_type = "llama-2-" + param_size
+      env_data.num_layers = args.n_layers
+      env = JetEngineEnvironment(env_data)
       pt_model = model_exportable.Transformer(args, env)
+    elif model_name == "gemma":
+      args = gemma_config.get_model_config(param_size)
+      env_data.cache_shape = (
+          batch_size,
+          args.num_key_value_heads,
+          max_cache_length,
+          args.head_dim,
+      )
+      env_data.model_type = "gemma-" + param_size
+      env_data.num_layers = args.num_hidden_layers
+      env = JetEngineEnvironment(env_data)
+      pt_model = gemma_model.GemmaModel(args, env)
+    else:
+      raise RuntimeError(f"Model with name {model_name} not found")
 
-      num_params_size = 0
-      num_params = 0
-      for _, v in pt_model.state_dict().items():
-        num_params += 1
-        num_params_size += np.prod(v.shape) * (1 if v.dtype == jnp.int8 else 2)
+    num_params_size = 0
+    num_params = 0
+    for _, v in pt_model.state_dict().items():
+      num_params += 1
+      num_params_size += np.prod(v.shape) * (1 if v.dtype == jnp.int8 else 2)
     print("Number of param Gbytes:", num_params_size / (1 << 30))
     print("Number of param: ", num_params)
 
