@@ -136,7 +136,7 @@ MAXTEXT_PREFILL = {
 }
 
 
-def main():
+def main(argv):
   """Main function to run engine offline."""
   engine = create_engine()
 
