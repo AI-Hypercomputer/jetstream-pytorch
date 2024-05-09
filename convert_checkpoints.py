@@ -419,7 +419,6 @@ def convert_hf_gemma_weights(
   ]
   model_config = json.loads((input_ckpt_dir / "config.json").read_text())
   for key in list(state_dict.keys()):
-    print(key)
     if state_dict[key].dtype.is_complex and _OUTPUT_SAFETENSORS.value:
       assert (
           key == "freqs_cis"
@@ -451,7 +450,6 @@ def convert_hf_gemma_weights(
 
     if new_key != key:
       state_dict[new_key] = state_dict.pop(key)
-  output_ckpt_dir.mkdir(parents=True, exist_ok=True)
   _export_to_local(output_ckpt_dir, model_config, state_dict)
 
 
