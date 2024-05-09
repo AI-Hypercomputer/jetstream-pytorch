@@ -110,7 +110,39 @@ class PyTorchEngine(engine_api.Engine):
     #      out_shardings=self.get_decode_state_sharding())
     self._lock = threading.RLock()
 
-  # pylint: disable-next=all
+  def sharding_by_name(self, name):
+
+    # This allows easier way to edit shardings
+    """
+    for key, val in self.env._data.experimental_sharding_axis_override.items():
+      if name.endswith(key): 
+        return self.env.sharding_by_axis(val)
+    """
+    if 'weight_scaler' in name:
+      if "attention." in name and "wo" in name:
+        return self.y_sharding
+      # elif "feed_forward.w2" in name:
+      #   return self.y_sharding
+      else:
+        return self.x_sharding
+    if "tok_embeddings." in name:
+        return self.y_sharding
+    if "attention." in name:
+        if "wo" in name:
+            # return self.y_sharding
+            return self.int4_weight_sharding
+        else:
+            return self.x_sharding
+    if "feed_forward." in name:
+        if "w2" in name:
+            return self.y_sharding
+            # return self.int4_weight_sharding
+        else:
+            return self.x_sharding
+    if "output" in name:
+        return self.x_sharding 
+    return self.replicated 
+
   def init_decode_state(
       self,
   ) -> DecodeState:
@@ -584,8 +616,26 @@ class PyTorchEngine(engine_api.Engine):
           return self._load_from_state_dict(self.env.checkpoint_path)
       else:
         jax_weights = self._make_state_dict_jax(self.pt_model.state_dict())
+    # copied from convert_checkpoints.py, can be put into a common quant config file
+    _QUANTIZE_LINEAR_WEIGHTS = {
+        'attention.wq.weight',
+        'attention.wk.weight',
+        'attention.wv.weight',
+        'attention.wo.weight',
+        'feed_forward.w1.weight',
+        'feed_forward.w2.weight',
+        'feed_forward.w3.weight',
+        'output.weight',
+    }
+    with jax.default_device(jax.devices('cpu')[0]):
+      for key, value in jax_weights.items():
+        for qname in _QUANTIZE_LINEAR_WEIGHTS:
+          if key.endswith(qname):
+            print(f"cast weight {key} to int4, shape {value.shape}")
+            jax_weights[key] = value.astype(jnp.int4)
+
     jax_weights = {
-        key: jax.device_put(value, self.env.sharding_by_name(key))
+        key: jax.device_put(value, self.sharding_by_name(key))
         for key, value in jax_weights.items()
     }
     for k, v in jax_weights.items():

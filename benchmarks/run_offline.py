@@ -37,6 +37,9 @@ _TOKENIZER_PATH = flags.DEFINE_string(
     "The tokenizer model path",
     required=False,
 )
+_MODEL_NAME = flags.DEFINE_string(
+    "model_name", None, "model type", required=False
+)
 _CKPT_PATH = flags.DEFINE_string(
     "checkpoint_path", None, "Directory for .pth checkpoints", required=False
 )
@@ -84,6 +87,7 @@ def create_engine():
   devices = jax.devices()
   start = time.perf_counter()
   engine = je.create_pytorch_engine(
+      model_name=_MODEL_NAME.value,
       devices=devices,
       tokenizer_path=_TOKENIZER_PATH.value,
       ckpt_path=_CKPT_PATH.value,
@@ -155,8 +159,8 @@ def main(argv):
 
   prefill_times = {}
 
-  if _PROFILING_OUTPUT.value:
-    jax.profiler.start_trace(_PROFILING_OUTPUT.value)
+  # if _PROFILING_OUTPUT.value:
+  #   jax.profiler.start_trace(_PROFILING_OUTPUT.value)
   decode_state = engine.init_decode_state()
   for batch, _ in MAXTEXT_PREFILL.items():
     runtime, decode_state = run_prefill_time(
@@ -176,6 +180,9 @@ def main(argv):
   print("======= decode starting ===")
   dec_times = []
   for i in range(10):
+    if i == 7:
+      if _PROFILING_OUTPUT.value:
+        jax.profiler.start_trace(_PROFILING_OUTPUT.value)
     start = time.perf_counter()
     # pylint: disable-next=all
     decode_state, sampled_tokens = engine.generate(params, decode_state)
@@ -194,10 +201,14 @@ def main(argv):
   prefill_times_ms = {k: v * 1000 for k, v in prefill_times.items()}
   decode_time_ms = sum(dec_times) * 1000 / 10 / _BATCH_SIZE.value
 
+<<<<<<< HEAD
   if _SHAREGPT_PATH.value:
     analyze_sharegpt.do_simulation(
         _SHAREGPT_PATH.value, prefill_times_ms, decode_time_ms
     )
+=======
+  # analyze_sharegpt.do_simulation(prefill_times_ms, decode_time_ms)
+>>>>>>> 8f27cd6 (save)
 
 
 if __name__ == "__main__":

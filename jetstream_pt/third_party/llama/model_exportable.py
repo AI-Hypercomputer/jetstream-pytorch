@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from . import model_args
 import jax
 
-from jetstream_pt.layers import Attention, RMSNorm, Int8Embedding, WeightOnlyInt8Linear
+from jetstream_pt.layers import Attention, RMSNorm, Int8Embedding, WeightOnlyInt8Linear, WeightOnlyInt4Linear
 
 
 class FeedForward(nn.Module):
@@ -35,6 +35,7 @@ class FeedForward(nn.Module):
     hidden_dim = multiple_of * ((hidden_dim + multiple_of - 1) // multiple_of)
 
     LinearLayer = WeightOnlyInt8Linear if quantize else nn.Linear
+    # LinearLayer = WeightOnlyInt4Linear if quantize else nn.Linear
 
     self.w1 = LinearLayer(
         dim,
@@ -155,6 +156,7 @@ class Transformer(nn.Module):
     self.norm = RMSNorm(params.dim, eps=params.norm_eps, device=params.device)
 
     LinearLayer = WeightOnlyInt8Linear if params.quantize else nn.Linear
+    # LinearLayer = WeightOnlyInt4Linear if params.quantize else nn.Linear
 
     self.output = LinearLayer(
         params.dim,

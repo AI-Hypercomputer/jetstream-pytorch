@@ -139,6 +139,10 @@ class JetEngineEnvironment:
         self._mesh, jax.sharding.PartitionSpec(*sharding)
     )
     return sharding_spec
+   
+  # def int4_weight_sharding(self):
+  #   sharding_spec = jsharding.NamedSharding(self._mesh, jax.sharding.PartitionSpec(None,None,"x"))
+  #   return sharding_spec
 
   def make_caches_prefill(self):
     """Create kv caches for inference prefill"""
