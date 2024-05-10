@@ -71,7 +71,9 @@ SYSTEM_TIME_PER_DECODE_TOKEN_MS = 30 / 160
 
 
 # pylint: disable-next=all
-def do_simulation(sharegpt_path, prefill_bucket_size_to_ms, system_time_per_decode_token_ms):
+def do_simulation(
+    sharegpt_path, prefill_bucket_size_to_ms, system_time_per_decode_token_ms
+):
   def next_power_of_2(x):
     return 1 if x == 0 else 2 ** (x - 1).bit_length()
 
@@ -83,7 +85,7 @@ def do_simulation(sharegpt_path, prefill_bucket_size_to_ms, system_time_per_deco
   convo_numbers = []
   # Please update with your own data file path
 
-  with open(sharegpt_path, "r") as f:
+  with open(sharegpt_path, "r", encoding="utf-8") as f:
     loaded_share_gpt = json.load(f)
   for example in loaded_share_gpt:
     if len(example["conversations"]) < 2:

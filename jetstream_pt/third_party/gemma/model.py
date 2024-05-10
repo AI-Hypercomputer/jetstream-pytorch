@@ -158,7 +158,6 @@ class GemmaAttention(nn.Module):
       self.env.apply_sharding(xk, axis=3)
       self.env.apply_sharding(xv, axis=3)
 
-
     # Positional embedding.
     xq = apply_rotary_emb(xq, freqs_cis=freqs_cis)
     xk = apply_rotary_emb(xk, freqs_cis=freqs_cis)

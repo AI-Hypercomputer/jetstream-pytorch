@@ -97,7 +97,9 @@ class JetEngineEnvironment:
     self.x_sharding = jsharding.NamedSharding(self._mesh, P("x"))
     self.replicated = jsharding.NamedSharding(self._mesh, P())
 
-    cache_sharding_axis = self.attention_kv_axis_names.index(self.kv_cache_shard_axis)
+    cache_sharding_axis = self.attention_kv_axis_names.index(
+        self.kv_cache_shard_axis
+    )
 
     if self.cache_shape[cache_sharding_axis] == 1:
       # cannot shard on an axis that is 1

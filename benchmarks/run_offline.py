@@ -67,14 +67,12 @@ _QUANTIZE_KV_CACHE = flags.DEFINE_bool(
 _MAX_CACHE_LENGTH = flags.DEFINE_integer(
     "max_cache_length", 1024, "kv_cache_quantize"
 )
-_MODEL_NAME = flags.DEFINE_string(
-    "model_name", "", "model_name"
-)
+_MODEL_NAME = flags.DEFINE_string("model_name", "", "model_name")
 _SHARDING_CONFIG = flags.DEFINE_string(
-  "sharding_config", "", "path to sharding config"
+    "sharding_config", "", "path to sharding config"
 )
 _SHAREGPT_PATH = flags.DEFINE_string(
-  "sharegpt_path", "", "path to sharegpt json file"
+    "sharegpt_path", "", "path to sharegpt json file"
 )
 
 
@@ -197,7 +195,9 @@ def main(argv):
   decode_time_ms = sum(dec_times) * 1000 / 10 / _BATCH_SIZE.value
 
   if _SHAREGPT_PATH.value:
-    analyze_sharegpt.do_simulation(_SHAREGPT_PATH.value, prefill_times_ms, decode_time_ms)
+    analyze_sharegpt.do_simulation(
+        _SHAREGPT_PATH.value, prefill_times_ms, decode_time_ms
+    )
 
 
 if __name__ == "__main__":
