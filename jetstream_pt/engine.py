@@ -86,7 +86,7 @@ class PyTorchEngine(engine_api.Engine):
     self.y_sharding = env.sharding_by_axis(1)
     self.x_sharding = env.sharding_by_axis(0)
     self.replicated = env.sharding_by_axis(-1)  # replicated
-    self.cache_sharding = self.y_sharding
+    self.cache_sharding = self.env.cache_sharding
 
     self.prefill = jax.jit(
         self.prefill, out_shardings=self.get_prefix_destination_sharding()

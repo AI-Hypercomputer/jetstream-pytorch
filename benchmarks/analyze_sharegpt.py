@@ -17,61 +17,11 @@ import json
 CUTOFF_INPUT = 1024
 CUTOFF_OUTPUT = 1024
 
-# batch size 60, ful cache, bfloat
-prefill_bucket_size_to_s = {
-    64: 0.007696230011060834,
-    128: 0.011508351005613805,
-    256: 0.01721684739459306,
-    512: 0.03257157760672271,
-    1024: 0.08185497261583805,
-}
-
-# batch size 96, ful cache, quantized
-prefill_bucket_size_to_s = {
-    64: 0.006911616190336645,
-    128: 0.011646182998083532,
-    256: 0.01875854718964547,
-    512: 0.0334438294172287,
-    1024: 0.0643601292045787,
-}
-
-# batch size 96, rolling, bfloat
-prefill_bucket_size_to_s = {
-    64: 0.007730783987790346,
-    128: 0.011515899002552033,
-    256: 0.01780580161139369,
-    512: 0.03115477201063186,
-    1024: 0.07443338260054588,
-}
-
-# batch size 160, rolling, quantized
-prefill_bucket_size_to_s = {
-    64: 0.006821704190224409,
-    128: 0.01175499300006777,
-    256: 0.018776051187887787,
-    512: 0.03392685519065708,
-    1024: 0.06476318498607725,
-}
-
-prefill_bucket_size_to_ms = {
-    k: p * 1000 for k, p in prefill_bucket_size_to_s.items()
-}
-
-# batch size 60, ful cache, bfloat
-SYSTEM_TIME_PER_DECODE_TOKEN_MS = 26.55 / 60
-
-# batch size 96, ful cache, quantized
-SYSTEM_TIME_PER_DECODE_TOKEN_MS = 26.0 / 96
-
-# batch size 96, rolling, bfloat
-SYSTEM_TIME_PER_DECODE_TOKEN_MS = 28.18 / 96
-
-# batch size 160, rolling, quantized
-SYSTEM_TIME_PER_DECODE_TOKEN_MS = 30 / 160
-
 
 # pylint: disable-next=all
-def do_simulation(prefill_bucket_size_to_ms, system_time_per_decode_token_ms):
+def do_simulation(
+    sharegpt_path, prefill_bucket_size_to_ms, system_time_per_decode_token_ms
+):
   def next_power_of_2(x):
     return 1 if x == 0 else 2 ** (x - 1).bit_length()
 
@@ -82,10 +32,9 @@ def do_simulation(prefill_bucket_size_to_ms, system_time_per_decode_token_ms):
 
   convo_numbers = []
   # Please update with your own data file path
-  loaded_share_gpt = json.load(
-      # pylint: disable-next=all
-      open("~/data/ShareGPT_V3_unfiltered_cleaned_split.json", "r")
-  )
+
+  with open(sharegpt_path, "r", encoding="utf-8") as f:
+    loaded_share_gpt = json.load(f)
   for example in loaded_share_gpt:
     if len(example["conversations"]) < 2:
       continue

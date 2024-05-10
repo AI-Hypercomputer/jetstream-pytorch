@@ -97,13 +97,16 @@ class JetEngineEnvironment:
     self.x_sharding = jsharding.NamedSharding(self._mesh, P("x"))
     self.replicated = jsharding.NamedSharding(self._mesh, P())
 
-    cache_sharding = (
-        "x" if axis == self._data.kv_cache_shard_axis else None
-        for axis in self._data.attention_kv_axis_names
+    cache_sharding_axis = self.attention_kv_axis_names.index(
+        self.kv_cache_shard_axis
     )
-    self.cache_sharding = jsharding.NamedSharding(
-        self._mesh, P(*cache_sharding)
-    )
+
+    if self.cache_shape[cache_sharding_axis] == 1:
+      # cannot shard on an axis that is 1
+      # default to last
+      cache_sharding_axis = len(self.cache_shape) - 1
+
+    self.cache_sharding = self.sharding_by_axis(cache_sharding_axis)
     self._load_sharding_config()
 
   def _load_sharding_config(self):
