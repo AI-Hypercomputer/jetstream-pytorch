@@ -18,7 +18,6 @@ CUTOFF_INPUT = 1024
 CUTOFF_OUTPUT = 1024
 
 
-
 # pylint: disable-next=all
 def do_simulation(
     sharegpt_path, prefill_bucket_size_to_ms, system_time_per_decode_token_ms
