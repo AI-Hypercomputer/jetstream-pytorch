@@ -28,7 +28,6 @@ import json
 import os
 import time
 
-from collections.abc import Sequence
 from absl import app
 from absl import flags
 from etils import epath
@@ -94,7 +93,7 @@ _WEIGHT_SHARDING_TYPE = {
     "output.weight": "ColumnParallelLinear",
 }
 
-_QUANTIZED_WEIGHTS_TO_SCALER_NAME = {
+_LLAMA_QUANTIZED_WEIGHTS_TO_SCALER_NAME = {
     "tok_embeddings.weight": "tok_embeddings.weight_scaler",
     "attention.wq.weight": "attention.wq.weight_scaler",
     "attention.wk.weight": "attention.wk.weight_scaler",
@@ -106,82 +105,29 @@ _QUANTIZED_WEIGHTS_TO_SCALER_NAME = {
     "output.weight": "output.weight_scaler",
 }
 
+_GEMMA_QUANTIZED_WEIGHTS_TO_SCALER_NAME = {
+    "self_attn.o_proj.weight": "self_attn.o_proj.weight_scaler",
+    "self_attn.wq.weight": "self_attn.wq.weight_scaler",
+    "self_attn.wk.weight": "self_attn.wk.weight_scaler",
+    "self_attn.wv.weight": "self_attn.wv.weight_scaler",
+    "mlp.gate_proj.weight": "mlp.gate_proj.weight_scaler",
+    "mlp.up_proj.weight": "mlp.up_proj.weight_scaler",
+    "mlp.down_proj.weight": "mlp.down_proj.weight_scaler",
+    "embedder.weight": "embedder.weight_scaler",
+}
 
-def _quantize_state_dict(state_dict):
+
+def _quantize_state_dict(state_dict, weight_map, weight_axis):
   updated_weights = {}
   for key, val in state_dict.items():
-    for qname, qscale_name in _QUANTIZED_WEIGHTS_TO_SCALER_NAME.items():
+    for qname, qscale_name in weight_map.items():
       if key.endswith(qname):
         new_weights, scaler = quantize.quantize_torch_int8(
-            val, reduce_axis=(1,)
+            val, reduce_axis=(weight_axis(key),)
         )
         updated_weights[key] = new_weights
         scale_name = key[: -len(qname)] + qscale_name
-        updated_weights[scale_name] = scaler
-  state_dict.update(updated_weights)
-  return state_dict
-
-
-_QUANTIZE_LINEAR_WEIGHTS = {
-    "attention.wq.weight",
-    "attention.wk.weight",
-    "attention.wv.weight",
-    "attention.wo.weight",
-    "feed_forward.w1.weight",
-    "feed_forward.w2.weight",
-    "feed_forward.w3.weight",
-    "output.weight",
-}
-
-
-def _quantize_state_dict(state_dict):
-  updated_weights = {}
-  for key, val in state_dict.items():
-    for qname in _QUANTIZE_LINEAR_WEIGHTS:
-      if key.endswith(qname):
-        new_weights, scaler = quantize.quantize_torch_int8(
-            val, reduce_axis=(1,)
-        )
-        updated_weights[key] = new_weights
-        scale_name = key + "_scaler"
         updated_weights[scale_name] = scaler.squeeze()
-  tok_weights, tok_scalers = quantize.quantize_torch_int8(
-      state_dict["tok_embeddings.weight"], reduce_axis=(0,)
-  )
-  updated_weights["tok_embeddings.weight"] = tok_weights
-  updated_weights["tok_embeddings.weight_scaler"] = tok_scalers.squeeze()
-  state_dict.update(updated_weights)
-  return state_dict
-
-
-_QUANTIZE_LINEAR_WEIGHTS = {
-    "attention.wq.weight",
-    "attention.wk.weight",
-    "attention.wv.weight",
-    "attention.wo.weight",
-    "feed_forward.w1.weight",
-    "feed_forward.w2.weight",
-    "feed_forward.w3.weight",
-    "output.weight",
-}
-
-
-def _quantize_state_dict(state_dict):
-  updated_weights = {}
-  for key, val in state_dict.items():
-    for qname in _QUANTIZE_LINEAR_WEIGHTS:
-      if key.endswith(qname):
-        new_weights, scaler = quantize.quantize_torch_int8(
-            val, reduce_axis=(1,)
-        )
-        updated_weights[key] = new_weights
-        scale_name = key + "_scaler"
-        updated_weights[scale_name] = scaler.squeeze()
-  tok_weights, tok_scalers = quantize.quantize_torch_int8(
-      state_dict["tok_embeddings.weight"], reduce_axis=(0,)
-  )
-  updated_weights["tok_embeddings.weight"] = tok_weights
-  updated_weights["tok_embeddings.weight_scaler"] = tok_scalers.squeeze()
   state_dict.update(updated_weights)
   return state_dict
 
@@ -222,7 +168,9 @@ def _tensors_have_same_shape(tensors):
 
 
 # pylint: disable-next=all
-def _merge_weights(checkpoints, minimize_memory_footprint, enable_float32):
+def _merge_llama_weights(
+    checkpoints, minimize_memory_footprint, enable_float32
+):
   print("Starting to merge weights.")
   state_dict = {}
   tmp_dir: epath.Path = None
@@ -362,13 +310,7 @@ def _export_to_local(output_ckpt_dir: epath.Path, params, state_dict):
     checklist_file.write_text(_generate_md5_checklist(output_ckpt_dir))
 
 
-def merge_weights(
-    input_ckpt_dir: epath.Path,
-    output_ckpt_dir: epath.Path,
-    minimize_memory_footprint: bool = True,
-    enable_float32: bool = False,
-) -> None:
-  """merge weights"""
+def _get_llama_state_dict(input_ckpt_dir):
   start = time.perf_counter()
   if "gs://" in str(input_ckpt_dir):
     print(
@@ -382,35 +324,15 @@ def merge_weights(
   print(f"Loading checkpoints takes {end - start} seconds")
 
   start = time.perf_counter()
-  state_dict = _merge_weights(
-      checkpoints, minimize_memory_footprint, enable_float32
+  state_dict = _merge_llama_weights(
+      checkpoints, _MINIMIZE_MEMORY_FOOTPRINT.value, _ENABLE_FLOAT32.value
   )
   end = time.perf_counter()
   print(f"Merging weights takes {end - start} seconds")
-
-  if _QUANTIZE.value:
-    start = time.perf_counter()
-    state_dict = _quantize_state_dict(state_dict)
-    end = time.perf_counter()
-    print(f"Quantizing weights takes {end - start} seconds")
-
-  print(f"Writing merged weights to dir {output_ckpt_dir}")
-  start = time.perf_counter()
-  if "gs://" in str(output_ckpt_dir):
-    _export_to_gcs(output_ckpt_dir, params, state_dict)
-  else:
-    _export_to_local(output_ckpt_dir, params, state_dict)
-  end = time.perf_counter()
-  print(f"Export outputs takes {end - start} seconds")
+  return state_dict, params
 
 
-def convert_hf_gemma_weights(
-    input_ckpt_dir: epath.Path, output_ckpt_dir: epath.Path
-):
-  """Convert gemma weights from Huggingface to be compatible with JetStream
-  1. Map attention weights to new names.
-  2. Split qkv fusion.
-  """
+def _get_gemma_state_dict(input_ckpt_dir):
   ckpt_file = list(input_ckpt_dir.glob("*.ckpt"))
   assert len(ckpt_file) == 1, "only expect 1 ckpt file for Gemma model."
   ckpt_file = ckpt_file[0]
@@ -450,24 +372,37 @@ def convert_hf_gemma_weights(
 
     if new_key != key:
       state_dict[new_key] = state_dict.pop(key)
-  _export_to_local(output_ckpt_dir, model_config, state_dict)
+  return state_dict, model_config
 
 
-def main(argv: Sequence[str]) -> None:
-  """convert checkpoint main function"""
-  if len(argv) > 1:
-    raise app.UsageError("Too many command-line arguments.")
-  if "gemma" in _MODEL_TYPE.value:
-    convert_hf_gemma_weights(
-        _INPUT_CHECKPOINT_DIR.value, _OUTPUT_CHECKPOINT_DIR.value
-    )
+def main(argv) -> None:
+  """merge weights"""
+
+  if _MODEL_TYPE.value == "gemma":
+    state_dict, params = _get_gemma_state_dict(_INPUT_CHECKPOINT_DIR.value)
+    quantize_weight_map = _GEMMA_QUANTIZED_WEIGHTS_TO_SCALER_NAME
+    weight_axis = lambda x: 0 if x == "embedder.weight" else 1
   else:
-    merge_weights(
-        _INPUT_CHECKPOINT_DIR.value,
-        _OUTPUT_CHECKPOINT_DIR.value,
-        _MINIMIZE_MEMORY_FOOTPRINT.value,
-        _ENABLE_FLOAT32.value,
+    state_dict, params = _get_llama_state_dict(_INPUT_CHECKPOINT_DIR.value)
+    quantize_weight_map = _LLAMA_QUANTIZED_WEIGHTS_TO_SCALER_NAME
+    weight_axis = lambda x: 0 if x == "tok_embeddings.weight" else 1
+
+  if _QUANTIZE.value:
+    start = time.perf_counter()
+    state_dict = _quantize_state_dict(
+        state_dict, quantize_weight_map, weight_axis
     )
+    end = time.perf_counter()
+    print(f"Quantizing weights takes {end - start} seconds")
+
+  print(f"Writing merged weights to dir {_OUTPUT_CHECKPOINT_DIR.value}")
+  start = time.perf_counter()
+  if "gs://" in str(_OUTPUT_CHECKPOINT_DIR.value):
+    _export_to_gcs(_OUTPUT_CHECKPOINT_DIR.value, params, state_dict)
+  else:
+    _export_to_local(_OUTPUT_CHECKPOINT_DIR.value, params, state_dict)
+  end = time.perf_counter()
+  print(f"Export outputs takes {end - start} seconds")
 
 
 if __name__ == "__main__":

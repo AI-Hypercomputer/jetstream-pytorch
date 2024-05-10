@@ -18,3 +18,11 @@ layers.*.input_layernorm.weight : -1 #  torch.float32 (2048,)
 layers.*.post_attention_layernorm.weight : -1 #  torch.float32 (2048,)
 norm.weight : -1 #  torch.float32 (2048,)
 embedder.weight : 1 # # 1, -1] #  torch.float32 (256000, 2048)
+embedder.weight_scaler : 0 
+layers.*.self_attn.o_proj.weight_scaler: 0
+layers.*.self_attn.wq.weight_scaler : 0 
+layers.*.self_attn.wk.weight_scaler : 0 
+layers.*.self_attn.wv.weight_scaler : 0 
+layers.*.mlp.gate_proj.weight_scaler : 0 
+layers.*.mlp.up_proj.weight_scaler : 0 
+layers.*.mlp.down_proj.weight_scaler : 0 

@@ -15,10 +15,11 @@
 import unittest
 import jax
 import jax.numpy as jnp
+from tests import helpers
 import torch
 import torch_xla2
 
-from jetstream_pt import cache_manager
+from jetstream_pt import cache_manager, layers, quantize
 
 
 class QuantizationTest(unittest.TestCase):
@@ -48,6 +49,47 @@ class QuantizationTest(unittest.TestCase):
       self.assertTrue(
           jnp.allclose(v._elem, new_v._elem[:, :, 57:58, :], atol=0.1)
       )
+
+  def test_kv_kernel(self):
+    """test kv cache quantization"""
+    cache_shape = (3, 2, 100, 2)  # bs, num heads, seqlen, dim
+    with jax.default_device(jax.devices("cpu")[0]):
+      env, _ = helpers.make_env_tiny(False)
+      key = jax.random.PRNGKey(123)
+      key2 = jax.random.PRNGKey(456)
+      cache_k_jax = jax.random.normal(key, cache_shape)
+      cache_v_jax = jax.random.normal(key2, cache_shape)
+
+      cache_k, cache_v = torch_xla2.tensor.wrap((cache_k_jax, cache_v_jax))
+
+      cache = cache_manager.KVCacheGenerate(cache_k, cache_v, [0], None)
+
+      # 1 is seqlen
+      xq = jax.random.normal(key, (3, 2, 1, 2))
+      xk = jax.random.normal(key, (3, 2, 1, 2))
+      xv = jax.random.normal(key, (3, 2, 1, 2))
+
+      xq, xk, xv = torch_xla2.tensor.wrap((xq, xk, xv))
+
+      attention_float = layers.AttentionKernel(env)
+      float_res = attention_float(xq, xk, xv, None, cache)
+
+      # ==
+
+      cache_k, cache_v = torch_xla2.tensor.wrap((cache_k_jax, cache_v_jax))
+      cache_k_int, cache_k_scaler = quantize.quantize_torch_int8(
+          cache_k, (1, 3)
+      )
+      cache_v_int, cache_v_scaler = quantize.quantize_torch_int8(
+          cache_v, (1, 3)
+      )
+      cache_int = cache_manager.Int8KVCacheGenerate(
+          cache_k_int, cache_v_int, cache_k_scaler, cache_v_scaler, [0], None
+      )
+      attention_quant = layers.Int8KVAttentionKernel(env)
+      int_res = attention_quant(xq, xk, xv, None, cache_int)
+
+      self.assertTrue(jnp.allclose(float_res.jax(), int_res.jax(), atol=0.01))
 
 
 if __name__ == "__main__":
