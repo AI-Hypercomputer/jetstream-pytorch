@@ -78,7 +78,7 @@ class WeightOnlyBlockwiseQuantizedLinear(torch.nn.Module):
     self.use_dot_general = False
     # Flatten einsum operands to 3D.
     # Same perf as non flattened one.
-    self.flatten = True
+    self.flatten = False
 
     block_size = 128
     n_blocks = in_features // block_size

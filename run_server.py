@@ -80,6 +80,12 @@ _MODEL_NAME = flags.DEFINE_string(
 _QUANTIZE_WEIGHTS = flags.DEFINE_bool(
     "quantize_weights", False, "weight quantization"
 )
+_QUANTIZE_NUM_BITS_WEIGHTS = flags.DEFINE_integer(
+    "quantize_num_bits_weights", 8, "number of bits of quantized weight."
+)
+_QUANTIZE_IS_BLOCKWISE_WEIGHTS = flags.DEFINE_bool(
+    "quantize_is_blockwise_weights", False, "blockwise quantization for weight."
+)
 _QUANTIZE_KV_CACHE = flags.DEFINE_bool(
     "quantize_kv_cache", False, "kv_cache_quantize"
 )
@@ -98,11 +104,19 @@ def main(argv: Sequence[str]):
   # No devices for local cpu test. A None for prefill and a None for generate.
   devices = server_lib.get_devices()
   print(f"devices: {devices}")
+  
+  quantize_weight = _QUANTIZE_WEIGHTS.value
+  quanitze_is_blockwise_weight = _QUANTIZE_IS_BLOCKWISE_WEIGHTS.value
+
   sharding_config_path = _SHARDING_CONFIG.value
   if not sharding_config_path:
+    sharding_config_name = _MODEL_NAME.value
+    if quantize_weight and quanitze_is_blockwise_weight:
+      sharding_config_name += "-blockwise-quant"
     sharding_config_path = os.path.join(
-        "default_shardings", _MODEL_NAME.value + ".yaml"
+      "default_shardings", sharding_config_name + ".yaml"
     )
+
   engine = jetstream_pt.create_pytorch_engine(
       devices=devices,
       tokenizer_path=_TOKENIZER_PATH.value,
@@ -113,6 +127,8 @@ def main(argv: Sequence[str]):
       batch_size=_BATCH_SIZE.value,
       model_name=_MODEL_NAME.value,
       quantize_weights=_QUANTIZE_WEIGHTS.value,
+      quantize_num_bits_weights=_QUANTIZE_NUM_BITS_WEIGHTS.value,
+      quanitze_is_blockwise_weight=quanitze_is_blockwise_weight,
       quantize_kv=_QUANTIZE_KV_CACHE.value,
       max_cache_length=_MAX_CACHE_LENGTH.value,
       sharding_config=sharding_config_path,

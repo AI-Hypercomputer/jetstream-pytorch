@@ -21,13 +21,14 @@ import torch_xla2
 
 from jetstream_pt import cache_manager, layers, quantize
 from jetstream_pt.layers import WeightOnlyBlockwiseQuantizedLinear
+from jetstream_pt.quantize import quantize_torch, quantize_blockwise
 from torch_xla2 import tensor
 from torch.utils import _pytree as pytree
 
 import jax.sharding as jsharding
 from jax.experimental import mesh_utils
 
-key = jax.random.PRNGKey(12345)
+# key = jax.random.PRNGKey(12345)
 
 
 class QuantizationTest(unittest.TestCase):
@@ -119,6 +120,59 @@ class QuantizationTest(unittest.TestCase):
       self.assertTrue(
           jnp.allclose(v._elem, new_v._elem[:, :, 57:58, :], atol=0.1)
       )
+
+  def test_quantize_tensor(self):
+    with jax.default_device(jax.devices("cpu")[0]):
+      w = self._xla_tensor((512, 256))
+      x = self._xla_tensor((2, 256))
+      # import pdb;pdb.set_trace()
+      w_q, s = quantize_blockwise(w.transpose(0,1))
+      print(w_q.shape)
+      print(s.shape)
+      w_dq = (w_q * s).reshape(-1, w.shape[0]).transpose(0,1)
+      # w_dq = torch_xla2.tensor.j2t(w_dq._elem)
+      # import pdb;pdb.set_trace()
+      # print(torch.max((w_dq - w).abs()))
+      print((w_dq - w).norm())
+    w = torch.rand(512, 256)
+    x = torch.rand(2, 256)
+    w_q, s = quantize_blockwise(w.transpose(0,1))
+    w_dq = (w_q * s).reshape(-1, w.shape[0]).transpose(0,1)
+    print(torch.max((w_dq - w).abs()))
+    print((w_dq - w).norm())
+  
+  def test_per_channel(self):
+    with jax.default_device(jax.devices("cpu")[0]):
+      w = torch.rand((512, 256))
+      x = torch.rand((2, 256))
+      w_q, s = quantize_torch(w, (1,))
+      w_dq = w_q * s
+      print((w_dq - w).norm())
+      
+      w = torch_xla2.tensor.move_to_device(w)
+      x = torch_xla2.tensor.move_to_device(x)
+      w_q, s = quantize_torch(w, (1,))
+      w_dq = (w_q * s)
+      print((w_dq - w).norm())
+    
+  def test_hex_llm_quant(self):
+    from jetstream_pt.quantize import quantize_tensor, TensorQConfig
+    print("test per-channel")
+    qconfig = TensorQConfig(is_blockwise=False, axis=1)
+    w = torch.rand((512, 256))
+    w_q, s, _ = quantize_tensor(w, qconfig)
+    w_dq = w_q * s
+    print("my quant diff: ", w_dq - w)
+    print("my quant norm: ", (w_dq - w).norm())
+    with jax.default_device(jax.devices("cpu")[0]):
+      w_q, s = quantize_torch(w, (1,))
+      w_dq = (w_q * s)
+      print("my quant diff: ", w_dq - w)
+      print("my quant norm: ", (w_dq - w).norm())
+
+      print("test blockwise")
+      qconfig = TensorQConfig(is_blockwise=True)
+    
 
   def test_int4_quantized_layer(self):
 
