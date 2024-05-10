@@ -149,6 +149,11 @@ class PyTorchRayWorker:
 
     if not sharding_config:
       sharding_config = os.path.join("default_shardings", model_name + ".yaml")
+    
+    quant_config = QuantizationConfig(
+        enable_weight_quantization=quantize_weights,
+        enable_kv_quantization=quantize_kv,
+    )
 
     env_data = JetEngineEnvironmentData(
         tokenizer_path=tokenizer_path,
@@ -157,8 +162,7 @@ class PyTorchRayWorker:
         batch_size=batch_size,
         max_decode_length=max_decode_length,
         max_input_sequence_length=context_length,
-        enable_weight_quantization=quantize_weights,
-        enable_kv_quantization=quantize_kv,
+        quant_config=quant_config,
         cache_sequence_length=max_cache_length,
         bf16_enable=bf16_enable,
         sharding_config_path=sharding_config,
@@ -283,7 +287,7 @@ class PyTorchRayWorker:
     caches_obj = self.env.make_caches_generate()
     caches = [c.state() for c in caches_obj]
     scalers = []
-    if self.env.enable_kv_quantization:
+    if self.env.quant_config.enable_kv_quantization:
       scalers = [c.scalers() for c in caches_obj]
     return DecodeState(
         jnp.zeros((self.env.batch_size, 1), dtype=jnp.int32),
@@ -332,7 +336,7 @@ class PyTorchRayWorker:
     pos = current_position
     input_indexes = jnp.full((1,), pos)
     new_mask = mask.at[:, current_position].set(0)
-    if self.env.enable_kv_quantization:
+    if self.env.quant_config.enable_kv_quantization:
       caches_obj = [
           cache_manager.Int8KVCacheGenerate(k, v, ks, vs, input_indexes)
           for (k, v), (ks, vs) in torch_xla2.tensor.wrap(
@@ -355,7 +359,7 @@ class PyTorchRayWorker:
         res = torch.func.functional_call(self.pt_model, paramst, argst)
       updated_caches = [c.state() for c in caches_obj]
     scales = []
-    if self.env.enable_kv_quantization:
+    if self.env.quant_config.enable_kv_quantization:
       scales = [c.scalers() for c in caches_obj]
     new_current_position = (
         current_position + 1
@@ -379,7 +383,9 @@ class PyTorchRayWorker:
   )
   def _call_model_prefill(self, weights, tokens, input_indexes):
     caches = [
-        cache_manager.KVCachePrefill(self.env.enable_kv_quantization)
+        cache_manager.KVCachePrefill(
+            self.env.quant_config.enable_kv_quantization
+        )
         for _ in self.pt_model.layers
     ]
     mask = jnp.full(
@@ -483,7 +489,7 @@ class PyTorchRayWorker:
     mask_insert = jnp.where(cond, 0, float("-inf"))
     mask = decode_state.mask.at[slot].set(mask_insert)
     input_pos = decode_state.input_pos.at[slot].set(prefix.seq_len)
-    if not self.env.enable_kv_quantization:
+    if not self.env.quant_config.enable_kv_quantization:
 
       @functools.partial(jax.jit, donate_argnums=(0, 1), inline=True)
       def insert(cache, new_entry):
@@ -584,7 +590,7 @@ class PyTorchRayWorker:
 
     scales = []
     caches = []
-    if not self.env.enable_kv_quantization:
+    if not self.env.quant_config.enable_kv_quantization:
 
       @functools.partial(jax.jit, donate_argnums=(0, 1), inline=True)
       def insert(cache, new_entry):

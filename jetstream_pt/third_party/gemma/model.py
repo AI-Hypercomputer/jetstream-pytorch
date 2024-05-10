@@ -93,8 +93,8 @@ class GemmaAttention(nn.Module):
     self.scaling = self.head_dim**-0.5
 
     Linear = (
-        layers.WeightOnlyInt8Linear
-        if env.enable_weight_quantization
+        layers.WeightOnlyPerChannelQuantizedLinear
+        if env.quant_config.enable_weight_quantization
         else torch.nn.Linear
     )
     self.wq = Linear(
@@ -124,7 +124,7 @@ class GemmaAttention(nn.Module):
 
     Kernel = (
         layers.Int8KVAttentionKernel
-        if env.enable_kv_quantization
+        if env.quant_config.enable_kv_quantization
         else layers.AttentionKernel
     )
     self.attention_kernel = Kernel(env)
@@ -214,8 +214,8 @@ class GemmaMLP(nn.Module):
   ):
     super().__init__()
     Linear = (
-        layers.WeightOnlyInt8Linear
-        if env.enable_weight_quantization
+        layers.WeightOnlyPerChannelQuantizedLinear
+        if env.quant_config.enable_weight_quantization
         else torch.nn.Linear
     )
     self.gate_proj = Linear(
@@ -306,7 +306,7 @@ class GemmaModel(nn.Module):
     )
     Embedding = (
         layers.Int8Embedding
-        if env.enable_weight_quantization
+        if env.quant_config.enable_weight_quantization
         else torch.nn.Embedding
     )
 

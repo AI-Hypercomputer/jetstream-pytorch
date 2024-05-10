@@ -33,7 +33,7 @@ from torch.utils import _pytree as pytree
 
 from jetstream_pt import cache_manager
 from jetstream_pt import quantize
-from jetstream_pt.environment import JetEngineEnvironment, JetEngineEnvironmentData
+from jetstream_pt.environment import JetEngineEnvironment, JetEngineEnvironmentData, QuantizationConfig
 from jetstream_pt.third_party.llama import model_exportable, model_args
 from jetstream_pt.third_party.gemma import config as gemma_config, model as gemma_model
 
@@ -115,33 +115,31 @@ class PyTorchEngine(engine_api.Engine):
     # This allows easier way to edit shardings
     """
     for key, val in self.env._data.experimental_sharding_axis_override.items():
-      if name.endswith(key): 
+      if name.endswith(key):
         return self.env.sharding_by_axis(val)
     """
-    if 'weight_scaler' in name:
-      if "attention." in name and "wo" in name:
+    if "weight_scaler" in name:
+      if "attention.wo" in name or "feed_forward.w2" in name:
         return self.y_sharding
-      # elif "feed_forward.w2" in name:
-      #   return self.y_sharding
       else:
         return self.x_sharding
     if "tok_embeddings." in name:
-        return self.y_sharding
+      return self.y_sharding
     if "attention." in name:
-        if "wo" in name:
-            # return self.y_sharding
-            return self.int4_weight_sharding
-        else:
-            return self.x_sharding
+      if "wo" in name:
+        # return self.y_sharding
+        return self.int4_weight_sharding
+      else:
+        return self.x_sharding
     if "feed_forward." in name:
-        if "w2" in name:
-            return self.y_sharding
-            # return self.int4_weight_sharding
-        else:
-            return self.x_sharding
+      if "w2" in name:
+        # return self.y_sharding
+        return self.int4_weight_sharding
+      else:
+        return self.x_sharding
     if "output" in name:
-        return self.x_sharding 
-    return self.replicated 
+      return self.x_sharding
+    return self.replicated
 
   def init_decode_state(
       self,
@@ -149,7 +147,7 @@ class PyTorchEngine(engine_api.Engine):
     caches_obj = self.env.make_caches_generate()
     caches = [c.state() for c in caches_obj]
     scalers = []
-    if self.env.enable_kv_quantization:
+    if self.env.quant_config.enable_kv_quantization:
       scalers = [c.scalers() for c in caches_obj]
     return DecodeState(
         jnp.zeros((self.env.batch_size, 1), dtype=jnp.int32),
@@ -176,7 +174,7 @@ class PyTorchEngine(engine_api.Engine):
       mask,
       input_pos,
   ):
-    if self.env.enable_kv_quantization:
+    if self.env.quant_config.enable_kv_quantization:
       caches_obj = [
           cache_manager.Int8KVCacheGenerate(k, v, ks, vs, input_indexes)
           for (k, v), (ks, vs) in torch_xla2.tensor.wrap(
@@ -199,7 +197,7 @@ class PyTorchEngine(engine_api.Engine):
         res = torch.func.functional_call(self.pt_model, paramst, argst)
     updated_caches = [c.state() for c in caches_obj]
     scales = []
-    if self.env.enable_kv_quantization:
+    if self.env.quant_config.enable_kv_quantization:
       scales = [c.scalers() for c in caches_obj]
     return torch_xla2.tensor.unwrap((res, updated_caches, scales))
 
@@ -209,7 +207,9 @@ class PyTorchEngine(engine_api.Engine):
   )
   def _call_model_prefill(self, weights, tokens, input_indexes):
     caches = [
-        cache_manager.KVCachePrefill(self.env.enable_kv_quantization)
+        cache_manager.KVCachePrefill(
+            self.env.quant_config.enable_kv_quantization
+        )
         for _ in self.pt_model.layers
     ]
     mask = jnp.full(
@@ -298,7 +298,7 @@ class PyTorchEngine(engine_api.Engine):
     mask_insert = jnp.where(cond, 0, float("-inf"))
     mask = decode_state.mask.at[slot].set(mask_insert)
     input_pos = decode_state.input_pos.at[slot].set(prefix.seq_len)
-    if not self.env.enable_kv_quantization:
+    if not self.env.quant_config.enable_kv_quantization:
 
       @functools.partial(jax.jit, donate_argnums=(0, 1), inline=True)
       def insert(cache, new_entry):
@@ -399,7 +399,7 @@ class PyTorchEngine(engine_api.Engine):
 
     scales = []
     caches = []
-    if not self.env.enable_kv_quantization:
+    if not self.env.quant_config.enable_kv_quantization:
 
       @functools.partial(jax.jit, donate_argnums=(0, 1), inline=True)
       def insert(cache, new_entry):
@@ -616,26 +616,28 @@ class PyTorchEngine(engine_api.Engine):
           return self._load_from_state_dict(self.env.checkpoint_path)
       else:
         jax_weights = self._make_state_dict_jax(self.pt_model.state_dict())
-    # copied from convert_checkpoints.py, can be put into a common quant config file
+    # Weight names that are quantized. Copied from convert_checkpoints.py
+    # TODO: put into a common quant config file.
     _QUANTIZE_LINEAR_WEIGHTS = {
-        'attention.wq.weight',
-        'attention.wk.weight',
-        'attention.wv.weight',
-        'attention.wo.weight',
-        'feed_forward.w1.weight',
-        'feed_forward.w2.weight',
-        'feed_forward.w3.weight',
-        'output.weight',
+        "attention.wq.weight",
+        "attention.wk.weight",
+        "attention.wv.weight",
+        "attention.wo.weight",
+        "feed_forward.w1.weight",
+        "feed_forward.w2.weight",
+        "feed_forward.w3.weight",
+        "output.weight",
     }
-    with jax.default_device(jax.devices('cpu')[0]):
-      for key, value in jax_weights.items():
-        for qname in _QUANTIZE_LINEAR_WEIGHTS:
-          if key.endswith(qname):
-            print(f"cast weight {key} to int4, shape {value.shape}")
-            jax_weights[key] = value.astype(jnp.int4)
+    if self.env.quant_config.num_bits_weight == 4:
+      with jax.default_device(jax.devices("cpu")[0]):
+        for key, value in jax_weights.items():
+          for qname in _QUANTIZE_LINEAR_WEIGHTS:
+            if key.endswith(qname):
+              # print(f"cast weight {key} to int4, shape {value.shape}")
+              jax_weights[key] = value.astype(jnp.int4)
 
     jax_weights = {
-        key: jax.device_put(value, self.sharding_by_name(key))
+        key: jax.device_put(value, self.env.sharding_by_name(key))
         for key, value in jax_weights.items()
     }
     for k, v in jax_weights.items():
@@ -710,6 +712,8 @@ def create_pytorch_engine(
     max_decode_length: int = 4096,
     model_name="llama-2",
     quantize_weights=False,
+    quantize_num_bits_weights=8,
+    quanitze_is_blockwise_weight=False,
     quantize_kv=False,
     max_cache_length=1024,
     sharding_config=None,
@@ -757,6 +761,13 @@ def create_pytorch_engine(
   if not sharding_config:
     sharding_config = os.path.join("default_shardings", model_name + ".yaml")
 
+  quant_config = QuantizationConfig(
+      enable_weight_quantization=quantize_weights,
+      num_bits_weight=quantize_num_bits_weights,
+      is_blockwise_weight=quanitze_is_blockwise_weight,
+      enable_kv_quantization=quantize_kv,
+  )
+
   env_data = JetEngineEnvironmentData(
       tokenizer_path=tokenizer_path,
       checkpoint_path=checkpoint_path,
@@ -764,8 +775,9 @@ def create_pytorch_engine(
       batch_size=batch_size,
       max_decode_length=max_decode_length,
       max_input_sequence_length=context_length,
-      enable_weight_quantization=quantize_weights,
-      enable_kv_quantization=quantize_kv,
+      # enable_weight_quantization=quantize_weights,
+      # enable_kv_quantization=quantize_kv,
+      quant_config=quant_config,
       cache_sequence_length=max_cache_length,
       bf16_enable=bf16_enable,
       sharding_config_path=sharding_config,

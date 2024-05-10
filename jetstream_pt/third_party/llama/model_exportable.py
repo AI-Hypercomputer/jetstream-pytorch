@@ -3,14 +3,16 @@
 
 from typing import Any, List, Optional
 
+import jax
 import torch
-from torch import nn
 import torch.nn.functional as F
+from jetstream_pt.layers import (Attention, Int8Embedding, RMSNorm,
+                                 WeightOnlyBlockwiseQuantizedLinear,
+                                 WeightOnlyPerChannelQuantizedLinear,
+                                 get_quantized_linear_layer)
+from torch import nn
 
 from . import model_args
-import jax
-
-from jetstream_pt.layers import Attention, RMSNorm, Int8Embedding, WeightOnlyInt8Linear, WeightOnlyInt4Linear
 
 
 class FeedForward(nn.Module):
@@ -34,8 +36,7 @@ class FeedForward(nn.Module):
       hidden_dim = int(ffn_dim_multiplier * hidden_dim)
     hidden_dim = multiple_of * ((hidden_dim + multiple_of - 1) // multiple_of)
 
-    LinearLayer = WeightOnlyInt8Linear if quantize else nn.Linear
-    # LinearLayer = WeightOnlyInt4Linear if quantize else nn.Linear
+    LinearLayer = get_quantized_linear_layer(env.quant_config)
 
     self.w1 = LinearLayer(
         dim,
@@ -155,8 +156,7 @@ class Transformer(nn.Module):
       self.layers.append(TransformerBlock(layer_id, params, env))
     self.norm = RMSNorm(params.dim, eps=params.norm_eps, device=params.device)
 
-    LinearLayer = WeightOnlyInt8Linear if params.quantize else nn.Linear
-    # LinearLayer = WeightOnlyInt4Linear if params.quantize else nn.Linear
+    LinearLayer = get_quantized_linear_layer(env.quant_config)
 
     self.output = LinearLayer(
         params.dim,
