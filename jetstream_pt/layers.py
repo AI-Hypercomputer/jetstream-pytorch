@@ -23,7 +23,6 @@ from torch import nn
 import torch.nn.functional as F
 import jax
 import jax.numpy as jnp
-import torch_xla2
 
 
 class Int8Embedding(torch.nn.Module):
@@ -156,10 +155,7 @@ class AttentionKernel:
     with jax.named_scope("attn_mat1"):
       ## Attention start
       # scores = torch.einsum(jnp.einsum, "ijkl,ikml->ikjm", xq, keys) / math.sqrt(self.head_dim)
-      scores = torch_xla2.extra.call_jax(
-          jnp.einsum, "ikjl,ikml->ikjm", xq, keys
-      ) / math.sqrt(head_dim)
-      self.env.apply_sharding(scores, axis=1)
+      scores = torch.einsum("ikjl,ikml->ikjm", xq, keys) / math.sqrt(head_dim)
       if mask is not None:
         # if mask.shape != (1,1,16,16):
         #   breakpoint()
@@ -171,14 +167,15 @@ class AttentionKernel:
       # output = torch.einsum(
       #    "ikjm,ikml->ikjl", scores, values
       # )  # (bs, n_local_heads, seqlen, head_dim)
-      output = torch_xla2.extra.call_jax(
-          jnp.einsum, "ikjm,ikml->ikjl", scores, values
-      )
+      output = torch.einsum("ikjm,ikml->ikjl", scores, values)
       if seqlen == 1:
         output = output[:, :, 0:1, :]
       # For XLA matmul performance boost
       # output = torch.matmul(scores, values)
-      self.env.apply_sharding(output, axis=1)
+      if self.env.shard_on_batch:
+        self.env.apply_sharding(output, axis=0)
+      else:
+        self.env.apply_sharding(output, axis=1)
       return output
 
 
@@ -210,29 +207,28 @@ class Int8KVAttentionKernel:
       ## Attention start
       # scores = torch.einsum(jnp.einsum, "ijkl,ikml->ikjm", xq, keys) / math.sqrt(self.head_dim)
       scores = (
-          torch_xla2.extra.call_jax(jnp.einsum, "ikjl,ikml->ikjm", xq, keys)
+          torch.einsum("ikjl,ikml->ikjm", xq, keys)
           / math.sqrt(head_dim)
           * (k_scaler.reshape(bsz, 1, 1, keys.shape[2]))
       )
-      self.env.apply_sharding(scores, axis=1)
       if mask is not None:
         scores = scores + mask  # (bs, n_local_heads, seqlen, max_seqlen)
     with jax.named_scope("attn_soft"):
       scores = F.softmax(scores.float(), dim=-1).type_as(xq)
       scores = scores * v_scaler.reshape((bsz, 1, 1, keys.shape[2]))
-      self.env.apply_sharding(scores, axis=1)
 
     with jax.named_scope("attn_mat2"):
       # output = torch.einsum(
       #    "ikjm,ikml->ikjl", scores, values
       # )  # (bs, n_local_heads, seqlen, head_dim)
-      output = torch_xla2.extra.call_jax(
-          jnp.einsum, "ikjm,ikml->ikjl", scores, values
-      )
+      output = torch.einsum("ikjm,ikml->ikjl", scores, values)
       if seqlen == 1:
         output = output[:, :, 0:1, :]
       # output = torch.matmul(scores, values)
-      self.env.apply_sharding(output, axis=1)
+      if self.env.shard_on_batch:
+        self.env.apply_sharding(output, axis=0)
+      else:
+        self.env.apply_sharding(output, axis=1)
       return output
 
 
@@ -323,9 +319,14 @@ class Attention(nn.Module):
       xk = xk.view(bsz, seqlen, self.n_kv_heads, self.head_dim)
       xv = xv.view(bsz, seqlen, self.n_kv_heads, self.head_dim)
 
-      self.env.apply_sharding(xq, axis=2)
-      self.env.apply_sharding(xk, axis=2)
-      self.env.apply_sharding(xv, axis=2)
+      if self.env.shard_on_batch:
+        self.env.apply_sharding(xq, axis=0)
+        self.env.apply_sharding(xk, axis=0)
+        self.env.apply_sharding(xv, axis=0)
+      else:
+        self.env.apply_sharding(xq, axis=2)
+        self.env.apply_sharding(xk, axis=2)
+        self.env.apply_sharding(xv, axis=2)
 
     with jax.named_scope("attn_rope"):
       xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)

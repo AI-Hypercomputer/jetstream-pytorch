@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-TORCHXLA_TAG=jetstream-pytorch
+TORCHXLA_TAG=6dccf0a02d7828516bdb589f2ae0dc79b64488fa  # updated May 10, 2024
 JETSTREAM_TAG=v0.2.1
 
 # Uninstall existing jax

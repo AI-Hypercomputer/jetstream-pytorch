@@ -12,10 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import torch_xla2
 import jax
 import jax.numpy as jnp
 import torch
+from jetstream_pt.torchjax import from_jax, to_jax
 
 
 # pylint: disable-next=all
@@ -49,9 +49,7 @@ class KVCachePrefill:
     self.cache_v = value
     if self.kv_quantize:  # pretend to be quantized
       bsz, _, seq, _ = key.shape
-      ones = torch_xla2.tensor.wrap(
-          jnp.ones((bsz, 1, seq, 1), dtype=jnp.bfloat16)
-      )
+      ones = from_jax(jnp.ones((bsz, 1, seq, 1), dtype=jnp.bfloat16))
       return key, value, ones, ones
 
     return key, value
@@ -64,7 +62,7 @@ class KVCachePrefill:
 # pylint: disable-next=all
 def KVCachePrefill_flatten(cache):
   return (
-      torch_xla2.tensor.unwrap((cache.cache_k, cache.cache_v)),
+      to_jax((cache.cache_k, cache.cache_v)),
       cache.kv_quantize,
   )
 
@@ -72,7 +70,7 @@ def KVCachePrefill_flatten(cache):
 # pylint: disable-next=all
 def KVCachePrefill_unflatten(auxdata, data):
   cache = KVCachePrefill(auxdata)
-  cache_k, cache_v = torch_xla2.tensor.wrap(data)
+  cache_k, cache_v = to_jax(data)
   cache.cache_k = cache_k
   cache.cache_v = cache_v
 
@@ -102,7 +100,7 @@ class KVCacheGenerate:
 
   def update(self, key, value):
     """Update kv cache"""
-    keyj, valuej = torch_xla2.tensor.unwrap((key, value))
+    keyj, valuej = from_jax((key, value))
     # pylint: disable-next=all
     self.cache_k._elem = self.cache_k._elem.at[:, :, self.pos].set(keyj)
     # pylint: disable-next=all
@@ -112,7 +110,7 @@ class KVCacheGenerate:
   def state(self):
     """Get kv cache state"""
     # pylint: disable-next=all
-    return self.cache_k._elem, self.cache_v._elem
+    return self.cache_k.jax(), self.cache_v.jax()
 
   @classmethod
   def empty(cls, shape, device, bf16_enable):
@@ -120,22 +118,22 @@ class KVCacheGenerate:
     default_dtype = jnp.bfloat16 if bf16_enable else jnp.float32
     k = jnp.zeros(shape, device=device, dtype=default_dtype)
     v = jnp.zeros(shape, device=device, dtype=default_dtype)
-    k, v = torch_xla2.tensor.wrap((k, v))
+    k, v = from_jax((k, v))
     return cls(k, v, 0, device)
 
 
 # pylint: disable-next=all
 def KVCacheGenerate_flatten(cache):
-  return torch_xla2.tensor.unwrap((cache.cache_k, cache.cache_v)), (
-      cache.pos,
-      cache.sharding,
+  return ((cache.cache_k.jax(), cache.cache_v.jax())), (
+      cache.pos.jax(),
+      cache.sharding.jax(),
   )
 
 
 # pylint: disable-next=all
 def KVCacheGenerate_unflatten(auxdata, data):
   position, sharding = auxdata
-  cache_k, cache_v = torch_xla2.tensor.wrap(data)
+  cache_k, cache_v = from_jax(data)
   cache = KVCacheGenerate(cache_k, cache_v, position, sharding)
   return cache
 
@@ -168,11 +166,11 @@ class Int8KVCacheGenerate:
 
   def state(self):
     """Get kv cache state"""
-    return torch_xla2.tensor.unwrap((self.cache_k, self.cache_v))
+    return to_jax((self.cache_k, self.cache_v))
 
   def scalers(self):
     """Get kv cache scalers"""
-    return torch_xla2.tensor.unwrap((self.k_scaler, self.v_scaler))
+    return to_jax((self.k_scaler, self.v_scaler))
 
   @classmethod
   # pylint: disable-next=all
@@ -184,7 +182,7 @@ class Int8KVCacheGenerate:
     kscaler = jnp.ones((shape[0], 1, shape[2], 1), dtype=jnp.bfloat16)
     vscaler = jnp.ones((shape[0], 1, shape[2], 1), dtype=jnp.bfloat16)
 
-    cache_k, cache_v, kscaler, vscaler = torch_xla2.tensor.wrap(
+    cache_k, cache_v, kscaler, vscaler = from_jax(
         (cache_k, cache_v, kscaler, vscaler)
     )
     return cls(cache_k, cache_v, kscaler, vscaler, 0, device)

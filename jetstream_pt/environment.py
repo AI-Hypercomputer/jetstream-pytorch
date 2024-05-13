@@ -75,6 +75,9 @@ class JetEngineEnvironmentData:
 
   sharding_config_path: str = ""
 
+  # Whether to shard on batch dimension. i.e. data parallel.
+  shard_on_batch: bool = False
+
 
 # pylint: disable-next=all
 class JetEngineEnvironment:
@@ -97,9 +100,12 @@ class JetEngineEnvironment:
     self.x_sharding = jsharding.NamedSharding(self._mesh, P("x"))
     self.replicated = jsharding.NamedSharding(self._mesh, P())
 
-    cache_sharding_axis = self.attention_kv_axis_names.index(
-        self.kv_cache_shard_axis
-    )
+    if data.shard_on_batch:
+      cache_sharding_axis = 0
+    else:
+      cache_sharding_axis = self.attention_kv_axis_names.index(
+          self.kv_cache_shard_axis
+      )
 
     if self.cache_shape[cache_sharding_axis] == 1:
       # cannot shard on an axis that is 1
@@ -169,6 +175,9 @@ class JetEngineEnvironment:
 
   def sharding_by_name(self, name):
     """Create sharding specified in the config."""
+    if self.shard_on_batch:
+      return self.shading_by_axis(0)  # batch dimension
+
     if name in self._sharding_config:
       return self.sharding_by_axis(self._sharding_config[name])
 

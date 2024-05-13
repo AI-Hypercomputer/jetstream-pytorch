@@ -20,6 +20,7 @@ import torch
 import torch_xla2
 
 from jetstream_pt import cache_manager, layers, quantize
+from jetstream_pt.torchjax import from_jax, to_jax
 
 
 class QuantizationTest(unittest.TestCase):
@@ -27,7 +28,7 @@ class QuantizationTest(unittest.TestCase):
 
   def _xla_tensor(self, shape):
     res = torch.randn(shape, dtype=torch.bfloat16)
-    return torch_xla2.tensor.move_to_device(res)
+    return torch_xla2.default_env().to_xla(res)
 
   def test_kv_cache(self):
     """test kv cache quantization"""
@@ -60,7 +61,7 @@ class QuantizationTest(unittest.TestCase):
       cache_k_jax = jax.random.normal(key, cache_shape)
       cache_v_jax = jax.random.normal(key2, cache_shape)
 
-      cache_k, cache_v = torch_xla2.tensor.wrap((cache_k_jax, cache_v_jax))
+      cache_k, cache_v = from_jax((cache_k_jax, cache_v_jax))
 
       cache = cache_manager.KVCacheGenerate(cache_k, cache_v, [0], None)
 
@@ -69,14 +70,14 @@ class QuantizationTest(unittest.TestCase):
       xk = jax.random.normal(key, (3, 2, 1, 2))
       xv = jax.random.normal(key, (3, 2, 1, 2))
 
-      xq, xk, xv = torch_xla2.tensor.wrap((xq, xk, xv))
+      xq, xk, xv = from_jax((xq, xk, xv))
 
       attention_float = layers.AttentionKernel(env)
       float_res = attention_float(xq, xk, xv, None, cache)
 
       # ==
 
-      cache_k, cache_v = torch_xla2.tensor.wrap((cache_k_jax, cache_v_jax))
+      cache_k, cache_v = from_jax((cache_k_jax, cache_v_jax))
       cache_k_int, cache_k_scaler = quantize.quantize_torch_int8(
           cache_k, (1, 3)
       )
