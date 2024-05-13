@@ -1,0 +1,28 @@
+
+# Sharding config for llama-3
+# Sharding should either be an int between 0 and rank - 1
+# signifying the axis to shard or -1 / null signifying replicated
+
+
+freqs_cis : -1 #  torch.complex64 (2048, 64)
+tok_embeddings.weight : 1 #  torch.float32 (128256, 4096)
+tok_embeddings.weight_scaler : 0 #  torch.bfloat16 (4096,)
+layers.*.attention.wo.weight : 1 #  torch.int8 (4096, 4096)
+layers.*.attention.wo.weight_scaler : 0 #  torch.bfloat16 (4096,)
+layers.*.attention.wq.weight : 0 #  torch.int8 (4096, 4096)
+layers.*.attention.wq.weight_scaler : 0 #  torch.bfloat16 (4096,)
+layers.*.attention.wk.weight : 0 #  torch.int8 (4096, 4096)
+layers.*.attention.wk.weight_scaler : 0 #  torch.bfloat16 (4096,)
+layers.*.attention.wv.weight : 0 #  torch.int8 (4096, 4096)
+layers.*.attention.wv.weight_scaler : 0 #  torch.bfloat16 (4096,)
+layers.*.feed_forward.w1.weight : 0 #  torch.float32 (11008, 4096)
+layers.*.feed_forward.w1.weight_scaler : 0  # torch.bfloat16 (4096,)
+layers.*.feed_forward.w2.weight : 1 #  torch.float32 (4096, 11008)
+layers.*.feed_forward.w2.weight_scaler : 0 # torch.bfloat16 (11008,)
+layers.*.feed_forward.w3.weight : 0 #  torch.float32 (11008, 4096)
+layers.*.feed_forward.w3.weight_scaler : 0 # torch.bfloat16 (4096,)
+layers.*.attention_norm.weight : -1 #  torch.float32 (4096,)
+layers.*.ffn_norm.weight : -1 #  torch.float32 (4096,)
+norm.weight : -1 #  torch.float32 (4096,)
+output.weight : 0 #  torch.float32 (128256, 4096)
+output.weight_scaler : 0 #  torch.float32 (4096,)

@@ -701,7 +701,6 @@ def create_pytorch_engine(
     checkpoint_format = "safetensors"
     checkpoint_path = paths[0]
 
-  tokenizer = token_utils.load_vocab(tokenizer_path)
   pt_model = None
 
   if not sharding_config:
@@ -734,7 +733,7 @@ def create_pytorch_engine(
         max_cache_length,
         args.dim // args.n_heads,
     )
-    env_data.model_type = "llama-2-" + param_size
+    env_data.model_type = model_name + "-" + param_size
     env_data.num_layers = args.n_layers
     env = JetEngineEnvironment(env_data)
     pt_model = model_exportable.Transformer(args, env)
@@ -746,7 +745,7 @@ def create_pytorch_engine(
         max_cache_length,
         args.head_dim,
     )
-    env_data.model_type = "gemma-" + param_size
+    env_data.model_type = model_name + "-" + param_size
     env_data.num_layers = args.num_hidden_layers
     env = JetEngineEnvironment(env_data)
     pt_model = gemma_model.GemmaModel(args, env)
