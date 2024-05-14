@@ -34,7 +34,7 @@ from tests import helpers
 class LlamaE2ETest(unittest.TestCase):
   """This test class includes all E2E test for llama2"""
 
-  def _to_jax(self, tree):
+  def _from_torch(self, tree):
     return pytree.tree_map_only(torch.Tensor, torch_xla2.tensor.t2j, tree)
 
   def _make_env(self, bf16_enable=True):
@@ -116,7 +116,7 @@ class LlamaE2ETest(unittest.TestCase):
 
     state_dict = dict(model_orig.state_dict())
     state_dict["freqs_cis"] = model_orig.freqs_cis
-    params = self._to_jax(state_dict)
+    params = self._from_torch(state_dict)
 
     output_tokens_multiple = []
     for i in [1, 2, 3]:
@@ -189,7 +189,7 @@ class LlamaE2ETest(unittest.TestCase):
 
     engine = PyTorchEngine(pt_model=model_ours, env=env)
 
-    params = self._to_jax(state_dict)
+    params = self._from_torch(state_dict)
     decode_state = engine.init_decode_state()
     slot = 0
     # pylint: disable-next=all
@@ -273,7 +273,7 @@ class LlamaE2ETest(unittest.TestCase):
 
     engine = PyTorchEngine(pt_model=model_ours, env=env)
 
-    params = self._to_jax(state_dict)
+    params = self._from_torch(state_dict)
     decode_state = engine.init_decode_state()
     slot = 0
 
@@ -345,7 +345,7 @@ class LlamaE2ETest(unittest.TestCase):
 
     engine = PyTorchEngine(pt_model=model_ours, env=env)
 
-    params = self._to_jax(state_dict)
+    params = self._from_torch(state_dict)
     decode_state = engine.init_decode_state()
     slot = 0
 
@@ -404,7 +404,7 @@ class LlamaE2ETest(unittest.TestCase):
     state_dict["freqs_cis"] = model_orig.freqs_cis
     model_ours = model_exportable.Transformer(model_arg, env)
     engine = PyTorchEngine(pt_model=model_ours, env=env)
-    params = self._to_jax(state_dict)
+    params = self._from_torch(state_dict)
     slot = 0
     out_tokens = []
 
@@ -479,7 +479,7 @@ class LlamaE2ETest(unittest.TestCase):
     state_dict["freqs_cis"] = model_orig.freqs_cis
     model_ours = model_exportable.Transformer(model_arg, env)
     engine = PyTorchEngine(pt_model=model_ours, env=env)
-    params = self._to_jax(state_dict)
+    params = self._from_torch(state_dict)
     slot = 0
     out_tokens = []
 
