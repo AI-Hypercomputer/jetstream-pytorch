@@ -172,10 +172,8 @@ class AttentionKernel:
         output = output[:, :, 0:1, :]
       # For XLA matmul performance boost
       # output = torch.matmul(scores, values)
-      if self.env.shard_on_batch:
-        self.env.apply_sharding(output, axis=0)
-      else:
-        self.env.apply_sharding(output, axis=1)
+      shard_axis = 0 if self.env.shard_on_batch else 1
+      self.env.apply_sharding(output, axis=shard_axis)
       return output
 
 
@@ -225,10 +223,8 @@ class Int8KVAttentionKernel:
       if seqlen == 1:
         output = output[:, :, 0:1, :]
       # output = torch.matmul(scores, values)
-      if self.env.shard_on_batch:
-        self.env.apply_sharding(output, axis=0)
-      else:
-        self.env.apply_sharding(output, axis=1)
+      shard_axis = 0 if self.env.shard_on_batch else 1
+      self.env.apply_sharding(output, axis=shard_axis)
       return output
 
 
@@ -319,14 +315,10 @@ class Attention(nn.Module):
       xk = xk.view(bsz, seqlen, self.n_kv_heads, self.head_dim)
       xv = xv.view(bsz, seqlen, self.n_kv_heads, self.head_dim)
 
-      if self.env.shard_on_batch:
-        self.env.apply_sharding(xq, axis=0)
-        self.env.apply_sharding(xk, axis=0)
-        self.env.apply_sharding(xv, axis=0)
-      else:
-        self.env.apply_sharding(xq, axis=2)
-        self.env.apply_sharding(xk, axis=2)
-        self.env.apply_sharding(xv, axis=2)
+      shard_axis = 0 if self.env.shard_on_batch else 2
+      self.env.apply_sharding(xq, axis=shard_axis)
+      self.env.apply_sharding(xk, axis=shard_axis)
+      self.env.apply_sharding(xv, axis=shard_axis)
 
     with jax.named_scope("attn_rope"):
       xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)

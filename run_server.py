@@ -90,7 +90,10 @@ _SHARDING_CONFIG = flags.DEFINE_string(
     "sharding_config", "", "config file for sharding"
 )
 _SHARD_ON_BATCH = flags.DEFINE_bool(
-    "shard_on_batch", False, "whether to shard on batch dimension"
+    "shard_on_batch",
+    False,
+    "whether to shard on batch dimension"
+    "If set true, sharding_config will be ignored.",
 )
 
 

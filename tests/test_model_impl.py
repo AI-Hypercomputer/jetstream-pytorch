@@ -23,7 +23,7 @@ from jetstream_pt.third_party.llama import model_exportable
 from jetstream_pt.third_party.llama import model_original
 from jetstream_pt.third_party.gemma import model_original as gemma_orig
 from jetstream_pt.third_party.gemma import model as gemma
-from jetstream_pt.torchjax import from_jax, to_jax
+from jetstream_pt import torchjax
 from jetstream_pt import layers
 from jetstream_pt import cache_manager
 
@@ -76,7 +76,7 @@ class ModelComponentTest(unittest.TestCase):
     x = jnp.arange(0, cache_length)
     cond = jnp.logical_and(x <= pos, x >= pos - seqlen)
     res = jnp.where(cond, 0, float("-inf"))
-    return from_jax(res)
+    return torchjax.to_torch(res)
 
   def _compare_cache(self, cache_torch, cache_jax):
     _, seq, _, _ = cache_torch.shape
@@ -88,7 +88,9 @@ class ModelComponentTest(unittest.TestCase):
     cache_array_k = jnp.zeros(env.cache_shape)
 
     cache_array_v = jnp.zeros(env.cache_shape)
-    cache_array_k, cache_array_v = from_jax((cache_array_k, cache_array_v))
+    cache_array_k, cache_array_v = torchjax.to_torch(
+        (cache_array_k, cache_array_v)
+    )
     cache_decode = cache_manager.KVCacheGenerate(
         cache_array_k, cache_array_v, pos, None
     )

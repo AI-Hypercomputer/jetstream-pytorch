@@ -33,7 +33,7 @@ from torch.utils import _pytree as pytree
 
 from jetstream_pt import cache_manager
 from jetstream_pt import quantize
-from jetstream_pt.torchjax import from_jax, to_jax
+from jetstream_pt import torchjax
 from jetstream_pt.environment import JetEngineEnvironment, JetEngineEnvironmentData
 from jetstream_pt.third_party.llama import model_exportable, model_args
 from jetstream_pt.third_party.gemma import config as gemma_config, model as gemma_model
@@ -151,27 +151,31 @@ class PyTorchEngine(engine_api.Engine):
     if self.env.enable_kv_quantization:
       caches_obj = [
           cache_manager.Int8KVCacheGenerate(k, v, ks, vs, input_indexes)
-          for (k, v), (ks, vs) in from_jax(list(zip(caches, cache_scales)))
+          for (k, v), (ks, vs) in torchjax.to_torch(
+              list(zip(caches, cache_scales))
+          )
       ]
     else:
       caches_obj = [
           cache_manager.KVCacheGenerate(
               k, v, input_indexes, self.cache_sharding
           )
-          for k, v in from_jax(caches)
+          for k, v in torchjax.to_torch(caches)
       ]
     mask = jnp.expand_dims(mask, (1, 2))
 
     args = (tokens, input_pos, caches_obj, mask)
-    paramst, argst = from_jax((weights, args))
+    paramst, argst = torchjax.to_torch((weights, args))
     with self._lock:
-      with torch_xla2.default_env():
+      with torchjax.jax_mode:
+        # The mode is needed so that tensors created inside of
+        # the model (such as via torch.ones etc) also have the right type
         res = torch.func.functional_call(self.pt_model, paramst, argst)
     updated_caches = [c.state() for c in caches_obj]
     scales = []
     if self.env.enable_kv_quantization:
       scales = [c.scalers() for c in caches_obj]
-    return to_jax((res, updated_caches, scales))
+    return torchjax.from_torch((res, updated_caches, scales))
 
   @functools.partial(
       jax.jit,
@@ -190,12 +194,12 @@ class PyTorchEngine(engine_api.Engine):
     mask = jnp.triu(mask, k=1)
     args = (tokens, input_indexes, caches, mask)
 
-    paramst, argst = from_jax((weights, args))
+    paramst, argst = torchjax.to_torch((weights, args))
     with self._lock:
-      with torch_xla2.default_env():
+      with torchjax.jax_mode:
         res = torch.func.functional_call(self.pt_model, paramst, argst)[0]
     caches_res = [c.state() for c in caches]
-    return to_jax((res, caches_res))
+    return torchjax.from_torch((res, caches_res))
 
   def _sampling(self, logits: Any, batch_size: int) -> jnp.ndarray:
     if len(logits.shape) == 2:
@@ -561,7 +565,7 @@ class PyTorchEngine(engine_api.Engine):
     for key, model_weights in self.pt_model.state_dict().items():
       assert key in state_dict, f"key: {key} not found"
       arr = jax.device_put(
-          to_jax(state_dict[key]), self.env.sharding_by_name(key)
+          torchjax.from_torch(state_dict[key]), self.env.sharding_by_name(key)
       )
       assert tuple(model_weights.shape) == tuple(
           arr.shape
@@ -602,41 +606,23 @@ class PyTorchEngine(engine_api.Engine):
 
   def get_prefix_destination_sharding(self) -> Prefix:
     """Returns the shardings necessary to transfer data between engines."""
-    if self.env.shard_on_batch:
-      return Prefix(
-          self.replicated,  # cache is replicated because bs=1 for prefill
-          self.replicated,
-          self.replicated,
-      )
-    else:
-      return Prefix(
-          self.replicated,
-          self.cache_sharding,
-          self.replicated,
-      )
+    return Prefix(
+        self.replicated,
+        self.replicated if self.env.shard_on_batch else self.cache_sharding,
+        self.replicated,
+    )
 
   def get_decode_state_sharding(self) -> DecodeState:
     """Gets the shardings corresponding to the decode state."""
-    if self.env.shard_on_batch:
-      return DecodeState(
-          self.x_sharding,  # shard on batch
-          self.cache_sharding,
-          self.replicated,
-          self.replicated,
-          self.replicated,
-          self.replicated,
-          self.replicated,
-      )
-    else:
-      return DecodeState(
-          self.replicated,  # shard on batch
-          self.cache_sharding,
-          self.replicated,
-          self.replicated,
-          self.replicated,
-          self.replicated,
-          self.replicated,
-      )
+    return DecodeState(
+        self.x_sharding if self.env.shard_on_batch else self.replicated,
+        self.cache_sharding,
+        self.replicated,
+        self.replicated,
+        self.replicated,
+        self.replicated,
+        self.replicated,
+    )
 
   def get_prefix_sequence_ddim(self) -> Any:
     """Returns the index of the sequence dim in the prefix type."""

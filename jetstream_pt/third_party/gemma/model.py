@@ -148,15 +148,10 @@ class GemmaAttention(nn.Module):
     xk = xk.view(batch_size, -1, self.num_kv_heads, self.head_dim)
     xv = xv.view(batch_size, -1, self.num_kv_heads, self.head_dim)
 
-    if self.env.shard_on_batch:
-      # Gemma 2B
-      self.env.apply_sharding(xq, axis=0)
-      self.env.apply_sharding(xk, axis=0)
-      self.env.apply_sharding(xv, axis=0)
-    else:
-      self.env.apply_sharding(xq, axis=2)
-      self.env.apply_sharding(xk, axis=2)
-      self.env.apply_sharding(xv, axis=2)
+    shard_axis = 0 if self.env.shard_on_batch else 2
+    self.env.apply_sharding(xq, axis=shard_axis)
+    self.env.apply_sharding(xk, axis=shard_axis)
+    self.env.apply_sharding(xv, axis=shard_axis)
 
     # Positional embedding.
     xq = apply_rotary_emb(xq, freqs_cis=freqs_cis)
