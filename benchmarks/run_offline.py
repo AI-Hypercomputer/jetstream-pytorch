@@ -106,8 +106,7 @@ def create_engine():
       quanitze_is_blockwise_weight=quanitze_is_blockwise_weight,
       quantize_kv=_QUANTIZE_KV_CACHE.value,
       max_cache_length=_MAX_CACHE_LENGTH.value,
-      model_name=_MODEL_NAME.value,
-      sharding_config=_SHARDING_CONFIG.value,
+      sharding_config=sharding_config_path,
   )
 
   print("Initialize engine", time.perf_counter() - start)

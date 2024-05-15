@@ -149,7 +149,7 @@ class PyTorchRayWorker:
 
     if not sharding_config:
       sharding_config = os.path.join("default_shardings", model_name + ".yaml")
-    
+
     quant_config = QuantizationConfig(
         enable_weight_quantization=quantize_weights,
         enable_kv_quantization=quantize_kv,

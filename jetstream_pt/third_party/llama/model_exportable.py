@@ -6,10 +6,14 @@ from typing import Any, List, Optional
 import jax
 import torch
 import torch.nn.functional as F
-from jetstream_pt.layers import (Attention, Int8Embedding, RMSNorm,
-                                 WeightOnlyBlockwiseQuantizedLinear,
-                                 WeightOnlyPerChannelQuantizedLinear,
-                                 get_quantized_linear_layer)
+from jetstream_pt.layers import (
+    Attention,
+    Int8Embedding,
+    RMSNorm,
+    WeightOnlyBlockwiseQuantizedLinear,
+    WeightOnlyPerChannelQuantizedLinear,
+    get_quantized_linear_layer,
+)
 from torch import nn
 
 from . import model_args

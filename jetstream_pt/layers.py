@@ -25,6 +25,8 @@ import jax
 import jax.numpy as jnp
 from jax import lax
 import torch_xla2
+from jetstream_pt.quantize import pseudo_quantize_tensor, awq_dequantize
+
 
 class Int8Embedding(torch.nn.Module):
 
@@ -45,13 +47,20 @@ class Int8Embedding(torch.nn.Module):
 
 class WeightOnlyPerChannelQuantizedLinear(torch.nn.Module):
 
-  def __init__(self, in_features, out_features, bias=False, device=None):
+  def __init__(
+      self,
+      in_features,
+      out_features,
+      bias=False,
+      device=None,
+      is_symmetric=True,
+  ):
     super().__init__()
     self.in_features = in_features
     self.out_features = out_features
 
     weight = torch.ones(
-      (out_features, in_features), dtype=torch.int8, device=device
+        (out_features, in_features), dtype=torch.int8, device=device
     )
     self.register_buffer("weight", weight)
 
@@ -60,22 +69,68 @@ class WeightOnlyPerChannelQuantizedLinear(torch.nn.Module):
     )
     self.register_buffer("weight_scaler", weight_scaler)
 
+    self.is_symmetric = is_symmetric
+    if not is_symmetric:
+      zero_point = torch.ones(
+          (out_features,), dtype=torch.bfloat16, device=device
+      )
+      self.register_buffer("zero_point", zero_point)
+    else:
+      self.register_buffer("zero_point", None)
+
     assert not bias, "Quantized Linear doesn't support bias."
 
+    self.run_fake_quantize = False
+
+  def load_quantized_weights(self, w_q, scale, zp=None):
+    """
+    Load weights quantized by quantize function.
+    """
+    self.weight = w_q.to(torch.int8)
+    self.weight_scaler = scale.squeeze(-1).to(torch.bfloat16)
+    if zp is not None:
+      self.zero_point = (zp * scale).squeeze(-1).to(torch.bfloat16)
+
   def forward(self, inputs):
-    return F.linear(inputs, self.weight) * self.weight_scaler
+    # return F.linear(inputs, self.weight) * self.weight_scaler
+    if self.is_symmetric:
+      return torch.mul(F.linear(inputs, self.weight), self.weight_scaler)
+    else:
+      # breakpoint()
+      out = torch.mul(F.linear(inputs, self.weight), self.weight_scaler)
+      zp_out = torch.einsum("...c,z->...z", inputs, self.zero_point)
+      return out - zp_out
+
+    if self.run_fake_quantize:
+      scaler = self.weight_scaler.unsqueeze(-1)
+      if not self.is_symmetric:
+        zero_point = self.zero_point.unsqueeze(-1) / scaler
+      else:
+        zero_point = None
+      w_dequantized = awq_dequantize(
+          self.weight.to(torch.bfloat16), scaler, zero_point
+      )
+      return F.linear(inputs, w_dequantized)
 
 
 class WeightOnlyBlockwiseQuantizedLinear(torch.nn.Module):
 
-  def __init__(self, in_features, out_features, bias, device):
+  def __init__(
+      self,
+      in_features,
+      out_features,
+      bias=False,
+      device=None,
+      is_symmetric=True,
+      use_dot_general=False,
+  ):
     super().__init__()
     self.in_features = in_features
     self.out_features = out_features
 
     # Use dot general instead of einsum
     # Use dot general is slow now.
-    self.use_dot_general = False
+    self.use_dot_general = use_dot_general
     # Flatten einsum operands to 3D.
     # Same perf as non flattened one.
     self.flatten = False
@@ -97,6 +152,28 @@ class WeightOnlyBlockwiseQuantizedLinear(torch.nn.Module):
         (n_blocks, out_features), dtype=torch.bfloat16, device=device
     )
     self.register_buffer("weight_scaler", weight_scaler)
+
+    self.is_symmetric = is_symmetric
+    if not self.is_symmetric:
+      zero_point = torch.ones(
+          (n_blocks, out_features), dtype=torch.bfloat16, device=device
+      )
+      self.register_buffer("zero_point", zero_point)
+    else:
+      self.register_buffer("zero_point", None)
+
+    self.run_fake_quantize = False
+
+  def load_quantized_weights(self, w_q, scale, zp=None):
+    """
+    Load weights quantized by quantize function.
+    """
+    self.weight = w_q.permute(1, 2, 0).to(torch.int8)
+    self.weight_scaler = scale.transpose(1, 0).squeeze(-1).to(torch.bfloat16)
+    if zp is not None:
+      self.zero_point = (
+          (zp * scale).transpose(1, 0).squeeze(-1).to(torch.bfloat16)
+      )
 
   def forward(self, inputs):
 
@@ -143,6 +220,8 @@ class WeightOnlyBlockwiseQuantizedLinear(torch.nn.Module):
       j_inputs = inputs._elem
       j_weight = self.weight._elem.astype(jnp.int8)
       j_weight_scaler = self.weight_scaler._elem
+      if not self.is_symmetric:
+        j_zero_point = self.zero_point._elem
       block_size = j_weight.shape[1]
       j_inputs_shape = j_inputs.shape
       j_inputs_new_shape = j_inputs_shape[:-1] + (
@@ -152,7 +231,23 @@ class WeightOnlyBlockwiseQuantizedLinear(torch.nn.Module):
       j_inputs = j_inputs.reshape(j_inputs_new_shape)
       out = jnp.einsum("scz,bdsc->bdsz", j_weight, j_inputs)
       out = jnp.einsum("bdsz,sz->bdz", out, j_weight_scaler)
+      if not self.is_symmetric:
+        zp_out = jnp.einsum("bdsc,sz->bdz", j_inputs, j_zero_point)
+        out = out - zp_out
       return torch_xla2.tensor.XLATensor2(out)
+
+    if self.run_fake_quantize:
+      weight = self.weight.permute(2, 0, 1).to(torch.bfloat16)
+      scaler = self.weight_scaler.unsqueeze(-1).transpose(1, 0)
+      if not self.is_symmetric:
+        zero_point = self.zero_point.unsqueeze(-1).transpose(1, 0) / scaler
+      else:
+        zero_point = None
+      w_dequantized = awq_dequantize(
+          self.weight, scaler, zero_point, block_size=128
+      )
+      w_dequantized = w_dequantized.reshape(w_dequantized.shape[0], -1)
+      return F.linear(inputs, w_dequantized)
 
 
 def get_quantized_linear_layer(config: "QuantizationConfig"):

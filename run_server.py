@@ -104,7 +104,7 @@ def main(argv: Sequence[str]):
   # No devices for local cpu test. A None for prefill and a None for generate.
   devices = server_lib.get_devices()
   print(f"devices: {devices}")
-  
+
   quantize_weight = _QUANTIZE_WEIGHTS.value
   quanitze_is_blockwise_weight = _QUANTIZE_IS_BLOCKWISE_WEIGHTS.value
 
@@ -114,7 +114,7 @@ def main(argv: Sequence[str]):
     if quantize_weight and quanitze_is_blockwise_weight:
       sharding_config_name += "-blockwise-quant"
     sharding_config_path = os.path.join(
-      "default_shardings", sharding_config_name + ".yaml"
+        "default_shardings", sharding_config_name + ".yaml"
     )
 
   engine = jetstream_pt.create_pytorch_engine(
