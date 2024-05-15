@@ -176,7 +176,7 @@ class JetEngineEnvironment:
   def sharding_by_name(self, name):
     """Create sharding specified in the config."""
     if self.shard_on_batch:
-      return self.shading_by_axis(0)  # batch dimension
+      return self.sharding_by_axis(0)  # batch dimension
 
     if name in self._sharding_config:
       return self.sharding_by_axis(self._sharding_config[name])

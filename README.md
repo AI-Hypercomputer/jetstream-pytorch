@@ -109,7 +109,17 @@ NOTE: the `--platform=tpu=8` need to specify number of tpu devices (which is 4 f
 ```bash
 python run_server.py --param_size=7b --model_name=$model_name --batch_size=128 --max_cache_length=2048 --quantize_weights=$quantize --quantize_kv_cache=$quantize --checkpoint_path=$output_ckpt_dir   --tokenizer_path=$tokenizer_path --platform=tpu=8 --model=$model_name
 ```
-Now you can fire gRPC to it
+
+Now you can fire gRPC to it.
+
+Optional flags: 
+* `--shard_on_batch=1` This makes the model to shard on 
+  the batch dimension. I.e. this runs in data parallel mode instead of model
+  parallel. This will ignore the sharding config. This is recommended for Gemma 2B
+  model, because Gemma 2B is small enough to fit on a single TPU chip.
+
+* `--sharding_config=<path>` This makes use of alternative sharding config instead of
+  the ones in default_shardings directory.
 
 # Run benchmark
 go to the deps/JetStream folder (downloaded during `install_everything.sh`)
