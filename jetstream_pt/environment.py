@@ -87,6 +87,11 @@ class JetEngineEnvironmentData:
   # Whether to shard on batch dimension. i.e. data parallel.
   shard_on_batch: bool = False
 
+  # Whether to enable ragged multi head attention.
+  ragged_mha: bool = False
+
+  # The block size for the ragged attention.
+  block_size: int = 512
 
 # pylint: disable-next=all
 class JetEngineEnvironment:
@@ -95,6 +100,9 @@ class JetEngineEnvironment:
     self._data = data
 
     self.seq_len = self._data.max_input_sequence_length
+    self.cache_len = self._data.cache_sequence_length
+    self.ragged_mha = self._data.ragged_mha
+    self.block_size = self._data.block_size
 
     P = jax.sharding.PartitionSpec
 
@@ -144,16 +152,18 @@ class JetEngineEnvironment:
     # pylint: disable-next=all
     tensor._elem = jax.lax.with_sharding_constraint(tensor._elem, sharding_spec)
 
-  def sharding_by_axis(self, axis):
+  def partition_by_axis(self, axis):
     """return sharding partition spc by axis, options are x, y, -1 or Noe"""
     if axis == -1 or axis is None:
-      return jsharding.NamedSharding(self._mesh, jax.sharding.PartitionSpec())
+      return jax.sharding.PartitionSpec()
     sharding = [None] * (axis + 1)
     sharding[axis] = "x"
-    sharding_spec = jsharding.NamedSharding(
-        self._mesh, jax.sharding.PartitionSpec(*sharding)
-    )
+    sharding_spec = jax.sharding.PartitionSpec(*sharding)
     return sharding_spec
+
+  def sharding_by_axis(self, axis):
+    """return sharding partition spc by axis, options are x, y, -1 or Noe"""
+    return jsharding.NamedSharding(self._mesh, self.partition_by_axis(axis))
 
   def make_caches_prefill(self):
     """Create kv caches for inference prefill"""

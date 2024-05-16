@@ -44,6 +44,7 @@ def create_engine():
       max_cache_length=FLAGS.max_cache_length,
       sharding_config=FLAGS.sharding_config,
       shard_on_batch=FLAGS.shard_on_batch,
+      ragged_mha=FLAGS.ragged_mha
   )
 
   print("Initialize engine", time.perf_counter() - start)

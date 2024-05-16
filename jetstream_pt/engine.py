@@ -64,6 +64,7 @@ class DecodeState:
   ]  # only present in quantized kv
   current_position: int
   lens: jax.Array  # [batch_size, 1]
+  start: jax.Array # [batch_size, 1], the starting pos for each slot
   input_pos: jax.Array  # [batch_size, 1] input pos for each slot
   mask: jax.Array  # [batch_size, seqlen] -inf for invalid; 0 for valid
 
@@ -126,8 +127,9 @@ class PyTorchEngine(engine_api.Engine):
         jnp.zeros((self.env.batch_size, 1), dtype=jnp.int32),
         caches,
         scalers,
-        self.env.max_input_sequence_length,
+        self.env.max_input_sequence_length / 4,
         jnp.zeros((self.env.batch_size, 1), dtype=jnp.int32),
+        jnp.zeros((self.env.batch_size,), dtype=jnp.int32),  # start pos
         jnp.zeros((self.env.batch_size,), dtype=jnp.int32),  # input pos
         jnp.full(
             (self.env.batch_size, self.env.cache_sequence_length),
@@ -145,7 +147,10 @@ class PyTorchEngine(engine_api.Engine):
       caches,
       cache_scales,
       mask,
+      start,
       input_pos,
+      pre_batch,
+      pre_block,
   ):
     if self.env.quant_config.enable_kv_quantization:
       caches_obj = [
@@ -163,7 +168,7 @@ class PyTorchEngine(engine_api.Engine):
       ]
     mask = jnp.expand_dims(mask, (1, 2))
 
-    args = (tokens, input_pos, caches_obj, mask)
+    args = (tokens, caches_obj, mask, start, input_pos, pre_batch, pre_block)
     paramst, argst = torchjax.to_torch((weights, args))
     with self._lock:
       with torchjax.jax_mode:
@@ -193,7 +198,7 @@ class PyTorchEngine(engine_api.Engine):
         dtype=self.default_dtype,
     )
     mask = jnp.triu(mask, k=1)
-    args = (tokens, input_indexes, caches, mask)
+    args = (tokens, caches, mask, None, input_indexes, None, None)
 
     paramst, argst = torchjax.to_torch((weights, args))
     with self._lock:
@@ -272,6 +277,7 @@ class PyTorchEngine(engine_api.Engine):
     cond = jnp.logical_and(x <= decode_state.current_position, x >= pos)
     mask_insert = jnp.where(cond, 0, float("-inf"))
     mask = decode_state.mask.at[slot].set(mask_insert)
+    start = decode_state.start_pos.at[slot].set(pos % self.env.cache_sequence_length)
     input_pos = decode_state.input_pos.at[slot].set(prefix.seq_len)
     if not self.env.quant_config.enable_kv_quantization:
 
@@ -328,6 +334,7 @@ class PyTorchEngine(engine_api.Engine):
         scales,
         decode_state.current_position,
         lens,
+        start,
         input_pos,
         mask,
     )
@@ -366,6 +373,7 @@ class PyTorchEngine(engine_api.Engine):
 
     mask_insert = jnp.where(cond, 0, float("-inf"))
     mask = decode_state.mask.at[slot].set(mask_insert)
+    start = decode_state.start_pos.at[slot].set(start_insert)
     input_pos = decode_state.input_pos.at[slot].set(prefix.seq_len)
 
     old_caches = decode_state.caches
@@ -420,6 +428,7 @@ class PyTorchEngine(engine_api.Engine):
         scales,
         decode_state.current_position,
         lens,
+        start,
         input_pos,
         mask,
     )
@@ -448,6 +457,45 @@ class PyTorchEngine(engine_api.Engine):
         slot,
     )
 
+  def precompute_ragged_block_indices(self, decode_state: DecodeState):
+    start = decode_state.start
+    end = (start + decode_state.input_pos) % self.env.cache_len
+    batch_size = start.shape[0]
+    bk = self.env.block_size
+    b = jnp.arange(batch_size).reshape((batch_size, 1))
+    num_bk = self.env.cache_len // self.env.block_size
+    i = jnp.arange(num_bk).reshape((1, num_bk))
+    i = jnp.broadcast_to(i, (batch_size, num_bk))
+
+    start = start.reshape((batch_size, 1))
+    end = end.reshape((batch_size, 1))
+
+    am_last_batch = b == batch_size - 1
+    last_good_block = jnp.where(start < end, jnp.div(end - 1, bk), jnp.div(self.env.cache_len -1, bk))
+
+    next_b = jnp.where(am_last_batch, b, b + 1)
+    next_i = jnp.where(am_last_batch, last_good_block, 0)
+
+    # start < end
+    def true_comp(b, i, bk, start, end, next_b, next_i):
+      b_next = jnp.where(i * bk >= end, next_b, b)
+      i_next = jnp.where(i * bk >= end, next_i, i)
+      i_next = jnp.where((i + 1) * bk <= start, jnp.div(start, bk), i_next)
+      return b_next, i_next
+
+    # start > end
+    def false_comp(b, i, bk, start, end):
+      b_next = b
+      i_next = jnp.where(jnp.logical_and(i * bk >= end, (i + 1) * bk <= start), jnp.div(start, bk), i)
+      return b_next, i_next
+
+    true_comp_b, true_comp_i = true_comp(b, i, bk, start, end, next_b, next_i)
+    false_comp_b, false_comp_i = false_comp(b, i, bk, start, end)
+
+    b_next = jnp.where(start < end, true_comp_b, jnp.where(start == end, next_b, false_comp_b))
+    i_next = jnp.where(start < end, true_comp_i, jnp.where(start == end, next_i, false_comp_i))
+    return b_next, i_next
+
   def generate(
       self, params: Any, decode_state: DecodeState
   ) -> tuple[DecodeState, engine_api.ResultTokens]:
@@ -457,6 +505,8 @@ class PyTorchEngine(engine_api.Engine):
 
     # fill mask first
     mask = decode_state.mask.at[:, decode_state.current_position].set(0)
+    pre_batch, pre_block = self.precompute_ragged_block_indices(decode_state)
+
     logits, new_caches, new_scales = self._call_model_generate(
         params,
         decode_state.tokens,
@@ -464,8 +514,12 @@ class PyTorchEngine(engine_api.Engine):
         decode_state.caches,
         decode_state.cache_scales,
         mask,
+        decode_state.start,
         decode_state.input_pos,
+        pre_batch,
+        pre_block,
     )
+
     next_token = self._sampling(logits, self.env.batch_size)
     lens = decode_state.lens + 1
     data = jnp.concatenate(
@@ -493,7 +547,9 @@ class PyTorchEngine(engine_api.Engine):
         new_scales,
         (decode_state.current_position + 1) % self.env.cache_sequence_length,
         lens,
-        decode_state.input_pos + 1,
+        decode_state.start,
+        # Stop the input_pos from increasing if it's 0, for better ragged attention performance
+        jnp.where(decode_state.input_pos == 0, 0, decode_state.input_pos + 1),
         mask,
     )
     print(
@@ -619,6 +675,7 @@ class PyTorchEngine(engine_api.Engine):
         self.replicated,
         self.replicated,
         self.replicated,
+        self.replicated,
     )
 
   def get_prefix_sequence_ddim(self) -> Any:
@@ -666,6 +723,7 @@ def create_pytorch_engine(
     max_cache_length=1024,
     sharding_config=None,
     shard_on_batch=False,
+    ragged_mha=False,
 ) -> PyTorchEngine:
   """Returns: The pytorch engine."""
 
@@ -724,6 +782,7 @@ def create_pytorch_engine(
       bf16_enable=bf16_enable,
       sharding_config_path=sharding_config,
       shard_on_batch=shard_on_batch,
+      ragged_mha=ragged_mha,
   )
 
   if shard_on_batch and sharding_config:
@@ -756,6 +815,7 @@ def create_pytorch_engine(
     env_data.model_type = model_name + "-" + param_size
     env_data.num_layers = args.num_hidden_layers
     env = JetEngineEnvironment(env_data)
+    print(f"Enviroment variables: {vars(env)}")
     pt_model = gemma_model.GemmaModel(args, env)
   else:
     raise RuntimeError(f"Model with name {model_name} not found")
