@@ -61,9 +61,6 @@ def quantize_tensor(
     min_val = w.amin(dim=reduce_axis, keepdim=True)
     scales = (max_val - min_val).clamp(min=EPS) / float(max_int - min_int)
     zero_point = min_int - torch.round(min_val / scales)
-    # zero_point = (min_int - torch.round(min_val / scales)).clamp_(
-    #     min_int, max_int
-    # )
   else:
     max_val = w.abs().amax(dim=reduce_axis, keepdim=True)
     max_val = max_val.clamp(min=EPS)
@@ -74,9 +71,7 @@ def quantize_tensor(
       torch.round(w * (1.0 / scales)) + zero_point, min_int, max_int
   ).to(torch.int8)
 
-  if symmetric:
-    zero_point = None
-  return w, scales, zero_point
+  return w, scales, zero_point if not symmetric else None
 
 
 def dequantize_tensor(w, scale, zero_point=None, block_size=-1):
