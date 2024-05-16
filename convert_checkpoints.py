@@ -53,7 +53,7 @@ _OUTPUT_CHECKPOINT_DIR = epath.DEFINE_path(
 
 _MINIMIZE_MEMORY_FOOTPRINT = flags.DEFINE_bool(
     "minimize_memory_footprint",
-    True,
+    False,
     "When set to true, reduce memory usage by staging in-memory data on disk",
 )
 

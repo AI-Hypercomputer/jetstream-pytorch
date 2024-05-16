@@ -128,7 +128,7 @@ go to the deps/JetStream folder (downloaded during `install_everything.sh`)
 cd deps/JetStream
 wget https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/ShareGPT_V3_unfiltered_cleaned_split.json
 export dataset_path=ShareGPT_V3_unfiltered_cleaned_split.json
-python benchmarks/benchmark_serving.py --tokenizer $tokenizer_path --num-prompts 2000  --dataset-path  $dataset_path --dataset sharegpt --save-request-outputs --warm-up=True
+python benchmarks/benchmark_serving.py --tokenizer $tokenizer_path --num-prompts 2000  --dataset-path  $dataset_path --dataset sharegpt --save-request-outputs --warmup-first=True
 ```
 Please look at `deps/JetStream/benchmarks/README.md` for more information.
 
