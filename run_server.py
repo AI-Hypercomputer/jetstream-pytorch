@@ -105,10 +105,6 @@ def main(argv: Sequence[str]):
   devices = server_lib.get_devices()
   print(f"devices: {devices}")
   sharding_config_path = _SHARDING_CONFIG.value
-  if not sharding_config_path:
-    sharding_config_path = os.path.join(
-        "default_shardings", _MODEL_NAME.value + ".yaml"
-    )
   engine = jetstream_pt.create_pytorch_engine(
       devices=devices,
       tokenizer_path=_TOKENIZER_PATH.value,
