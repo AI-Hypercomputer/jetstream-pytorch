@@ -13,36 +13,32 @@
 # limitations under the License.
 
 """Implement Jet Engine API."""
-import queue
-from typing import Any, List, Optional, Tuple, Union
-import threading
 import functools
 import os
+import queue
+import threading
+from typing import Any, List, Optional, Tuple, Union
+
 import humanize
-
-
-from etils import epath
-import safetensors
-from flax import struct
 import jax
-from jax import numpy as jnp
-from jax.experimental import multihost_utils
-import torch
 import numpy as np
 import ray
-from torch.utils import _pytree as pytree
+import safetensors
+import torch
 import torch_xla2
-
+from etils import epath
+from flax import struct
+from jax import numpy as jnp
+from jax.experimental import multihost_utils
+from torch.utils import _pytree as pytree
 from jetstream.engine import engine_api, tokenizer_pb2
-
-from jetstream_pt.third_party.llama import model_exportable, model_args
-
-from jetstream_pt import cache_manager
-from jetstream_pt import quantize
-from jetstream_pt import torchjax
-from jetstream_pt.environment import JetEngineEnvironment, JetEngineEnvironmentData
-from jetstream_pt.third_party.gemma import config as gemma_config, model as gemma_model
-
+from jetstream_pt import cache_manager, quantize, torchjax
+from jetstream_pt.environment import (JetEngineEnvironment,
+                                      JetEngineEnvironmentData,
+                                      QuantizationConfig)
+from jetstream_pt.third_party.gemma import config as gemma_config
+from jetstream_pt.third_party.gemma import model as gemma_model
+from jetstream_pt.third_party.llama import model_args, model_exportable
 
 Mesh = jax.sharding.Mesh
 P = jax.sharding.PartitionSpec

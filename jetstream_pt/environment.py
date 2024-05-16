@@ -27,6 +27,7 @@ from jetstream_pt import cache_manager
 
 
 @dataclasses.dataclass
+# pylint: disable-next=all
 class QuantizationConfig:
   enable_weight_quantization: bool = False
   num_bits_weight: int = 8

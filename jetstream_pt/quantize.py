@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import torch
 from typing import Tuple, Union
 
+import torch
 
 EPS = 1e-5
 
@@ -27,14 +27,22 @@ def quantize_tensor(
     block_size: int = -1,
 ):
   """
-  w: weight tensor to be quantized.
-  reduce_axis: axises along which to quantize.
-  n_bit: Quantize to n_bit bits. (Use int8 container for n_bits < 8).
-  symmetric: Whether quantization is symmetric.
-  block_size: Blocksize for blockwise quantization. -1 for per-channel quant.
+  Quantize weight tensor w along 'reduce_axis'.
+  
+  Args:
+    w: weight tensor to be quantized.
+    reduce_axis: axises along which to quantize.
+    n_bit: Quantize to n_bit bits. (Use int8 container for n_bits < 8).
+    symmetric: Whether quantization is symmetric.
+    block_size: Blocksize for blockwise quantization. -1 for per-channel quant.
+  
+  Return:
+    w_q: Quantized weight in int8 container
+    scale: scalar for quantized tensor
+    zero_point: zero_point for quantized tensor, None if symmetric quantization
   """
 
-  assert n_bit > 0 and n_bit <= 8, "Quantization bits must be between [1, 8]."
+  assert 0 < n_bit <= 8, "Quantization bits must be between [1, 8]."
   if isinstance(reduce_axis, int):
     reduce_axis = (reduce_axis,)
 
@@ -67,16 +75,16 @@ def quantize_tensor(
   ).to(torch.int8)
 
   if symmetric:
-    return w, scales, None
-  else:
-    return w, scales, zero_point
+    zero_point = None
+  return w, scales, zero_point
 
 
 def dequantize_tensor(w, scale, zero_point=None, block_size=-1):
+  """Dequantize tensor quantized by quantize_tensor."""
   if zero_point is not None:
     return (w - zero_point) * scale
-  else:
-    return w * scale
+
+  return w * scale
 
 
 def load_q_weight_helper(w_q, scale, zp=None, block_size=-1):
