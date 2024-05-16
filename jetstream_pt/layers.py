@@ -18,14 +18,20 @@
 import math
 from typing import Optional, Tuple
 
-import torch
-from torch import nn
-import torch.nn.functional as F
 import jax
 import jax.numpy as jnp
-from jax import lax
+import torch
+import torch.nn.functional as F
 import torch_xla2
-from jetstream_pt.quantize import pseudo_quantize_tensor, awq_dequantize
+from jax import lax
+from jetstream_pt.quantize import quantize_tensor, dequantize_tensor, load_q_weight_helper
+from torch import nn
+
+
+def _calc_cosine_dist(x, y):
+  x = x.flatten().to(torch.float32)
+  y = y.flatten().to(torch.float32)
+  return (torch.dot(x, y) / (x.norm() * y.norm())).item()
 
 
 class Int8Embedding(torch.nn.Module):
@@ -54,6 +60,7 @@ class WeightOnlyPerChannelQuantizedLinear(torch.nn.Module):
       bias=False,
       device=None,
       is_symmetric=True,
+      n_bit=8,
   ):
     super().__init__()
     self.in_features = in_features
@@ -80,23 +87,35 @@ class WeightOnlyPerChannelQuantizedLinear(torch.nn.Module):
 
     assert not bias, "Quantized Linear doesn't support bias."
 
+    self.n_bit = n_bit
+    # Flag to enable dequantize weight first, then do matmul. Useful for debugging.
     self.run_fake_quantize = False
 
-  def load_quantized_weights(self, w_q, scale, zp=None):
+  def _load_quantized_weights(self, w_q, scale, zp=None):
     """
-    Load weights quantized by quantize function.
+    Load weights quantized by 'quantize_tensor'.
     """
-    self.weight = w_q.to(torch.int8)
-    self.weight_scaler = scale.squeeze(-1).to(torch.bfloat16)
-    if zp is not None:
-      self.zero_point = (zp * scale).squeeze(-1).to(torch.bfloat16)
+    self.weight, self.weight_scaler, self.zero_point = load_q_weight_helper(
+        w_q, scale, zp, block_size=-1
+    )
+
+  def quantize_weight_from_nn_linear(self, weight):
+    assert weight.dim() == 2, "Expect 2D weight from torch.nn.Linear."
+    assert weight.shape == (
+        self.out_features,
+        self.in_features,
+    ), f"Unexpected weight shape ({self.out_features}, {self.in_features})."
+    w_q, scale, zp = quantize_tensor(
+        weight, (1,), self.n_bit, self.is_symmetric, block_size=-1
+    )
+    w_dq = dequantize_tensor(w_q, scale, zp)
+    print("check qweight cosine dist: ", _calc_cosine_dist(weight, w_dq))
+    self._load_quantized_weights(w_q, scale, zp)
 
   def forward(self, inputs):
-    # return F.linear(inputs, self.weight) * self.weight_scaler
     if self.is_symmetric:
       return torch.mul(F.linear(inputs, self.weight), self.weight_scaler)
     else:
-      # breakpoint()
       out = torch.mul(F.linear(inputs, self.weight), self.weight_scaler)
       zp_out = torch.einsum("...c,z->...z", inputs, self.zero_point)
       return out - zp_out
@@ -107,7 +126,7 @@ class WeightOnlyPerChannelQuantizedLinear(torch.nn.Module):
         zero_point = self.zero_point.unsqueeze(-1) / scaler
       else:
         zero_point = None
-      w_dequantized = awq_dequantize(
+      w_dequantized = dequantize_tensor(
           self.weight.to(torch.bfloat16), scaler, zero_point
       )
       return F.linear(inputs, w_dequantized)
@@ -123,6 +142,8 @@ class WeightOnlyBlockwiseQuantizedLinear(torch.nn.Module):
       device=None,
       is_symmetric=True,
       use_dot_general=False,
+      block_size=128,
+      n_bit=8,
   ):
     super().__init__()
     self.in_features = in_features
@@ -131,11 +152,11 @@ class WeightOnlyBlockwiseQuantizedLinear(torch.nn.Module):
     # Use dot general instead of einsum
     # Use dot general is slow now.
     self.use_dot_general = use_dot_general
-    # Flatten einsum operands to 3D.
-    # Same perf as non flattened one.
+    # Flatten einsum operands to 3D. XLA was slow if operands are 4D. But it's fixed now.
+    # Same perf as non flattened one now.
     self.flatten = False
 
-    block_size = 128
+    self.block_size = block_size
     n_blocks = in_features // block_size
 
     if self.use_dot_general:
@@ -162,79 +183,146 @@ class WeightOnlyBlockwiseQuantizedLinear(torch.nn.Module):
     else:
       self.register_buffer("zero_point", None)
 
+    self.n_bit = n_bit
+    # Flag to enable dequantize weight first, then do matmul. Useful for debugging.
     self.run_fake_quantize = False
 
-  def load_quantized_weights(self, w_q, scale, zp=None):
+  def _load_quantized_weights(self, w_q, scale, zp=None):
     """
-    Load weights quantized by quantize function.
+    Load weights quantized by 'quantize_tensor'.'
     """
-    self.weight = w_q.permute(1, 2, 0).to(torch.int8)
-    self.weight_scaler = scale.transpose(1, 0).squeeze(-1).to(torch.bfloat16)
-    if zp is not None:
-      self.zero_point = (
-          (zp * scale).transpose(1, 0).squeeze(-1).to(torch.bfloat16)
-      )
+    self.weight, self.weight_scaler, self.zero_point = load_q_weight_helper(
+        w_q, scale, zp, self.block_size
+    )
+
+  def quantize_weight_from_nn_linear(self, weight):
+    assert weight.dim() == 2, "Expect 2D weight from torch.nn.Linear."
+    assert weight.shape == (
+        self.out_features,
+        self.in_features,
+    ), f"Unexpected weight shape ({self.out_features}, {self.in_features})."
+    w_q, scale, zp = quantize_tensor(
+        weight, (1,), self.n_bit, self.is_symmetric, self.block_size
+    )
+    w_dq = dequantize_tensor(w_q, scale, zp)
+    print("check qweight cosine dist: ", _calc_cosine_dist(weight, w_dq))
+    # breakpoint()
+    self._load_quantized_weights(w_q, scale, zp)
+
+  @staticmethod
+  def blockwise_jax_kernel(j_inputs, j_weight, j_weight_scaler, j_zero_point):
+    j_weight = j_weight.astype(jnp.int8)
+    block_size = j_weight.shape[1]
+    j_inputs_shape = j_inputs.shape
+    j_inputs_new_shape = j_inputs_shape[:-1] + (
+        j_inputs_shape[-1] // block_size,
+        block_size,
+    )
+    j_inputs = j_inputs.reshape(j_inputs_new_shape)
+    out = jnp.einsum("scz,bdsc->bdsz", j_weight, j_inputs)
+    out = jnp.einsum("bdsz,sz->bdz", out, j_weight_scaler)
+    if j_zero_point is not None:
+      zp_out = jnp.einsum("bdsc,sz->bdz", j_inputs, j_zero_point)
+      out = out - zp_out
+    return out
+
+  @staticmethod
+  def blockwise_jax_kernel_dot_general(
+      j_inputs, j_weight, j_weight_scaler, j_zero_point
+  ):
+    j_inputs_shape = j_inputs.shape
+    block_size = j_weight.shape[2]
+    bs = j_inputs_shape[0]
+    j_inputs_new_shape = j_inputs_shape[:-1] + (
+        j_inputs_shape[-1] // block_size,
+        block_size,
+    )
+    j_inputs = j_inputs.reshape(j_inputs_new_shape)
+    j_inputs = jax.lax.collapse(j_inputs, 0, 2)
+    out = jax.lax.dot_general(
+        j_inputs, j_weight, dimension_numbers=([(2), (2)], [(1), (0)])
+    )
+    out = jax.lax.dot_general(
+        out, j_weight_scaler, dimension_numbers=([(0), (0)], [(2), (1)])
+    )
+    out = jax.lax.transpose(out, [1, 0])
+    out = out.reshape((bs, -1) + out.shape[1:])
+    return out
+
+  @staticmethod
+  def blockwise_jax_kernel_dot_general(
+      j_inputs, j_weight, j_weight_scaler, j_zero_point
+  ):
+    j_inputs_shape = j_inputs.shape
+    block_size = j_weight.shape[2]
+    bs = j_inputs_shape[0]
+    j_inputs_new_shape = j_inputs_shape[:-1] + (
+        j_inputs_shape[-1] // block_size,
+        block_size,
+    )
+    j_inputs = j_inputs.reshape(j_inputs_new_shape)
+    j_inputs = jax.lax.collapse(j_inputs, 0, 2)
+    out = jax.lax.dot_general(
+        j_inputs, j_weight, dimension_numbers=([(2), (2)], [(1), (0)])
+    )
+    out = jax.lax.dot_general(
+        out, j_weight_scaler, dimension_numbers=([(0), (0)], [(2), (1)])
+    )
+    out = jax.lax.transpose(out, [1, 0])
+    out = out.reshape((bs, -1) + out.shape[1:])
+    return out
+
+  @staticmethod
+  def blockwise_jax_kernel_einsum_flatten(
+      j_inputs, j_weight, j_weight_scaler, j_zero_point
+  ):
+    j_weight = j_weight.astype(jnp.int8)
+    block_size = j_weight.shape[1]
+    j_inputs_shape = j_inputs.shape
+    bs = j_inputs_shape[0]
+    j_inputs_new_shape = j_inputs_shape[:-1] + (
+        j_inputs_shape[-1] // block_size,
+        block_size,
+    )
+    j_inputs = j_inputs.reshape(j_inputs_new_shape)
+    j_inputs = jax.lax.collapse(j_inputs, 0, 2)
+    out = jnp.einsum("scz,bsc->bsz", j_weight, j_inputs)
+    out = jnp.einsum("bsz,sz->bz", out, j_weight_scaler)
+    out = out.reshape((bs, -1) + out.shape[1:])
+    return out
 
   def forward(self, inputs):
 
     if self.use_dot_general:
-      j_inputs = inputs._elem
-      j_weight = self.weight._elem
-      j_weight_scaler = self.weight_scaler._elem
-      j_inputs_shape = j_inputs.shape
-      block_size = j_weight.shape[2]
-      bs = j_inputs_shape[0]
-      j_inputs_new_shape = j_inputs_shape[:-1] + (
-          j_inputs_shape[-1] // block_size,
-          block_size,
+      assert (
+          self.zero_point is None
+      ), "Blockwise quantized linear doesn't support zero_point in dot_general implementation."
+      return torch_xla2.extra.call_jax(
+          WeightOnlyBlockwiseQuantizedLinear.blockwise_jax_kernel_dot_general,
+          inputs,
+          self.weight,
+          self.weight_scaler,
+          self.zero_point,
       )
-      j_inputs = j_inputs.reshape(j_inputs_new_shape)
-      j_inputs = jax.lax.collapse(j_inputs, 0, 2)
-      out = jax.lax.dot_general(
-          j_inputs, j_weight, dimension_numbers=([(2), (2)], [(1), (0)])
-      )
-      out = jax.lax.dot_general(
-          out, j_weight_scaler, dimension_numbers=([(0), (0)], [(2), (1)])
-      )
-      out = jax.lax.transpose(out, [1, 0])
-      out = out.reshape((bs, -1) + out.shape[1:])
-      return torch_xla2.tensor.XLATensor2(out)
     if self.flatten:
-      j_inputs = inputs._elem
-      j_weight = self.weight._elem.astype(jnp.int8)
-      j_weight_scaler = self.weight_scaler._elem
-      block_size = j_weight.shape[1]
-      j_inputs_shape = j_inputs.shape
-      bs = j_inputs_shape[0]
-      j_inputs_new_shape = j_inputs_shape[:-1] + (
-          j_inputs_shape[-1] // block_size,
-          block_size,
+      assert (
+          self.zero_point is None
+      ), "Blockwise quantized linear doesn't support zero_point in einsum (flattened) implementation."
+      return torch_xla2.extra.call_jax(
+          WeightOnlyBlockwiseQuantizedLinear.blockwise_jax_kernel_einsum_flatten,
+          inputs,
+          self.weight,
+          self.weight_scaler,
+          self.zero_point,
       )
-      j_inputs = j_inputs.reshape(j_inputs_new_shape)
-      j_inputs = jax.lax.collapse(j_inputs, 0, 2)
-      out = jnp.einsum("scz,bsc->bsz", j_weight, j_inputs)
-      out = jnp.einsum("bsz,sz->bz", out, j_weight_scaler)
-      out = out.reshape((bs, -1) + out.shape[1:])
-      return torch_xla2.tensor.XLATensor2(out)
     else:
-      j_inputs = inputs._elem
-      j_weight = self.weight._elem.astype(jnp.int8)
-      j_weight_scaler = self.weight_scaler._elem
-      if not self.is_symmetric:
-        j_zero_point = self.zero_point._elem
-      block_size = j_weight.shape[1]
-      j_inputs_shape = j_inputs.shape
-      j_inputs_new_shape = j_inputs_shape[:-1] + (
-          j_inputs_shape[-1] // block_size,
-          block_size,
+      return torch_xla2.extra.call_jax(
+          WeightOnlyBlockwiseQuantizedLinear.blockwise_jax_kernel,
+          inputs,
+          self.weight,
+          self.weight_scaler,
+          self.zero_point,
       )
-      j_inputs = j_inputs.reshape(j_inputs_new_shape)
-      out = jnp.einsum("scz,bdsc->bdsz", j_weight, j_inputs)
-      out = jnp.einsum("bdsz,sz->bdz", out, j_weight_scaler)
-      if not self.is_symmetric:
-        zp_out = jnp.einsum("bdsc,sz->bdz", j_inputs, j_zero_point)
-        out = out - zp_out
-      return torch_xla2.tensor.XLATensor2(out)
 
     if self.run_fake_quantize:
       weight = self.weight.permute(2, 0, 1).to(torch.bfloat16)
@@ -243,7 +331,7 @@ class WeightOnlyBlockwiseQuantizedLinear(torch.nn.Module):
         zero_point = self.zero_point.unsqueeze(-1).transpose(1, 0) / scaler
       else:
         zero_point = None
-      w_dequantized = awq_dequantize(
+      w_dequantized = dequantize_tensor(
           self.weight, scaler, zero_point, block_size=128
       )
       w_dequantized = w_dequantized.reshape(w_dequantized.shape[0], -1)
@@ -496,12 +584,6 @@ class Attention(nn.Module):
       mask: Optional[torch.Tensor],
       cache,
   ):
-    # print(f"check x shape: {x.shape}, dtype {x.dtype}")
-    # print(f"check freqs_cis shape: {freqs_cis.shape}, dtype {freqs_cis.dtype}")
-    # if mask is not None:
-    #   print(f"check mask shape: {mask.shape}, dtype {mask.dtype}")
-    # print(f"check x shape: {x.shape}, dtype {x.dtype}")
-    # bsz, seqlen, _ = x.shape
     with jax.named_scope("attn_linear_before_cache"):
       bsz, seqlen = x.shape[0], x.shape[-2]
 

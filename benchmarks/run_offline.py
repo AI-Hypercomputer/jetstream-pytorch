@@ -76,7 +76,6 @@ _QUANTIZE_KV_CACHE = flags.DEFINE_bool(
 _MAX_CACHE_LENGTH = flags.DEFINE_integer(
     "max_cache_length", 1024, "kv_cache_quantize"
 )
-_MODEL_NAME = flags.DEFINE_string("model_name", "", "model_name")
 _SHARDING_CONFIG = flags.DEFINE_string(
     "sharding_config", "", "path to sharding config"
 )
@@ -92,6 +91,19 @@ def create_engine():
 
   devices = jax.devices()
   start = time.perf_counter()
+
+  quantize_weight = _QUANTIZE_WEIGHTS.value
+  quanitze_is_blockwise_weight = _QUANTIZE_IS_BLOCKWISE_WEIGHTS.value
+  sharding_config_path = _SHARDING_CONFIG.value
+  if not sharding_config_path:
+    sharding_config_name = _MODEL_NAME.value
+    if quantize_weight and quanitze_is_blockwise_weight:
+      sharding_config_name += "-blockwise-quant"
+    sharding_config_path = os.path.join(
+        "default_shardings", sharding_config_name + ".yaml"
+    )
+  print(sharding_config_path)
+
   engine = je.create_pytorch_engine(
       model_name=_MODEL_NAME.value,
       devices=devices,
@@ -101,7 +113,7 @@ def create_engine():
       param_size=_SIZE.value,
       context_length=_CONTEXT_LENGTH.value,
       batch_size=_BATCH_SIZE.value,
-      quantize_weights=_QUANTIZE_WEIGHTS.value,
+      quantize_weights=quantize_weight,
       quantize_num_bits_weights=_QUANTIZE_NUM_BITS_WEIGHTS.value,
       quanitze_is_blockwise_weight=quanitze_is_blockwise_weight,
       quantize_kv=_QUANTIZE_KV_CACHE.value,

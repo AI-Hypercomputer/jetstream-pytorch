@@ -510,8 +510,8 @@ class PyTorchRayWorker:
       @functools.partial(jax.jit, donate_argnums=(0, 1), inline=True)
       def insert(cache, scaler, new_entry):
         reduce_axis = (1, 3)
-        vals, scales = torch_xla2.extra.call_torch(
-            quantize.quantize_torch_int8, new_entry, reduce_axis
+        vals, scales, _ = torch_xla2.extra.call_torch(
+            quantize.quantize_tensor, new_entry, reduce_axis
         )
         new_scaler = jax.lax.dynamic_update_slice(
             scaler,
@@ -609,8 +609,8 @@ class PyTorchRayWorker:
       def insert(cache, scaler, new_entry):
         new_entry = jnp.transpose(new_entry.squeeze(0), (1, 0, 2))
         reduce_axis = (1, 2)
-        vals, scales = torch_xla2.extra.call_torch(
-            quantize.quantize_torch_int8, new_entry, reduce_axis
+        vals, scales, _ = torch_xla2.extra.call_torch(
+            quantize.quantize_tensor, new_entry, reduce_axis
         )
         new_scaler = scaler.at[slot, :, update_indexes, :].set(scales)
         new_scaler = jax.lax.with_sharding_constraint(

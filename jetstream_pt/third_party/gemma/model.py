@@ -350,3 +350,21 @@ class GemmaModel(nn.Module):
       embedder_weight = embedder_weight * self.embedder.weight_scaler
     logits = torch.matmul(hidden_states, embedder_weight.t())
     return logits
+
+  @staticmethod
+  def get_quantized_linear_weight_to_scaler_map():
+    return {
+        "self_attn.o_proj.weight": "self_attn.o_proj.weight_scaler",
+        "self_attn.wq.weight": "self_attn.wq.weight_scaler",
+        "self_attn.wk.weight": "self_attn.wk.weight_scaler",
+        "self_attn.wv.weight": "self_attn.wv.weight_scaler",
+        "mlp.gate_proj.weight": "mlp.gate_proj.weight_scaler",
+        "mlp.up_proj.weight": "mlp.up_proj.weight_scaler",
+        "mlp.down_proj.weight": "mlp.down_proj.weight_scaler",
+    }
+
+  @staticmethod
+  def get_quantized_embedding_weight_to_scaler_map():
+    return {
+        "embedder.weight": "embedder.weight_scaler",
+    }

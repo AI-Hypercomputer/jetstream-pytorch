@@ -66,6 +66,12 @@ _SIZE = flags.DEFINE_string("size", "tiny", "size of model")
 _QUANTIZE_WEIGHTS = flags.DEFINE_bool(
     "quantize_weights", False, "weight quantization"
 )
+_QUANTIZE_NUM_BITS_WEIGHTS = flags.DEFINE_integer(
+    "quantize_num_bits_weights", 8, "number of bits of quantized weight."
+)
+_QUANTIZE_IS_BLOCKWISE_WEIGHTS = flags.DEFINE_bool(
+    "quantize_is_blockwise_weights", False, "blockwise quantization for weight."
+)
 _QUANTIZE_KV_CACHE = flags.DEFINE_bool(
     "quantize_kv_cache", False, "kv_cache_quantize"
 )
@@ -84,6 +90,18 @@ def create_engine():
 
   devices = jax.devices()
   start = time.perf_counter()
+
+  quantize_weight = _QUANTIZE_WEIGHTS.value
+  quanitze_is_blockwise_weight = _QUANTIZE_IS_BLOCKWISE_WEIGHTS.value
+  sharding_config_path = _SHARDING_CONFIG.value
+  if not sharding_config_path:
+    sharding_config_name = _MODEL_NAME.value
+    if quantize_weight and quanitze_is_blockwise_weight:
+      sharding_config_name += "-blockwise-quant"
+    sharding_config_path = os.path.join(
+        "default_shardings", sharding_config_name + ".yaml"
+    )
+
   engine = je.create_pytorch_engine(
       model_name=_MODEL_NAME.value,
       devices=devices,
@@ -93,10 +111,12 @@ def create_engine():
       param_size=_SIZE.value,
       context_length=_CONTEXT_LENGTH.value,
       batch_size=_BATCH_SIZE.value,
-      quantize_weights=_QUANTIZE_WEIGHTS.value,
+      quantize_weights=quantize_weight,
+      quantize_num_bits_weights=_QUANTIZE_NUM_BITS_WEIGHTS.value,
+      quanitze_is_blockwise_weight=quanitze_is_blockwise_weight,
       quantize_kv=_QUANTIZE_KV_CACHE.value,
       max_cache_length=_MAX_CACHE_LENGTH.value,
-      sharding_config=_SHARDING_CONFIG.value,
+      sharding_config=sharding_config_path,
   )
 
   print("Initialize engine", time.perf_counter() - start)

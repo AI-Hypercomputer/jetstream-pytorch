@@ -202,3 +202,22 @@ class Transformer(nn.Module):
       h = self.norm(h)
       output = self.output(h).float()
     return output
+
+  @staticmethod
+  def get_quantized_linear_weight_to_scaler_map():
+    return {
+        "attention.wq.weight": "attention.wq.weight_scaler",
+        "attention.wk.weight": "attention.wk.weight_scaler",
+        "attention.wv.weight": "attention.wv.weight_scaler",
+        "attention.wo.weight": "attention.wo.weight_scaler",
+        "feed_forward.w1.weight": "feed_forward.w1.weight_scaler",
+        "feed_forward.w2.weight": "feed_forward.w2.weight_scaler",
+        "feed_forward.w3.weight": "feed_forward.w3.weight_scaler",
+        "output.weight": "output.weight_scaler",
+    }
+
+  @staticmethod
+  def get_quantized_embedding_weight_to_scaler_map():
+    return {
+        "tok_embeddings.weight": "tok_embeddings.weight_scaler",
+    }
