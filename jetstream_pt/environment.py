@@ -27,6 +27,15 @@ from jetstream_pt import cache_manager
 
 
 @dataclasses.dataclass
+class QuantizationConfig:
+  enable_weight_quantization: bool = False
+  num_bits_weight: int = 8
+  is_blockwise_weight: bool = False
+
+  enable_kv_quantization: bool = False
+
+
+@dataclasses.dataclass
 # pylint: disable-next=all
 class JetEngineEnvironmentData:
   checkpoint_path: str = ""  # if empty string then use model's state_dict()
@@ -41,7 +50,7 @@ class JetEngineEnvironmentData:
 
   # enable_weight_quantization: bool = False
   # enable_kv_quantization: bool = False
-  quant_config: "QuantizationConfig" = None
+  quant_config: QuantizationConfig = QuantizationConfig()
 
   model_type: str = "llama-2-13b"  # this implies the model config
 
@@ -76,14 +85,8 @@ class JetEngineEnvironmentData:
 
   sharding_config_path: str = ""
 
-
-@dataclasses.dataclass
-class QuantizationConfig:
-  enable_weight_quantization: bool = False
-  num_bits_weight: int = 8
-  is_blockwise_weight: bool = False
-
-  enable_kv_quantization: bool = False
+  # Whether to shard on batch dimension. i.e. data parallel.
+  shard_on_batch: bool = False
 
 
 # pylint: disable-next=all
@@ -107,9 +110,12 @@ class JetEngineEnvironment:
     self.x_sharding = jsharding.NamedSharding(self._mesh, P("x"))
     self.replicated = jsharding.NamedSharding(self._mesh, P())
 
-    cache_sharding_axis = self.attention_kv_axis_names.index(
-        self.kv_cache_shard_axis
-    )
+    if data.shard_on_batch:
+      cache_sharding_axis = 0
+    else:
+      cache_sharding_axis = self.attention_kv_axis_names.index(
+          self.kv_cache_shard_axis
+      )
 
     if self.cache_shape[cache_sharding_axis] == 1:
       # cannot shard on an axis that is 1
@@ -183,6 +189,9 @@ class JetEngineEnvironment:
 
   def sharding_by_name(self, name):
     """Create sharding specified in the config."""
+    if self.shard_on_batch:
+      return self.sharding_by_axis(0)  # batch dimension
+
     if name in self._sharding_config:
       return self.sharding_by_axis(self._sharding_config[name])
 

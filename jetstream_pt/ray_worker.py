@@ -39,6 +39,7 @@ from jetstream_pt.third_party.llama import model_exportable, model_args
 
 from jetstream_pt import cache_manager
 from jetstream_pt import quantize
+from jetstream_pt import torchjax
 from jetstream_pt.environment import JetEngineEnvironment, JetEngineEnvironmentData
 from jetstream_pt.third_party.gemma import config as gemma_config, model as gemma_model
 
@@ -339,7 +340,7 @@ class PyTorchRayWorker:
     if self.env.quant_config.enable_kv_quantization:
       caches_obj = [
           cache_manager.Int8KVCacheGenerate(k, v, ks, vs, input_indexes)
-          for (k, v), (ks, vs) in torch_xla2.tensor.wrap(
+          for (k, v), (ks, vs) in torchjax.to_torch(
               list(zip(caches, cache_scales))
           )
       ]
@@ -348,14 +349,14 @@ class PyTorchRayWorker:
           cache_manager.KVCacheGenerate(
               k, v, input_indexes, self.cache_sharding
           )
-          for k, v in torch_xla2.tensor.wrap(caches)
+          for k, v in torchjax.to_torch(caches)
       ]
     mask = jnp.expand_dims(mask, (1, 2))
 
     args = (tokens, input_pos, caches_obj, mask)
-    paramst, argst = torch_xla2.tensor.wrap((weights, args))
+    paramst, argst = torchjax.to_torch((weights, args))
     with self._lock:
-      with torch_xla2.tensor.XLADispatchMode():
+      with torchjax.jax_mode():
         res = torch.func.functional_call(self.pt_model, paramst, argst)
       updated_caches = [c.state() for c in caches_obj]
     scales = []
@@ -365,7 +366,7 @@ class PyTorchRayWorker:
         current_position + 1
     ) % self.env.cache_sequence_length
 
-    return torch_xla2.tensor.unwrap(
+    return torchjax.from_torch(
         (
             res,
             updated_caches,
@@ -396,12 +397,12 @@ class PyTorchRayWorker:
     mask = jnp.triu(mask, k=1)
     args = (tokens, input_indexes, caches, mask)
 
-    paramst, argst = torch_xla2.tensor.wrap((weights, args))
+    paramst, argst = torchjax.to_torch((weights, args))
     with self._lock:
-      with torch_xla2.tensor.XLADispatchMode():
+      with torchjax.jax_mode:
         res = torch.func.functional_call(self.pt_model, paramst, argst)[0]
     caches_res = [c.state() for c in caches]
-    return torch_xla2.tensor.unwrap((res, caches_res))
+    return torchjax.from_torch((res, caches_res))
 
   def _sampling(self, logits: Any, batch_size: int) -> np.ndarray:
     if len(logits.shape) == 2:
@@ -510,7 +511,7 @@ class PyTorchRayWorker:
       @functools.partial(jax.jit, donate_argnums=(0, 1), inline=True)
       def insert(cache, scaler, new_entry):
         reduce_axis = (1, 3)
-        vals, scales, _ = torch_xla2.extra.call_torch(
+        vals, scales, _ = torchjax.call_torch(
             quantize.quantize_tensor, new_entry, reduce_axis
         )
         new_scaler = jax.lax.dynamic_update_slice(
@@ -609,7 +610,7 @@ class PyTorchRayWorker:
       def insert(cache, scaler, new_entry):
         new_entry = jnp.transpose(new_entry.squeeze(0), (1, 0, 2))
         reduce_axis = (1, 2)
-        vals, scales, _ = torch_xla2.extra.call_torch(
+        vals, scales, _ = torchjax.call_torch(
             quantize.quantize_tensor, new_entry, reduce_axis
         )
         new_scaler = scaler.at[slot, :, update_indexes, :].set(scales)
@@ -784,6 +785,7 @@ class PyTorchRayWorker:
   def _load_from_safetensors(self, path):
 
     weights = {}
+    # pylint: disable-next=all
     with safetensors.safe_open(path, framework="flax", device="cpu") as f:
       for key, model_weights in self.pt_model.state_dict().items():
         if key == "freqs_cis":

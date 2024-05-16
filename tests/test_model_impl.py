@@ -13,11 +13,9 @@
 # limitations under the License.
 
 import unittest
-import random
 import jax
 import jax.numpy as jnp
 import torch
-from torch.utils import _pytree as pytree
 import torch_xla2
 from . import helpers
 
@@ -25,6 +23,7 @@ from jetstream_pt.third_party.llama import model_exportable
 from jetstream_pt.third_party.llama import model_original
 from jetstream_pt.third_party.gemma import model_original as gemma_orig
 from jetstream_pt.third_party.gemma import model as gemma
+from jetstream_pt import torchjax
 from jetstream_pt import layers
 from jetstream_pt import cache_manager
 
@@ -36,6 +35,7 @@ class ModelComponentTest(unittest.TestCase):
   def setUp(self):
     """setup torch env"""
     jax.config.update("jax_platform_name", "cpu")
+    jax.config.update("jax_enable_x64", False)
     torch.set_default_dtype(torch.float32)
 
   def _prefill_mask(self, seqlen, start_pos):
@@ -62,23 +62,11 @@ class ModelComponentTest(unittest.TestCase):
     freqs_cis = freqs_cis[start_pos : start_pos + seqlen]
     return freqs_cis
 
-  def _to_xla_tensor(self, tree):
-    return pytree.tree_map_only(
-        torch.Tensor, torch_xla2.tensor.move_to_device, tree
-    )
-
-  def _call_xla_model(self, model, weights, args):
-    with jax.default_device(jax.devices("cpu")[0]):
-      xla_weights, xla_inputs = self._to_xla_tensor((weights, args))
-      result = torch.func.functional_call(model, xla_weights, xla_inputs)
-      result_torch = torch_xla2.tensor.j2t(result._elem)
-      return result_torch
-
   def _generate_mask(self, cache_length, pos, seqlen):
     x = jnp.arange(0, cache_length)
     cond = jnp.logical_and(x <= pos, x >= pos - seqlen)
     res = jnp.where(cond, 0, float("-inf"))
-    return torch_xla2.tensor.wrap(res)
+    return torchjax.to_torch(res)
 
   def _compare_cache(self, cache_torch, cache_jax):
     _, seq, _, _ = cache_torch.shape
@@ -90,7 +78,7 @@ class ModelComponentTest(unittest.TestCase):
     cache_array_k = jnp.zeros(env.cache_shape)
 
     cache_array_v = jnp.zeros(env.cache_shape)
-    cache_array_k, cache_array_v = torch_xla2.tensor.wrap(
+    cache_array_k, cache_array_v = torchjax.to_torch(
         (cache_array_k, cache_array_v)
     )
     cache_decode = cache_manager.KVCacheGenerate(
@@ -133,7 +121,7 @@ class ModelComponentTest(unittest.TestCase):
         cache,
     )
 
-    result_torch = self._call_xla_model(
+    result_torch = helpers.call_xla_model(
         attention_ours, attention_orig.state_dict(), input_ours
     )
 
@@ -168,7 +156,7 @@ class ModelComponentTest(unittest.TestCase):
     mask = mask.reshape(1, 1, 1, -1)  # seq dim is the last one
     freqs_cis = freqs_cis.reshape(batch, 1, -1)
     input_ours2 = (x2, freqs_cis, mask, cache_decode)
-    result_torch = self._call_xla_model(
+    result_torch = helpers.call_xla_model(
         attention_ours, attention_orig.state_dict(), input_ours2
     )
 
@@ -254,7 +242,7 @@ class ModelComponentTest(unittest.TestCase):
 
       state_dict = dict(attention_orig.state_dict())
       load_hook(state_dict, "")
-      result_torch = self._call_xla_model(
+      result_torch = helpers.call_xla_model(
           attention_ours, state_dict, input_ours
       )
 
@@ -297,7 +285,7 @@ class ModelComponentTest(unittest.TestCase):
         cache,
     )
 
-    result_torch = self._call_xla_model(
+    result_torch = helpers.call_xla_model(
         block_ours, block_orig.state_dict(), input_ours
     )
 
@@ -330,7 +318,7 @@ class ModelComponentTest(unittest.TestCase):
     mask = mask.reshape(1, 1, 1, -1)  # seq dim is the last one
     freqs_cis = freqs_cis.reshape(batch, 1, -1)
     input_ours2 = (x2, freqs_cis, mask, cache_decode)
-    result_torch = self._call_xla_model(
+    result_torch = helpers.call_xla_model(
         block_ours, block_orig.state_dict(), input_ours2
     )
 
@@ -367,7 +355,7 @@ class ModelComponentTest(unittest.TestCase):
         mask,
     )
 
-    result_torch = self._call_xla_model(model_ours, state_dict, input_ours)
+    result_torch = helpers.call_xla_model(model_ours, state_dict, input_ours)
 
     print("Transformer: Diff norm", (result_torch - expected_out).norm())
     self.assertTrue(torch.allclose(result_torch, expected_out, atol=1e-4))

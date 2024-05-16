@@ -16,6 +16,17 @@ Date | Device  | dtype | batch size | cache length |max input length |max output
 2024-05-10 | TPU v5e-8 | bfloat16 | 96 | 2048 | 1024 | 1024 | 3236
 2024-05-10 | TPU v5e-8 | int8 | 128 | 2048 | 1024 | 1024 | 4695
 
+## Gemma - 2B
+
+Date | Device  | dtype | batch size | cache length |max input length |max output length| throughput (token/s) 
+----| ------- | ------ |---------- | -------------|-----------------|------------------|----------------------
+2024-05-14 | TPU v5e-8 | bfloat16 | 512 | 2048 | 1024 | 1024 | 8700
+2024-05-14 | TPU v5e-8 | int8 | 1024 | 2048 | 1024 | 1024 | 8746
+
+** NOTE: ** Gemma 2B uses `--shard_on_batch` flag so it's data parallel instead
+of model parallel.
+
+
 ## Llama 2 - 7B
 
 Date | Device  | dtype | batch size | cache length |max input length |max output length| throughput (token/s) 

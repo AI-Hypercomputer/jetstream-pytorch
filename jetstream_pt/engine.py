@@ -33,6 +33,7 @@ from torch.utils import _pytree as pytree
 
 from jetstream_pt import cache_manager
 from jetstream_pt import quantize
+from jetstream_pt import torchjax
 from jetstream_pt.environment import JetEngineEnvironment, JetEngineEnvironmentData, QuantizationConfig
 from jetstream_pt.third_party.llama import model_exportable as llama_model, model_args
 from jetstream_pt.third_party.gemma import config as gemma_config, model as gemma_model
@@ -86,7 +87,10 @@ class PyTorchEngine(engine_api.Engine):
     self.y_sharding = env.sharding_by_axis(1)
     self.x_sharding = env.sharding_by_axis(0)
     self.replicated = env.sharding_by_axis(-1)  # replicated
+
     self.cache_sharding = self.env.cache_sharding
+
+    jax.config.update("jax_enable_x64", False)
 
     self.prefill = jax.jit(
         self.prefill, out_shardings=self.get_prefix_destination_sharding()
@@ -177,7 +181,7 @@ class PyTorchEngine(engine_api.Engine):
     if self.env.quant_config.enable_kv_quantization:
       caches_obj = [
           cache_manager.Int8KVCacheGenerate(k, v, ks, vs, input_indexes)
-          for (k, v), (ks, vs) in torch_xla2.tensor.wrap(
+          for (k, v), (ks, vs) in torchjax.to_torch(
               list(zip(caches, cache_scales))
           )
       ]
@@ -186,20 +190,22 @@ class PyTorchEngine(engine_api.Engine):
           cache_manager.KVCacheGenerate(
               k, v, input_indexes, self.cache_sharding
           )
-          for k, v in torch_xla2.tensor.wrap(caches)
+          for k, v in torchjax.to_torch(caches)
       ]
     mask = jnp.expand_dims(mask, (1, 2))
 
     args = (tokens, input_pos, caches_obj, mask)
-    paramst, argst = torch_xla2.tensor.wrap((weights, args))
+    paramst, argst = torchjax.to_torch((weights, args))
     with self._lock:
-      with torch_xla2.tensor.XLADispatchMode():
+      with torchjax.jax_mode:
+        # The mode is needed so that tensors created inside of
+        # the model (such as via torch.ones etc) also have the right type
         res = torch.func.functional_call(self.pt_model, paramst, argst)
     updated_caches = [c.state() for c in caches_obj]
     scales = []
     if self.env.quant_config.enable_kv_quantization:
       scales = [c.scalers() for c in caches_obj]
-    return torch_xla2.tensor.unwrap((res, updated_caches, scales))
+    return torchjax.from_torch((res, updated_caches, scales))
 
   @functools.partial(
       jax.jit,
@@ -220,12 +226,12 @@ class PyTorchEngine(engine_api.Engine):
     mask = jnp.triu(mask, k=1)
     args = (tokens, input_indexes, caches, mask)
 
-    paramst, argst = torch_xla2.tensor.wrap((weights, args))
+    paramst, argst = torchjax.to_torch((weights, args))
     with self._lock:
-      with torch_xla2.tensor.XLADispatchMode():
+      with torchjax.jax_mode:
         res = torch.func.functional_call(self.pt_model, paramst, argst)[0]
     caches_res = [c.state() for c in caches]
-    return torch_xla2.tensor.unwrap((res, caches_res))
+    return torchjax.from_torch((res, caches_res))
 
   def _sampling(self, logits: Any, batch_size: int) -> jnp.ndarray:
     if len(logits.shape) == 2:
@@ -319,7 +325,7 @@ class PyTorchEngine(engine_api.Engine):
       @functools.partial(jax.jit, donate_argnums=(0, 1), inline=True)
       def insert(cache, scaler, new_entry):
         reduce_axis = (1, 3)
-        vals, scales, _ = torch_xla2.extra.call_torch(
+        vals, scales, _ = torchjax.call_torch(
             quantize.quantize_tensor, new_entry, reduce_axis
         )
         new_scaler = jax.lax.dynamic_update_slice(
@@ -418,7 +424,7 @@ class PyTorchEngine(engine_api.Engine):
       def insert(cache, scaler, new_entry):
         new_entry = jnp.transpose(new_entry.squeeze(0), (1, 0, 2))
         reduce_axis = (1, 2)
-        vals, scales, _ = torch_xla2.extra.call_torch(
+        vals, scales, _ = torchjax.call_torch(
             quantize.quantize_tensor, new_entry, reduce_axis
         )
         new_scaler = scaler.at[slot, :, update_indexes, :].set(scales)
@@ -580,7 +586,7 @@ class PyTorchEngine(engine_api.Engine):
     weights = {}
     for key, model_weights in self.pt_model.state_dict().items():
       assert key in state_dict, f"key: {key} not found"
-      weights[key] = torch_xla2.tensor.t2j(state_dict[key])
+      weights[key] = torchjax.from_torch(state_dict[key])
       assert tuple(model_weights.shape) == tuple(
           weights[key].shape
       ), f"key: {key} error: {model_weights.shape} != {weights[key].shape}"
@@ -630,14 +636,14 @@ class PyTorchEngine(engine_api.Engine):
     """Returns the shardings necessary to transfer data between engines."""
     return Prefix(
         self.replicated,
-        self.cache_sharding,
+        self.replicated if self.env.shard_on_batch else self.cache_sharding,
         self.replicated,
     )
 
   def get_decode_state_sharding(self) -> DecodeState:
     """Gets the shardings corresponding to the decode state."""
     return DecodeState(
-        self.replicated,
+        self.x_sharding if self.env.shard_on_batch else self.replicated,
         self.cache_sharding,
         self.replicated,
         self.replicated,
@@ -693,6 +699,7 @@ def create_pytorch_engine(
     quantize_kv=False,
     max_cache_length=1024,
     sharding_config=None,
+    shard_on_batch=False,
 ) -> PyTorchEngine:
   """Returns: The pytorch engine."""
 
@@ -731,7 +738,6 @@ def create_pytorch_engine(
     checkpoint_format = "safetensors"
     checkpoint_path = paths[0]
 
-  tokenizer = token_utils.load_vocab(tokenizer_path)
   pt_model = None
 
   if not sharding_config:
@@ -755,7 +761,11 @@ def create_pytorch_engine(
       cache_sequence_length=max_cache_length,
       bf16_enable=bf16_enable,
       sharding_config_path=sharding_config,
+      shard_on_batch=shard_on_batch,
   )
+
+  if shard_on_batch and sharding_config:
+    print("WARNING: with sharding_on_batch sharding config is ignored.")
 
   if model_name.startswith("llama"):
 
@@ -770,7 +780,7 @@ def create_pytorch_engine(
         max_cache_length,
         args.dim // args.n_heads,
     )
-    env_data.model_type = "llama-2-" + param_size
+    env_data.model_type = model_name + "-" + param_size
     env_data.num_layers = args.n_layers
     env = JetEngineEnvironment(env_data)
     pt_model = llama_model.Transformer(args, env)
@@ -782,7 +792,7 @@ def create_pytorch_engine(
         max_cache_length,
         args.head_dim,
     )
-    env_data.model_type = "gemma-" + param_size
+    env_data.model_type = model_name + "-" + param_size
     env_data.num_layers = args.num_hidden_layers
     env = JetEngineEnvironment(env_data)
     pt_model = gemma_model.GemmaModel(args, env)
