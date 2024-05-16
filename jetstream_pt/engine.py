@@ -712,7 +712,9 @@ def create_pytorch_engine(
 
   if not sharding_config:
     sharding_file_name = "llama" if model_name.startswith("llama") else "gemma"
-    sharding_config = os.path.join("default_shardings", sharding_file_name + ".yaml")
+    sharding_config = os.path.join(
+        "default_shardings", sharding_file_name + ".yaml"
+    )
 
   env_data = JetEngineEnvironmentData(
       tokenizer_path=tokenizer_path,
