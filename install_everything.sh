@@ -13,7 +13,7 @@
 # limitations under the License.
 
 TORCHXLA_TAG=f26c35c2fa5eb1d22d042a2a8a8dc34f11b99f60 # updated May 14, 2024
-JETSTREAM_TAG=v0.2.1
+JETSTREAM_TAG=e4952fbb12e0ab3c33bc7c1eef3839b7c2ad0dd4 # updated May 16, 2024
 
 # Uninstall existing jax
 pip show jax && pip uninstall -y jax
