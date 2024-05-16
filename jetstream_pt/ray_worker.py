@@ -33,9 +33,11 @@ from jax.experimental import multihost_utils
 from torch.utils import _pytree as pytree
 from jetstream.engine import engine_api, tokenizer_pb2
 from jetstream_pt import cache_manager, quantize, torchjax
-from jetstream_pt.environment import (JetEngineEnvironment,
-                                      JetEngineEnvironmentData,
-                                      QuantizationConfig)
+from jetstream_pt.environment import (
+    JetEngineEnvironment,
+    JetEngineEnvironmentData,
+    QuantizationConfig,
+)
 from jetstream_pt.third_party.gemma import config as gemma_config
 from jetstream_pt.third_party.gemma import model as gemma_model
 from jetstream_pt.third_party.llama import model_args, model_exportable

@@ -28,14 +28,14 @@ def quantize_tensor(
 ):
   """
   Quantize weight tensor w along 'reduce_axis'.
-  
+
   Args:
     w: weight tensor to be quantized.
     reduce_axis: axises along which to quantize.
     n_bit: Quantize to n_bit bits. (Use int8 container for n_bits < 8).
     symmetric: Whether quantization is symmetric.
     block_size: Blocksize for blockwise quantization. -1 for per-channel quant.
-  
+
   Return:
     w_q: Quantized weight in int8 container
     scale: scalar for quantized tensor
