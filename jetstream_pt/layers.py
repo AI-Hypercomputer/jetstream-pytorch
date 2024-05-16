@@ -888,6 +888,6 @@ class Attention(nn.Module):
     xv = xv.transpose(1, 2)
     xq = xq.transpose(1, 2)
 
-    output = self.attention_kernel(xq, xk, xv, mask, cache, start, end, pre_batch, pre_block)
+    output = self.attention_kernel(xq, xk, xv, mask, cache, start, end, pre_batch, pre_block).type_as(xq)
     output = output.transpose(-3, -2).contiguous().view(bsz, seqlen, -1)
     return self.wo(output)
