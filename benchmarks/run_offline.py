@@ -103,7 +103,6 @@ def create_engine():
     sharding_config_path = os.path.join(
         "default_shardings", sharding_config_name + ".yaml"
     )
-  print(sharding_config_path)
 
   engine = je.create_pytorch_engine(
       model_name=_MODEL_NAME.value,
@@ -179,8 +178,6 @@ def main(argv):
 
   prefill_times = {}
 
-  # if _PROFILING_OUTPUT.value:
-  #   jax.profiler.start_trace(_PROFILING_OUTPUT.value)
   decode_state = engine.init_decode_state()
   for batch, _ in MAXTEXT_PREFILL.items():
     runtime, decode_state = run_prefill_time(

@@ -297,7 +297,7 @@ class WeightOnlyBlockwiseQuantizedLinear(torch.nn.Module):
     return out
 
   def forward(self, inputs):
-
+    # bsz, seqlen, _ = x.shape
     if self.use_dot_general:
       assert (
           self.zero_point is None

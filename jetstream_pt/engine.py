@@ -114,37 +114,6 @@ class PyTorchEngine(engine_api.Engine):
     #      out_shardings=self.get_decode_state_sharding())
     self._lock = threading.RLock()
 
-  def sharding_by_name(self, name):
-
-    # This allows easier way to edit shardings
-    """
-    for key, val in self.env._data.experimental_sharding_axis_override.items():
-      if name.endswith(key):
-        return self.env.sharding_by_axis(val)
-    """
-    if "weight_scaler" in name:
-      if "attention.wo" in name or "feed_forward.w2" in name:
-        return self.y_sharding
-      else:
-        return self.x_sharding
-    if "tok_embeddings." in name:
-      return self.y_sharding
-    if "attention." in name:
-      if "wo" in name:
-        # return self.y_sharding
-        return self.int4_weight_sharding
-      else:
-        return self.x_sharding
-    if "feed_forward." in name:
-      if "w2" in name:
-        # return self.y_sharding
-        return self.int4_weight_sharding
-      else:
-        return self.x_sharding
-    if "output" in name:
-      return self.x_sharding
-    return self.replicated
-
   def init_decode_state(
       self,
   ) -> DecodeState:
