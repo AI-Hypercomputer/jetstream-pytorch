@@ -74,8 +74,12 @@ def main(argv):
       )
       if complete[0]:
         break
-      token_ids = output[0].token_ids
-      sampled_tokens_list.extend(token_ids)
+      sampled_tokens_list = output[0]
+      # output_str = tokenizer.decode_str([token_id])
+      # print(Fore.GREEN + output_str, end="", flush=True)
+
+    # print(Style.RESET_ALL + "\n")
+    # print("---- Streaming decode finished.")
 
     print("---- All output tokens.")
     print(sampled_tokens_list)
