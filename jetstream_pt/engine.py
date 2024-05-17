@@ -277,7 +277,7 @@ class PyTorchEngine(engine_api.Engine):
     cond = jnp.logical_and(x <= decode_state.current_position, x >= pos)
     mask_insert = jnp.where(cond, 0, float("-inf"))
     mask = decode_state.mask.at[slot].set(mask_insert)
-    start = decode_state.start_pos.at[slot].set(pos % self.env.cache_sequence_length)
+    start = decode_state.start.at[slot].set(pos % self.env.cache_sequence_length)
     input_pos = decode_state.input_pos.at[slot].set(prefix.seq_len)
     if not self.env.quant_config.enable_kv_quantization:
 
@@ -373,7 +373,7 @@ class PyTorchEngine(engine_api.Engine):
 
     mask_insert = jnp.where(cond, 0, float("-inf"))
     mask = decode_state.mask.at[slot].set(mask_insert)
-    start = decode_state.start_pos.at[slot].set(start_insert)
+    start = decode_state.start.at[slot].set(start_insert)
     input_pos = decode_state.input_pos.at[slot].set(prefix.seq_len)
 
     old_caches = decode_state.caches
