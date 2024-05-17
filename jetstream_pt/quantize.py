@@ -60,7 +60,7 @@ def quantize_tensor(
     max_val = w.amax(dim=reduce_axis, keepdim=True)
     min_val = w.amin(dim=reduce_axis, keepdim=True)
     scales = (max_val - min_val).clamp(min=EPS) / float(max_int - min_int)
-    zero_point = min_int - torch.round(min_val / scales)
+    zero_point = min_int - min_val / scales
   else:
     max_val = w.abs().amax(dim=reduce_axis, keepdim=True)
     max_val = max_val.clamp(min=EPS)
