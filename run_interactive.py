@@ -158,20 +158,15 @@ def main(argv):
       decode_state, result_tokens = engine.generate(params, decode_state)
       result_tokens = result_tokens.convert_to_numpy()
       res = result_tokens.get_result_at_slot(slot)
-      stop_tokens = set(tokenizer.tokenizer.stop_tokens)
+      stop_tokens = set(tokenizer.stop_tokens)
       stop_tokens.add(tokenizer.pad_id)
+      token_id = res.tokens[0][0].item()
+      sampled_tokens_list.append(token_id)
       if (
-          res.tokens[0][0] in stop_tokens
+          token_id in stop_tokens
           or len(sampled_tokens_list) > max_output_length
       ):
         break
-      token_id = res.tokens[0][0]
-      sampled_tokens_list.append(token_id)
-      # output_str = tokenizer.decode_str([token_id])
-      # print(Fore.GREEN + output_str, end="", flush=True)
-
-    # print(Style.RESET_ALL + "\n")
-    # print("---- Streaming decode finished.")
 
     print("---- All output tokens.")
     print(sampled_tokens_list)

@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-version = "0.2.0"
+version = "0.2.1"
 name = "jetstream_pt"
 dependencies = [
     "absl-py",
@@ -14,7 +14,12 @@ dependencies = [
     "google-jetstream",
     "google-cloud-storage",
     "safetensors",
+    "torch_xla2 @ {root:uri}/deps/xla/experimental/torch_xla2",
+    "google-jetstream @ {root:uri}/deps/JetStream",
 ]
 
 requires-python = ">=3.10"
 license = {file = "LICENSE"}
+
+[tool.hatch.metadata]
+allow-direct-references = true

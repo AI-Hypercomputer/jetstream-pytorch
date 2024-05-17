@@ -55,7 +55,7 @@ jobs:
         pylint --indent-string='  ' jetstream_pt/ benchmarks/
     - name: Format check with pyink
       run: |
-        pyink --pyink-indentation 2 --line-length 80 --check --verbose .
+        pyink --pyink-indentation 2 --line-length 80 --check --verbose --extend-exclude=deps .
 
   cpu:
     name: "jetstream_pt unit tests"
@@ -80,3 +80,27 @@ jobs:
     - name: Create test coverage report
       run: |
         coverage report -m
+
+  interactive:
+    name: "jetstream_pt run interactive"
+    strategy:
+      matrix:
+        os: [ubuntu-20.04]
+        python-version: ['3.10']
+    runs-on: ${{ matrix.os }}
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install Dependencies
+      run: |
+        source install_everything.sh
+    - name: Run interactive (bf16)
+      run: |
+        JAX_PLATFORMS=cpu python run_interactive.py --size=tiny --batch_size=1 --max_cache_length=2048 --tokenizer_path=jetstream_pt/third_party/llama/tokenizer.model --model_name=llama-2 --sharding_config=default_shardings/llama.yaml --quantize_weights=0 --quantize_kv_cache=0
+    - name: Run interactive (int8)
+      run: |
+        JAX_PLATFORMS=cpu python run_interactive.py --size=tiny --batch_size=1 --max_cache_length=2048 --tokenizer_path=jetstream_pt/third_party/llama/tokenizer.model --model_name=llama-2 --sharding_config=default_shardings/llama.yaml --quantize_weights=1 --quantize_kv_cache=1
