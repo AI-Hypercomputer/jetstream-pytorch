@@ -104,10 +104,10 @@ python run_interactive.py --model_name=$model_name --size=7b --batch_size=64 --m
 
 
 # Run the server
-NOTE: the `--platform=tpu=8` need to specify number of tpu devices (which is 4 for v4-8 and 8 for v5light-8`)
+Here is an example to run the server with llama2 7B config. Note that the `--platform=tpu=8` need to specify number of tpu devices (which is 4 for v4-8 and 8 for v5light-8`).
 
 ```bash
-python run_server.py --param_size=7b --batch_size=128 --max_cache_length=2048 --quantize_weights=$quantize --quantize_kv_cache=$quantize --checkpoint_path=$output_ckpt_dir   --tokenizer_path=$tokenizer_path --platform=tpu=8 --model=$model_name
+python run_server.py --param_size=7b --batch_size=128 --max_cache_length=2048 --quantize_weights=$quantize --quantize_kv_cache=$quantize --checkpoint_path=$output_ckpt_dir   --tokenizer_path=$tokenizer_path --platform=tpu=8 --model=$model_name --sharding_config="default_shardings/llama.yaml"
 ```
 
 Now you can fire gRPC to it.
@@ -122,7 +122,7 @@ Optional flags:
   the ones in default_shardings directory.
 
 # Run benchmark
-go to the deps/JetStream folder (downloaded during `install_everything.sh`)
+Start the server and then go to the deps/JetStream folder (downloaded during `install_everything.sh`)
 
 ```bash
 cd deps/JetStream
