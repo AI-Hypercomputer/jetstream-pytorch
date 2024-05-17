@@ -649,7 +649,7 @@ def dense_attention(xq, keys, values, k_scaler=None, v_scaler=None, mask=None):
       ## Attention start
       # scores = torch.einsum(jnp.einsum, "ijkl,ikml->ikjm", xq, keys) / math.sqrt(self.head_dim)
       scores = torch.einsum("ikjl,ikml->ikjm", xq, keys) / math.sqrt(head_dim)
-      if k_scaler:
+      if k_scaler is not None:
         scores = scores * (k_scaler.reshape(bsz, 1, 1, keys.shape[2]))
       if mask is not None:
         # if mask.shape != (1,1,16,16):
@@ -657,7 +657,7 @@ def dense_attention(xq, keys, values, k_scaler=None, v_scaler=None, mask=None):
         scores = scores + mask  # (bs, n_local_heads, seqlen, max_seqlen)
   with jax.named_scope("attn_soft"):
     scores = F.softmax(scores.float(), dim=-1).type_as(xq)
-    if v_scaler:
+    if v_scaler is not None:
       scores = scores * v_scaler.reshape((bsz, 1, 1, keys.shape[2]))
 
   with jax.named_scope("attn_mat2"):
