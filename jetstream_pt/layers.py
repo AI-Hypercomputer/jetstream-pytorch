@@ -582,7 +582,7 @@ def ragged_mqa(
   return out, (m[..., 0], l[..., 0])
 
 
-@functools.partial(jax.jit, static_argnames=['bk', 'mask', 'normalize_var', 'shard_axis'])
+@functools.partial(jax.jit, static_argnames=['bk', 'mask_value', 'normalize_var', 'shard_axis'])
 def ragged_mha(
     q: jax.Array,
     k: jax.Array,
