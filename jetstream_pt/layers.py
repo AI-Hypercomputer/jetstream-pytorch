@@ -775,9 +775,9 @@ class Int8KVAttentionKernel:
 
     with jax.named_scope("attn_qkv"):
       if self.env.ragged_mha and seqlen == 1:
-        output = torch_xla2.extra.call_jax(self.binded_ragged_mha_quantized, xq, keys, values, start, end, pre_batch, pre_block, k_scaler, v_scaler)
+        output, _ = torch_xla2.extra.call_jax(self.binded_ragged_mha_quantized, xq, keys, values, start, end, pre_batch, pre_block, k_scaler, v_scaler)
       else:
-        output, _ = dense_attention_quantized(xq, keys, values, k_scaler, v_scaler, mask)
+        output= dense_attention_quantized(xq, keys, values, k_scaler, v_scaler, mask)
 
       if seqlen == 1:
         output = output[:, :, 0:1, :]
