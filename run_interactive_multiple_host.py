@@ -15,63 +15,66 @@
 import os
 import random
 import time
-
 from typing import List
-from absl import app
-from absl import flags
-from colorama import Fore, Style
 
 import jax
-
+from absl import app, flags
+from colorama import Fore, Style
 from jetstream.engine import token_utils
 from jetstream_pt import ray_engine
-
-FLAGS = flags.FLAGS
-
-_TOKENIZER_PATH = flags.DEFINE_string(
-    "tokenizer_path",
-    "tokenizer.model",
-    "The tokenizer model path",
-    required=False,
-)
-_CKPT_PATH = flags.DEFINE_string(
-    "checkpoint_path", None, "Directory for .pth checkpoints", required=False
-)
-_BF16_ENABLE = flags.DEFINE_bool(
-    "bf16_enable", False, "Whether to enable bf16", required=False
-)
-_CONTEXT_LENGTH = flags.DEFINE_integer(
-    "context_length", 1024, "The context length", required=False
-)
-_BATCH_SIZE = flags.DEFINE_integer(
-    "batch_size", 32, "The batch size", required=False
-)
-_PROFILING_OUTPUT = flags.DEFINE_string(
-    "profiling_output",
-    "",
-    "The profiling output",
-    required=False,
+from jetstream_pt.config import (
+    FLAGS,
+    create_engine_from_config_flags,
+    define_common_flags,
+    define_profiling_flags,
 )
 
-_SIZE = flags.DEFINE_string("size", "tiny", "size of model")
+define_common_flags()
+define_profiling_flags()
+# _TOKENIZER_PATH = flags.DEFINE_string(
+#     "tokenizer_path",
+#     "tokenizer.model",
+#     "The tokenizer model path",
+#     required=False,
+# )
+# _CKPT_PATH = flags.DEFINE_string(
+#     "checkpoint_path", None, "Directory for .pth checkpoints", required=False
+# )
+# _BF16_ENABLE = flags.DEFINE_bool(
+#     "bf16_enable", False, "Whether to enable bf16", required=False
+# )
+# _CONTEXT_LENGTH = flags.DEFINE_integer(
+#     "context_length", 1024, "The context length", required=False
+# )
+# _BATCH_SIZE = flags.DEFINE_integer(
+#     "batch_size", 32, "The batch size", required=False
+# )
+# _PROFILING_OUTPUT = flags.DEFINE_string(
+#     "profiling_output",
+#     "",
+#     "The profiling output",
+#     required=False,
+# )
 
-_QUANTIZE_WEIGHTS = flags.DEFINE_bool(
-    "quantize_weights", False, "weight quantization"
-)
-_QUANTIZE_KV_CACHE = flags.DEFINE_bool(
-    "quantize_kv_cache", False, "kv_cache_quantize"
-)
-_MAX_CACHE_LENGTH = flags.DEFINE_integer(
-    "max_cache_length", 1024, "kv_cache_quantize"
-)
+# _SIZE = flags.DEFINE_string("size", "tiny", "size of model")
 
-_MODEL_NAME = flags.DEFINE_string(
-    "model_name", None, "model type", required=False
-)
+# _QUANTIZE_WEIGHTS = flags.DEFINE_bool(
+#     "quantize_weights", False, "weight quantization"
+# )
+# _QUANTIZE_KV_CACHE = flags.DEFINE_bool(
+#     "quantize_kv_cache", False, "kv_cache_quantize"
+# )
+# _MAX_CACHE_LENGTH = flags.DEFINE_integer(
+#     "max_cache_length", 1024, "kv_cache_quantize"
+# )
 
-_SHARDING_CONFIG = flags.DEFINE_string(
-    "sharding_config", "", "config file for sharding"
-)
+# _MODEL_NAME = flags.DEFINE_string(
+#     "model_name", None, "model type", required=False
+# )
+
+# _SHARDING_CONFIG = flags.DEFINE_string(
+#     "sharding_config", "", "config file for sharding"
+# )
 
 
 def create_engine():
@@ -81,17 +84,18 @@ def create_engine():
 
   start = time.perf_counter()
   engine = ray_engine.create_pytorch_ray_engine(
-      model_name=_MODEL_NAME.value,
-      tokenizer_path=_TOKENIZER_PATH.value,
-      ckpt_path=_CKPT_PATH.value,
-      bf16_enable=True,
-      param_size=_SIZE.value,
-      context_length=_CONTEXT_LENGTH.value,
-      batch_size=_BATCH_SIZE.value,
-      quantize_weights=_QUANTIZE_WEIGHTS.value,
-      quantize_kv=_QUANTIZE_KV_CACHE.value,
-      max_cache_length=_MAX_CACHE_LENGTH.value,
-      sharding_config=_SHARDING_CONFIG.value,
+      model_name=FLAGS.model_name,
+      tokenizer_path=FLAGS.tokenizer_path,
+      ckpt_path=FLAGS.checkpoint_path,
+      bf16_enable=FLAGS.bf16_enable,
+      param_size=FLAGS.size,
+      context_length=FLAGS.context_length,
+      batch_size=FLAGS.batch_size,
+      quantize_weights=FLAGS.quantize_weights,
+      quantize_kv=FLAGS.quantize_kv_cache,
+      max_cache_length=FLAGS.max_cache_length,
+      sharding_config=FLAGS.sharding_config,
+      shard_on_batch=FLAGS.shard_on_batch,
   )
 
   print("Initialize engine", time.perf_counter() - start)
@@ -101,7 +105,7 @@ def create_engine():
 # pylint: disable-next=all
 def main(argv):
 
-  engine = create_engine()
+  engine = create_engine_from_config_flags()
 
   start = time.perf_counter()
   engine.load_params()
@@ -112,8 +116,11 @@ def main(argv):
   stop_tokens = [vocab.eos_id, vocab.pad_id]
   max_output_length = 1024
 
-  if _PROFILING_OUTPUT.value:
-    jax.profiler.start_trace(_PROFILING_OUTPUT.value)
+  #   if _PROFILING_OUTPUT.value:
+  #     jax.profiler.start_trace(_PROFILING_OUTPUT.value)
+  profiling_output = FLAGS.profiling_output
+  if profiling_output:
+    jax.profiler.start_trace(profiling_output)
 
   engine.init_decode_state()
   prompts: List[str] = [
@@ -128,7 +135,7 @@ def main(argv):
       "<s>[INST] <<SYS>>\nYou are an AI assistant. You will be given a task. You must generate a detailed and long answer.\n<</SYS>>\n\nContinue the following story.\n\nKay didn't have shoes that fit her feet properly. She only wore sneakers, because the \nChoose from: [I] shoes  fitted badly. [II] sneakers  fitted badly. [/INST]",
   ]
   for prompt in prompts:
-    slot = random.randint(0, _BATCH_SIZE.value - 1)
+    slot = random.randint(0, FLAGS.batch_size - 1)
     tokens, true_length = token_utils.tokenize_and_pad(
         prompt, vocab, is_bos=True, jax_padding=False
     )
@@ -161,7 +168,7 @@ def main(argv):
     print("---- All output text.")
     print(vocab.tokenizer.decode(sampled_tokens_list))
 
-  if _PROFILING_OUTPUT.value:
+  if profiling_output:
     jax.profiler.stop_trace()
 
 

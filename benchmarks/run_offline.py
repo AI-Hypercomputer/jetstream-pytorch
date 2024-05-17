@@ -15,66 +15,68 @@
 import logging
 import os
 import time
-# pylint: disable-next=all
-from absl import app
-from absl import flags
 
 import jax
 import jax.numpy as jnp
-
-from jetstream_pt import engine as je
+# pylint: disable-next=all
+from absl import app, flags
 # pylint: disable-next=all
 from benchmarks import analyze_sharegpt
-
+from jetstream_pt import engine as je
+from jetstream_pt.config import (
+    FLAGS,
+    create_engine_from_config_flags,
+    define_common_flags,
+    define_profiling_flags,
+)
 
 logging.getLogger().setLevel(logging.ERROR)
 
+define_common_flags()
+define_profiling_flags()
+# FLAGS = flags.FLAGS
 
-FLAGS = flags.FLAGS
+# _TOKENIZER_PATH = flags.DEFINE_string(
+#     "tokenizer_path",
+#     "tokenizer.model",
+#     "The tokenizer model path",
+#     required=False,
+# )
+# _CKPT_PATH = flags.DEFINE_string(
+#     "checkpoint_path", None, "Directory for .pth checkpoints", required=False
+# )
+# _BF16_ENABLE = flags.DEFINE_bool(
+#     "bf16_enable", False, "Whether to enable bf16", required=False
+# )
+# _CONTEXT_LENGTH = flags.DEFINE_integer(
+#     "context_length", 1024, "The context length", required=False
+# )
+# _BATCH_SIZE = flags.DEFINE_integer(
+#     "batch_size", 32, "The batch size", required=False
+# )
+# _PROFILING_OUTPUT = flags.DEFINE_string(
+#     "profiling_output",
+#     "",
+#     "The profiling output",
+#     required=False,
+# )
 
-_TOKENIZER_PATH = flags.DEFINE_string(
-    "tokenizer_path",
-    "tokenizer.model",
-    "The tokenizer model path",
-    required=False,
-)
-_CKPT_PATH = flags.DEFINE_string(
-    "checkpoint_path", None, "Directory for .pth checkpoints", required=False
-)
-_BF16_ENABLE = flags.DEFINE_bool(
-    "bf16_enable", False, "Whether to enable bf16", required=False
-)
-_CONTEXT_LENGTH = flags.DEFINE_integer(
-    "context_length", 1024, "The context length", required=False
-)
-_BATCH_SIZE = flags.DEFINE_integer(
-    "batch_size", 32, "The batch size", required=False
-)
-_PROFILING_OUTPUT = flags.DEFINE_string(
-    "profiling_output",
-    "",
-    "The profiling output",
-    required=False,
-)
+# _SIZE = flags.DEFINE_string("size", "tiny", "size of model")
 
-_SIZE = flags.DEFINE_string("size", "tiny", "size of model")
-
-_QUANTIZE_WEIGHTS = flags.DEFINE_bool(
-    "quantize_weights", False, "weight quantization"
-)
-_QUANTIZE_KV_CACHE = flags.DEFINE_bool(
-    "quantize_kv_cache", False, "kv_cache_quantize"
-)
-_MAX_CACHE_LENGTH = flags.DEFINE_integer(
-    "max_cache_length", 1024, "kv_cache_quantize"
-)
-_MODEL_NAME = flags.DEFINE_string("model_name", "", "model_name")
-_SHARDING_CONFIG = flags.DEFINE_string(
-    "sharding_config", "", "path to sharding config"
-)
-_SHAREGPT_PATH = flags.DEFINE_string(
-    "sharegpt_path", "", "path to sharegpt json file"
-)
+# _QUANTIZE_WEIGHTS = flags.DEFINE_bool(
+#     "quantize_weights", False, "weight quantization"
+# )
+# _QUANTIZE_KV_CACHE = flags.DEFINE_bool(
+#     "quantize_kv_cache", False, "kv_cache_quantize"
+# )
+# _MAX_CACHE_LENGTH = flags.DEFINE_integer(
+#     "max_cache_length", 1024, "kv_cache_quantize"
+# )
+# _MODEL_NAME = flags.DEFINE_string("model_name", "", "model_name")
+# _SHARDING_CONFIG = flags.DEFINE_string(
+#     "sharding_config", "", "path to sharding config"
+# )
+flags.DEFINE_string("sharegpt_path", "", "path to sharegpt json file")
 
 
 def create_engine():
@@ -85,18 +87,19 @@ def create_engine():
   devices = jax.devices()
   start = time.perf_counter()
   engine = je.create_pytorch_engine(
+      model_name=FLAGS.model_name,
       devices=devices,
-      tokenizer_path=_TOKENIZER_PATH.value,
-      ckpt_path=_CKPT_PATH.value,
-      bf16_enable=True,
-      param_size=_SIZE.value,
-      context_length=_CONTEXT_LENGTH.value,
-      batch_size=_BATCH_SIZE.value,
-      quantize_weights=_QUANTIZE_WEIGHTS.value,
-      quantize_kv=_QUANTIZE_KV_CACHE.value,
-      max_cache_length=_MAX_CACHE_LENGTH.value,
-      model_name=_MODEL_NAME.value,
-      sharding_config=_SHARDING_CONFIG.value,
+      tokenizer_path=FLAGS.tokenizer_path,
+      ckpt_path=FLAGS.checkpoint_path,
+      bf16_enable=FLAGS.bf16_enable,
+      param_size=FLAGS.size,
+      context_length=FLAGS.context_length,
+      batch_size=FLAGS.batch_size,
+      quantize_weights=FLAGS.quantize_weights,
+      quantize_kv=FLAGS.quantize_kv_cache,
+      max_cache_length=FLAGS.max_cache_length,
+      sharding_config=FLAGS.sharding_config,
+      shard_on_batch=FLAGS.shard_on_batch,
   )
 
   print("Initialize engine", time.perf_counter() - start)
@@ -148,7 +151,7 @@ MAXTEXT_PREFILL = {
 
 def main(argv):
   """Main function to run engine offline."""
-  engine = create_engine()
+  engine = create_engine_from_config_flags()
 
   start = time.perf_counter()
   params = engine.load_params()
@@ -156,8 +159,9 @@ def main(argv):
 
   prefill_times = {}
 
-  if _PROFILING_OUTPUT.value:
-    jax.profiler.start_trace(_PROFILING_OUTPUT.value)
+  profiling_output = FLAGS.profiling_output
+  if profiling_output:
+    jax.profiler.start_trace(profiling_output)
   decode_state = engine.init_decode_state()
   for batch, _ in MAXTEXT_PREFILL.items():
     runtime, decode_state = run_prefill_time(
@@ -186,18 +190,19 @@ def main(argv):
     dec_times.append(end - start)
     print(i, "decode time", (end - start))
 
-  if _PROFILING_OUTPUT.value:
+  if profiling_output:
     jax.profiler.stop_trace()
 
   print("prefill ", prefill_times)
   print("decode", sum(dec_times) / 10)
 
   prefill_times_ms = {k: v * 1000 for k, v in prefill_times.items()}
-  decode_time_ms = sum(dec_times) * 1000 / 10 / _BATCH_SIZE.value
+  decode_time_ms = sum(dec_times) * 1000 / 10 / FLAGS.batch_size
 
-  if _SHAREGPT_PATH.value:
+  sharegpt_path = FLAGS.sharegpt_path
+  if sharegpt_path:
     analyze_sharegpt.do_simulation(
-        _SHAREGPT_PATH.value, prefill_times_ms, decode_time_ms
+        sharegpt_path, prefill_times_ms, decode_time_ms
     )
 
 
