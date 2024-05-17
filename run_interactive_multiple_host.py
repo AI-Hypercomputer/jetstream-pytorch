@@ -31,50 +31,6 @@ from jetstream_pt.config import (
 
 define_common_flags()
 define_profiling_flags()
-# _TOKENIZER_PATH = flags.DEFINE_string(
-#     "tokenizer_path",
-#     "tokenizer.model",
-#     "The tokenizer model path",
-#     required=False,
-# )
-# _CKPT_PATH = flags.DEFINE_string(
-#     "checkpoint_path", None, "Directory for .pth checkpoints", required=False
-# )
-# _BF16_ENABLE = flags.DEFINE_bool(
-#     "bf16_enable", False, "Whether to enable bf16", required=False
-# )
-# _CONTEXT_LENGTH = flags.DEFINE_integer(
-#     "context_length", 1024, "The context length", required=False
-# )
-# _BATCH_SIZE = flags.DEFINE_integer(
-#     "batch_size", 32, "The batch size", required=False
-# )
-# _PROFILING_OUTPUT = flags.DEFINE_string(
-#     "profiling_output",
-#     "",
-#     "The profiling output",
-#     required=False,
-# )
-
-# _SIZE = flags.DEFINE_string("size", "tiny", "size of model")
-
-# _QUANTIZE_WEIGHTS = flags.DEFINE_bool(
-#     "quantize_weights", False, "weight quantization"
-# )
-# _QUANTIZE_KV_CACHE = flags.DEFINE_bool(
-#     "quantize_kv_cache", False, "kv_cache_quantize"
-# )
-# _MAX_CACHE_LENGTH = flags.DEFINE_integer(
-#     "max_cache_length", 1024, "kv_cache_quantize"
-# )
-
-# _MODEL_NAME = flags.DEFINE_string(
-#     "model_name", None, "model type", required=False
-# )
-
-# _SHARDING_CONFIG = flags.DEFINE_string(
-#     "sharding_config", "", "config file for sharding"
-# )
 
 
 def create_engine():
@@ -116,8 +72,6 @@ def main(argv):
   stop_tokens = [vocab.eos_id, vocab.pad_id]
   max_output_length = 1024
 
-  #   if _PROFILING_OUTPUT.value:
-  #     jax.profiler.start_trace(_PROFILING_OUTPUT.value)
   profiling_output = FLAGS.profiling_output
   if profiling_output:
     jax.profiler.start_trace(profiling_output)

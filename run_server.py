@@ -24,9 +24,11 @@ from jetstream_pt.config import (
     FLAGS,
     create_engine_from_config_flags,
     define_common_flags,
+    define_profiling_flags,
 )
 
 define_common_flags()
+define_profiling_flags()
 
 flags.DEFINE_integer("port", 9000, "port to listen on")
 flags.DEFINE_integer("threads", 64, "number of worker threads in thread pool")
@@ -36,89 +38,11 @@ flags.DEFINE_string(
     "available servers",
 )
 flags.DEFINE_string(
-    "profiling_output",
-    "",
-    "The profiling output",
-    required=False,
-)
-flags.DEFINE_string(
     "platform",
     "tpu=4",
     "The platform that the engine runs on",
     required=False,
 )
-# _PORT = flags.DEFINE_integer("port", 9000, "port to listen on")
-# _THREADS = flags.DEFINE_integer(
-#     "threads", 64, "number of worker threads in thread pool"
-# )
-# _CONFIG = flags.DEFINE_string(
-#     "config",
-#     "InterleavedCPUTestServer",
-#     "available servers",
-# )
-# _PROFILING_OUTPUT = flags.DEFINE_string(
-#     "profiling_output",
-#     "",
-#     "The profiling output",
-#     required=False,
-# )
-# _PLATFORM = flags.DEFINE_string(
-#     "platform",
-#     "tpu=4",
-#     "The platform that the engine runs on",
-#     required=False,
-# )
-
-# Common flags
-# _TOKENIZER_PATH = flags.DEFINE_string(
-#     "tokenizer_path",
-#     "tokenizer.model",
-#     "The tokenizer model path",
-#     required=False,
-# )
-# _CKPT_PATH = flags.DEFINE_string(
-#     "checkpoint_path", None, "Directory for .pth checkpoints", required=False
-# )
-# _BF16_ENABLE = flags.DEFINE_bool(
-#     "bf16_enable", True, "Whether to enable bf16", required=False
-# )
-# _CONTEXT_LENGTH = flags.DEFINE_integer(
-#     "context_length", 1024, "The context length", required=False
-# )
-# _BATCH_SIZE = flags.DEFINE_integer(
-#     "batch_size", 32, "The batch size", required=False
-# )
-
-# _PARAM_SIZE = flags.DEFINE_string(
-#     "param_size",
-#     "7b",
-#     "The model size the server runs on.",
-#     required=False,
-# )
-# _MODEL_NAME = flags.DEFINE_string(
-#     "model",
-#     "llama-2",
-#     "name of the model. Supported options are llama-2 and llama-3",
-# )
-
-# _QUANTIZE_WEIGHTS = flags.DEFINE_bool(
-#     "quantize_weights", False, "weight quantization"
-# )
-# _QUANTIZE_KV_CACHE = flags.DEFINE_bool(
-#     "quantize_kv_cache", False, "kv_cache_quantize"
-# )
-# _MAX_CACHE_LENGTH = flags.DEFINE_integer(
-#     "max_cache_length", 1024, "kv_cache_quantize"
-# )
-# _SHARDING_CONFIG = flags.DEFINE_string(
-#     "sharding_config", "", "config file for sharding"
-# )
-# _SHARD_ON_BATCH = flags.DEFINE_bool(
-#     "shard_on_batch",
-#     False,
-#     "whether to shard on batch dimension"
-#     "If set true, sharding_config will be ignored.",
-# )
 
 
 # pylint: disable-next=all

@@ -34,48 +34,6 @@ logging.getLogger().setLevel(logging.ERROR)
 
 define_common_flags()
 define_profiling_flags()
-# FLAGS = flags.FLAGS
-
-# _TOKENIZER_PATH = flags.DEFINE_string(
-#     "tokenizer_path",
-#     "tokenizer.model",
-#     "The tokenizer model path",
-#     required=False,
-# )
-# _CKPT_PATH = flags.DEFINE_string(
-#     "checkpoint_path", None, "Directory for .pth checkpoints", required=False
-# )
-# _BF16_ENABLE = flags.DEFINE_bool(
-#     "bf16_enable", False, "Whether to enable bf16", required=False
-# )
-# _CONTEXT_LENGTH = flags.DEFINE_integer(
-#     "context_length", 1024, "The context length", required=False
-# )
-# _BATCH_SIZE = flags.DEFINE_integer(
-#     "batch_size", 32, "The batch size", required=False
-# )
-# _PROFILING_OUTPUT = flags.DEFINE_string(
-#     "profiling_output",
-#     "",
-#     "The profiling output",
-#     required=False,
-# )
-
-# _SIZE = flags.DEFINE_string("size", "tiny", "size of model")
-
-# _QUANTIZE_WEIGHTS = flags.DEFINE_bool(
-#     "quantize_weights", False, "weight quantization"
-# )
-# _QUANTIZE_KV_CACHE = flags.DEFINE_bool(
-#     "quantize_kv_cache", False, "kv_cache_quantize"
-# )
-# _MAX_CACHE_LENGTH = flags.DEFINE_integer(
-#     "max_cache_length", 1024, "kv_cache_quantize"
-# )
-# _MODEL_NAME = flags.DEFINE_string("model_name", "", "model_name")
-# _SHARDING_CONFIG = flags.DEFINE_string(
-#     "sharding_config", "", "path to sharding config"
-# )
 flags.DEFINE_string("sharegpt_path", "", "path to sharegpt json file")
 
 
