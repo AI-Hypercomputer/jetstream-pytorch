@@ -665,7 +665,7 @@ def dense_attention(xq, keys, values, k_scaler=None, v_scaler=None, mask=None):
     #    "ikjm,ikml->ikjl", scores, values
     # )  # (bs, n_local_heads, seqlen, head_dim)
     output = torch.einsum("ikjm,ikml->ikjl", scores, values)
-
+  return output
 
 class AttentionKernel:
 
