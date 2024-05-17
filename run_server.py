@@ -52,7 +52,6 @@ def main(argv: Sequence[str]):
   # No devices for local cpu test. A None for prefill and a None for generate.
   devices = server_lib.get_devices()
   print(f"devices: {devices}")
-  sharding_config_path = _SHARDING_CONFIG.value
   engine = jetstream_pt.create_pytorch_engine(
       model_name=FLAGS.model_name,
       devices=devices,
