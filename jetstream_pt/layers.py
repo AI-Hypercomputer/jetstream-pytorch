@@ -626,7 +626,7 @@ def ragged_mha(
     replicated_inputs = (pre_batch, pre_block)
   else:
     replicated_in_axes = 6
-    replicated_inputs = (k_scaler, v_scaler, pre_batch, pre_block)
+    replicated_inputs = (jnp.squeeze(k_scaler, -1), jnp.squeeze(v_scaler, -1), pre_batch, pre_block)
 
   with jax.named_scope("ragged_mha_vmap"):
     out, (m, l) = jax.vmap(
