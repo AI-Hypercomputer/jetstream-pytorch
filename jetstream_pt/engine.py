@@ -298,7 +298,7 @@ class PyTorchEngine(engine_api.Engine):
         )
         new_scaler = jax.lax.dynamic_update_slice(
             scaler,
-            scales.jax(),
+            scales,
             [slot, 0, pos, 0],
         )
         new_scaler = jax.lax.with_sharding_constraint(
@@ -306,7 +306,7 @@ class PyTorchEngine(engine_api.Engine):
         )
         res = jax.lax.dynamic_update_slice(
             cache,
-            vals.jax(),
+            vals,
             [slot, 0, pos, 0],
         )
         res = jax.lax.with_sharding_constraint(res, self.cache_sharding)

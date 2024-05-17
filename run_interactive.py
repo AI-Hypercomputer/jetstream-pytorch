@@ -140,7 +140,7 @@ def main(argv):
   ]
   for prompt in prompts:
     slot = random.randint(0, _BATCH_SIZE.value - 1)
-    tokens, true_length = tokenizer.encode(prompt, is_bos=True)
+    tokens, true_length = tokenizer.encode(prompt)
 
     print(f"---- Input prompts are: {prompt}")
     print(f"---- Encoded tokens are: {tokens}")
@@ -157,12 +157,15 @@ def main(argv):
     while True:
       decode_state, result_tokens = engine.generate(params, decode_state)
       result_tokens = result_tokens.convert_to_numpy()
-      output, complete = tokenizer.decode(
-          slot, max_output_length, result_tokens, complete
-      )
-      if complete[0]:
+      res = result_tokens.get_result_at_slot(slot)
+      stop_tokens = set(tokenizer.tokenizer.stop_tokens)
+      stop_tokens.add(tokenizer.pad_id)
+      if (
+          res.tokens[0][0] in stop_tokens
+          or len(sampled_tokens_list) > max_output_length
+      ):
         break
-      token_id = output[0][0]
+      token_id = res.tokens[0][0]
       sampled_tokens_list.append(token_id)
       # output_str = tokenizer.decode_str([token_id])
       # print(Fore.GREEN + output_str, end="", flush=True)
@@ -173,7 +176,7 @@ def main(argv):
     print("---- All output tokens.")
     print(sampled_tokens_list)
     print("---- All output text.")
-    print(tokenizer.decode_str(sampled_tokens_list))
+    print(tokenizer.decode(sampled_tokens_list))
 
   if _PROFILING_OUTPUT.value:
     jax.profiler.stop_trace()
