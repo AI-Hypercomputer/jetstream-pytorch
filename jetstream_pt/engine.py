@@ -127,8 +127,8 @@ class PyTorchEngine(engine_api.Engine):
         jnp.zeros((self.env.batch_size, 1), dtype=jnp.int32),
         caches,
         scalers,
-        self.env.max_input_sequence_length / 4,
-        jnp.zeros((self.env.batch_size, 1), dtype=jnp.int32),
+        self.env.max_input_sequence_length // 4,
+        jnp.zeros((self.env.batch_size, 1), dtype=jnp.int32), # lens
         jnp.zeros((self.env.batch_size,), dtype=jnp.int32),  # start pos
         jnp.zeros((self.env.batch_size,), dtype=jnp.int32),  # input pos
         jnp.full(
