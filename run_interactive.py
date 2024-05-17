@@ -157,16 +157,17 @@ def main(argv):
     while True:
       decode_state, result_tokens = engine.generate(params, decode_state)
       result_tokens = result_tokens.convert_to_numpy()
-      res = result_tokens.get_result_at_slot(slot)
-      stop_tokens = set(tokenizer.stop_tokens)
-      stop_tokens.add(tokenizer.pad_id)
-      token_id = res.tokens[0][0].item()
-      sampled_tokens_list.append(token_id)
-      if (
-          token_id in stop_tokens
-          or len(sampled_tokens_list) > max_output_length
-      ):
+      output, complete = token_utils.process_result_tokens(
+          tokenizer=tokenizer,
+          slot=slot,
+          slot_max_length=max_output_length,
+          result_tokens=result_tokens,
+          complete=complete,
+      )
+      if complete[0]:
         break
+      token_ids = output[0].token_ids
+      sampled_tokens_list.extend(token_ids)
 
     print("---- All output tokens.")
     print(sampled_tokens_list)
