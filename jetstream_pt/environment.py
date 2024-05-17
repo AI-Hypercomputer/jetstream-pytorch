@@ -152,7 +152,7 @@ class JetEngineEnvironment:
     # pylint: disable-next=all
     tensor._elem = jax.lax.with_sharding_constraint(tensor._elem, sharding_spec)
 
-  def partition_by_axis(self, axis):
+  def partition_by_axis(self, axis=None):
     """return sharding partition spc by axis, options are x, y, -1 or Noe"""
     if axis == -1 or axis is None:
       return jax.sharding.PartitionSpec()
