@@ -643,57 +643,28 @@ def ragged_mha(
   return out, (m, l)
 
 
-def dense_attention(xq, keys, values, mask):
-  head_dim = xq.shape[-1]
+def dense_attention(xq, keys, values, k_scaler=None, v_scaler=None, mask=None):
+  bsz, _, _, head_dim = xq.shape
   with jax.named_scope("attn_mat1"):
       ## Attention start
       # scores = torch.einsum(jnp.einsum, "ijkl,ikml->ikjm", xq, keys) / math.sqrt(self.head_dim)
       scores = torch.einsum("ikjl,ikml->ikjm", xq, keys) / math.sqrt(head_dim)
+      if k_scaler:
+        scores = scores * (k_scaler.reshape(bsz, 1, 1, keys.shape[2]))
       if mask is not None:
         # if mask.shape != (1,1,16,16):
         #   breakpoint()
         scores = scores + mask  # (bs, n_local_heads, seqlen, max_seqlen)
   with jax.named_scope("attn_soft"):
     scores = F.softmax(scores.float(), dim=-1).type_as(xq)
+    if v_scaler:
+      scores = scores * v_scaler.reshape((bsz, 1, 1, keys.shape[2]))
 
   with jax.named_scope("attn_mat2"):
     # output = torch.einsum(
     #    "ikjm,ikml->ikjl", scores, values
     # )  # (bs, n_local_heads, seqlen, head_dim)
     output = torch.einsum("ikjm,ikml->ikjl", scores, values)
-
-
-def dense_attention_quantized(
-    xq: jax.Array,
-    keys: jax.Array,
-    values: jax.Array,
-    k_scaler = None,
-    v_scaler = None,
-    mask = None,
-):
-      bsz, _, _, head_dim = xq.shape
- 
-      with jax.named_scope("attn_mat1"):
-        ## Attention start
-        # scores = torch.einsum(jnp.einsum, "ijkl,ikml->ikjm", xq, keys) / math.sqrt(self.head_dim)
-        scores = (
-            torch.einsum("ikjl,ikml->ikjm", xq, keys)
-            / math.sqrt(head_dim)
-            * (k_scaler.reshape(bsz, 1, 1, keys.shape[2]))
-        )
-        if mask is not None:
-          scores = scores + mask  # (bs, n_local_heads, seqlen, max_seqlen)
-      with jax.named_scope("attn_soft"):
-        scores = F.softmax(scores.float(), dim=-1).type_as(xq)
-        scores = scores * v_scaler.reshape((bsz, 1, 1, keys.shape[2]))
-
-      with jax.named_scope("attn_mat2"):
-        # output = torch.einsum(
-        #    "ikjm,ikml->ikjl", scores, values
-        # )  # (bs, n_local_heads, seqlen, head_dim)
-        output = torch.einsum("ikjm,ikml->ikjl", scores, values)
-
-      return output
 
 
 class AttentionKernel:
@@ -704,7 +675,7 @@ class AttentionKernel:
     qkv_pspec = self.env.partition_by_axis(self.shard_axis) # Number of heads
     others_pspec = self.env.partition_by_axis()
     self.binded_ragged_mha = functools.partial(ragged_mha, bk=self.env.block_size, shard_axis=self.shard_axis)
-    self.binded_ragged_mha = shard_map(ragged_mha, env.mesh, in_specs=(*([qkv_pspec] * 3), *([others_pspec] * 4)), out_specs=(others_pspec, (others_pspec, others_pspec)), check_rep=False)
+    self.binded_ragged_mha = shard_map(ragged_mha, env.mesh, in_specs=(*([qkv_pspec] * 3), *([others_pspec] * 4)), out_specs=(qkv_pspec, (others_pspec, others_pspec)), check_rep=False)
     self.binded_ragged_mha = jax.jit(self.binded_ragged_mha)
 
   def __call__(self, xq, xk, xv, mask, cache, start, end, pre_batch, pre_block):
@@ -729,9 +700,9 @@ class AttentionKernel:
   
     with jax.named_scope("attn_qkv"):
       if self.env.ragged_mha and seqlen == 1:
-        output, _ = torch_xla2.extra.call_jax(self.binded_ragged_mha, xq, keys, values, start, end, pre_batch, pre_block)
+        output, _ = torch_xla2.interop.call_jax(self.binded_ragged_mha, xq, keys, values, start, end, pre_batch, pre_block)
       else:
-        output = dense_attention(xq, keys, values, mask)
+        output = dense_attention(xq, keys, values, None, None, mask)
 
       if seqlen == 1:
         output = output[:, :, 0:1, :]
@@ -749,7 +720,7 @@ class Int8KVAttentionKernel:
     qkv_pspec = self.env.partition_by_axis(self.shard_axis) # Number of heads
     others_pspec = self.env.partition_by_axis()
     self.binded_ragged_mha_quantized = functools.partial(ragged_mha, bk=self.env.block_size, shard_axis=self.shard_axis)
-    self.binded_ragged_mha_quantized = shard_map(self.binded_ragged_mha_quantized, env.mesh, in_specs=(*([qkv_pspec] * 3), *([others_pspec]*6)), out_specs=(others_pspec, (others_pspec, others_pspec)), check_rep=False)
+    self.binded_ragged_mha_quantized = shard_map(self.binded_ragged_mha_quantized, env.mesh, in_specs=(*([qkv_pspec] * 3), *([others_pspec]*6)), out_specs=(qkv_pspec, (others_pspec, others_pspec)), check_rep=False)
     self.binded_ragged_mha_quantized = jax.jit(self.binded_ragged_mha_quantized)
 
   def __call__(self, xq, xk, xv, mask, cache, start, end, pre_batch, pre_block):
@@ -775,9 +746,9 @@ class Int8KVAttentionKernel:
 
     with jax.named_scope("attn_qkv"):
       if self.env.ragged_mha and seqlen == 1:
-        output, _ = torch_xla2.extra.call_jax(self.binded_ragged_mha_quantized, xq, keys, values, start, end, pre_batch, pre_block, k_scaler, v_scaler)
+        output, _ = torch_xla2.interop.call_jax(self.binded_ragged_mha_quantized, xq, keys, values, start, end, pre_batch, pre_block, k_scaler, v_scaler)
       else:
-        output= dense_attention_quantized(xq, keys, values, k_scaler, v_scaler, mask)
+        output= dense_attention(xq, keys, values, k_scaler, v_scaler, mask)
 
       if seqlen == 1:
         output = output[:, :, 0:1, :]

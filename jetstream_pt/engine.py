@@ -506,6 +506,7 @@ class PyTorchEngine(engine_api.Engine):
     # fill mask first
     mask = decode_state.mask.at[:, decode_state.current_position].set(0)
     pre_batch, pre_block = self.precompute_ragged_block_indices(decode_state)
+    pre_batch, pre_block = pre_batch.reshape((-1)), pre_block.reshape((-1))
 
     logits, new_caches, new_scales = self._call_model_generate(
         params,
