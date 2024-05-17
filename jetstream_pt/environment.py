@@ -108,14 +108,14 @@ class JetEngineEnvironment:
 
     num_of_partitions = jax.device_count()
     # make mesh etc.
-    self._mesh = jsharding.Mesh(
+    self.mesh = jsharding.Mesh(
         mesh_utils.create_device_mesh((num_of_partitions, 1)),
         axis_names=("x", "y"),
     )
 
-    self.y_sharding = jsharding.NamedSharding(self._mesh, P(None, "x"))
-    self.x_sharding = jsharding.NamedSharding(self._mesh, P("x"))
-    self.replicated = jsharding.NamedSharding(self._mesh, P())
+    self.y_sharding = jsharding.NamedSharding(self.mesh, P(None, "x"))
+    self.x_sharding = jsharding.NamedSharding(self.mesh, P("x"))
+    self.replicated = jsharding.NamedSharding(self.mesh, P())
 
     if data.shard_on_batch:
       cache_sharding_axis = 0
@@ -163,7 +163,7 @@ class JetEngineEnvironment:
 
   def sharding_by_axis(self, axis):
     """return sharding partition spc by axis, options are x, y, -1 or Noe"""
-    return jsharding.NamedSharding(self._mesh, self.partition_by_axis(axis))
+    return jsharding.NamedSharding(self.mesh, self.partition_by_axis(axis))
 
   def make_caches_prefill(self):
     """Create kv caches for inference prefill"""

@@ -704,7 +704,7 @@ class AttentionKernel:
     qkv_pspec = self.env.partition_by_axis(self.shard_axis) # Number of heads
     others_pspec = self.env.partition_by_axis()
     self.binded_ragged_mha = functools.partial(ragged_mha, bk=self.env.block_size, shard_axis=self.shard_axis)
-    self.binded_ragged_mha = shard_map(ragged_mha, in_specs=(*([qkv_pspec] * 3), *([others_pspec] * 4)), out_specs=(others_pspec, (others_pspec, others_pspec)), check_rep=False)
+    self.binded_ragged_mha = shard_map(ragged_mha, env.mesh, in_specs=(*([qkv_pspec] * 3), *([others_pspec] * 4)), out_specs=(others_pspec, (others_pspec, others_pspec)), check_rep=False)
     self.binded_ragged_mha = jax.jit(self.binded_ragged_mha)
 
   def __call__(self, xq, xk, xv, mask, cache, start, end, pre_batch, pre_block):
@@ -749,7 +749,7 @@ class Int8KVAttentionKernel:
     qkv_pspec = self.env.partition_by_axis(self.shard_axis) # Number of heads
     others_pspec = self.env.partition_by_axis()
     self.binded_ragged_mha_quantized = functools.partial(ragged_mha, bk=self.env.block_size, shard_axis=self.shard_axis)
-    self.binded_ragged_mha_quantized = shard_map(self.binded_ragged_mha_quantized, in_specs=(*([qkv_pspec] * 3), *([others_pspec]*6)), out_specs=(others_pspec, (others_pspec, others_pspec)), check_rep=False)
+    self.binded_ragged_mha_quantized = shard_map(self.binded_ragged_mha_quantized, env.mesh, in_specs=(*([qkv_pspec] * 3), *([others_pspec]*6)), out_specs=(others_pspec, (others_pspec, others_pspec)), check_rep=False)
     self.binded_ragged_mha_quantized = jax.jit(self.binded_ragged_mha_quantized)
 
   def __call__(self, xq, xk, xv, mask, cache, start, end, pre_batch, pre_block):
