@@ -29,6 +29,7 @@ Follow the steps in
 ## Get the jetstream-pytorch code
 ```bash
 git clone https://github.com/google/jetstream-pytorch.git
+git checkout v0.2.2
 ```
 
 (optional) Create a virtual env using `venv` or `conda` and activate it.
@@ -39,7 +40,6 @@ git clone https://github.com/google/jetstream-pytorch.git
 cd jetstream-pytorch
 source install_everything.sh
 ```
-NOTE: the above script will export PYTHONPATH, so sourcing will make it to take effect in the current shell
 
 # Download and convert weights
 
