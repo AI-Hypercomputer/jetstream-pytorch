@@ -69,7 +69,7 @@ def main(argv):
     complete = np.zeros((1,), dtype=np.bool_)
     while True:
       decode_state, result_tokens = engine.generate(params, decode_state)
-      output, complete = token_utils.process_result_token(
+      output, complete = token_utils.process_result_tokens(
           tokenizer, slot, max_output_length, result_tokens, complete
       )
       if complete[0]:
