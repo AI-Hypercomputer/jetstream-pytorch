@@ -127,7 +127,7 @@ class PyTorchEngine(engine_api.Engine):
         jnp.zeros((self.env.batch_size, 1), dtype=jnp.int32),
         caches,
         scalers,
-        self.env.max_input_sequence_length // 4,
+        self.env.block_size // 2,
         jnp.zeros((self.env.batch_size, 1), dtype=jnp.int32), # lens
         jnp.zeros((self.env.batch_size,), dtype=jnp.int32),  # start pos
         jnp.zeros((self.env.batch_size,), dtype=jnp.int32),  # input pos
@@ -471,7 +471,7 @@ class PyTorchEngine(engine_api.Engine):
     end = end.reshape((batch_size, 1))
 
     am_last_batch = b == batch_size - 1
-    last_good_block = jnp.where(start < end, jnp.div(end - 1, bk), jnp.div(self.env.cache_len -1, bk))
+    last_good_block = jnp.where(start < end, jax.lax.div(end - 1, bk), jax.lax.div(self.env.cache_len -1, bk))
 
     next_b = jnp.where(am_last_batch, b, b + 1)
     next_i = jnp.where(am_last_batch, last_good_block, 0)
@@ -480,13 +480,13 @@ class PyTorchEngine(engine_api.Engine):
     def true_comp(b, i, bk, start, end, next_b, next_i):
       b_next = jnp.where(i * bk >= end, next_b, b)
       i_next = jnp.where(i * bk >= end, next_i, i)
-      i_next = jnp.where((i + 1) * bk <= start, jnp.div(start, bk), i_next)
+      i_next = jnp.where((i + 1) * bk <= start, jax.lax.div(start, bk), i_next)
       return b_next, i_next
 
     # start > end
     def false_comp(b, i, bk, start, end):
       b_next = b
-      i_next = jnp.where(jnp.logical_and(i * bk >= end, (i + 1) * bk <= start), jnp.div(start, bk), i)
+      i_next = jnp.where(jnp.logical_and(i * bk >= end, (i + 1) * bk <= start), jax.lax.div(start, bk), i)
       return b_next, i_next
 
     true_comp_b, true_comp_i = true_comp(b, i, bk, start, end, next_b, next_i)
