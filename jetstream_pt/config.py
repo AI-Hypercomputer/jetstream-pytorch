@@ -21,47 +21,45 @@ from jetstream_pt.engine import create_pytorch_engine
 
 FLAGS = flags.FLAGS
 
-
-def define_common_flags():
-  """Add common config flags to global FLAG."""
-  flags.DEFINE_string(
-      "tokenizer_path",
-      None,
-      "The tokenizer model path",
-      required=True,
-  )
-  flags.DEFINE_string("model_name", None, "model type", required=False)
-  flags.DEFINE_string(
-      "checkpoint_path", None, "Directory for .pth checkpoints", required=False
-  )
-  flags.DEFINE_bool(
-      "bf16_enable", True, "Whether to enable bf16", required=False
-  )
-  flags.DEFINE_integer(
-      "context_length", 1024, "The context length", required=False
-  )
-  flags.DEFINE_integer("batch_size", 32, "The batch size", required=False)
-  flags.DEFINE_string("size", "tiny", "size of model")
-  flags.DEFINE_bool("quantize_weights", False, "weight quantization")
-  flags.DEFINE_bool("quantize_kv_cache", False, "kv_cache_quantize")
-  flags.DEFINE_integer("max_cache_length", 1024, "kv_cache_quantize")
-  flags.DEFINE_string("sharding_config", "", "config file for sharding")
-  flags.DEFINE_bool(
-      "shard_on_batch",
-      False,
-      "whether to shard on batch dimension"
-      "If set true, sharding_config will be ignored.",
-  )
+flags.DEFINE_string(
+    "tokenizer_path",
+    None,
+    "The tokenizer model path",
+    required=True,
+)
+flags.DEFINE_string("model_name", None, "model type", required=False)
+flags.DEFINE_string(
+    "checkpoint_path", None, "Directory for .pth checkpoints", required=False
+)
+flags.DEFINE_bool(
+    "bf16_enable", True, "Whether to enable bf16", required=False
+)
+flags.DEFINE_integer(
+    "context_length", 1024, "The context length", required=False
+)
+flags.DEFINE_integer("batch_size", 32, "The batch size", required=False)
+flags.DEFINE_string("size", "tiny", "size of model")
+flags.DEFINE_bool("quantize_weights", False, "weight quantization")
+flags.DEFINE_bool("quantize_kv_cache", False, "kv_cache_quantize")
+flags.DEFINE_integer("max_cache_length", 1024, "kv_cache_quantize")
+flags.DEFINE_string("sharding_config", "", "config file for sharding")
+flags.DEFINE_bool(
+    "shard_on_batch",
+    False,
+    "whether to shard on batch dimension"
+    "If set true, sharding_config will be ignored.",
+)
+flags.DEFINE_string(
+    "profiling_output",
+    "",
+    "The profiling output",
+    required=False,
+)
 
 
 def define_profiling_flags():
   """Add profiling related config flags to global FLAG."""
-  flags.DEFINE_string(
-      "profiling_output",
-      "",
-      "The profiling output",
-      required=False,
-  )
+  
 
 
 def create_engine_from_config_flags():

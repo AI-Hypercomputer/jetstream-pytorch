@@ -16,6 +16,7 @@
 import os
 from typing import Sequence
 
+import jax
 import jetstream_pt
 from absl import app, flags
 from jetstream.core import server_lib
@@ -23,11 +24,9 @@ from jetstream.core.config_lib import ServerConfig
 from jetstream_pt.config import (
     FLAGS,
     create_engine_from_config_flags,
-    define_common_flags,
     define_profiling_flags,
 )
 
-define_common_flags()
 define_profiling_flags()
 
 flags.DEFINE_integer("port", 9000, "port to listen on")
@@ -37,13 +36,6 @@ flags.DEFINE_string(
     "InterleavedCPUTestServer",
     "available servers",
 )
-flags.DEFINE_string(
-    "platform",
-    "tpu=4",
-    "The platform that the engine runs on",
-    required=False,
-)
-
 
 # pylint: disable-next=all
 def main(argv: Sequence[str]):
@@ -52,23 +44,9 @@ def main(argv: Sequence[str]):
   # No devices for local cpu test. A None for prefill and a None for generate.
   devices = server_lib.get_devices()
   print(f"devices: {devices}")
-  engine = jetstream_pt.create_pytorch_engine(
-      model_name=FLAGS.model_name,
-      devices=devices,
-      tokenizer_path=FLAGS.tokenizer_path,
-      ckpt_path=FLAGS.checkpoint_path,
-      bf16_enable=FLAGS.bf16_enable,
-      param_size=FLAGS.size,
-      context_length=FLAGS.context_length,
-      batch_size=FLAGS.batch_size,
-      quantize_weights=FLAGS.quantize_weights,
-      quantize_kv=FLAGS.quantize_kv_cache,
-      max_cache_length=FLAGS.max_cache_length,
-      sharding_config=FLAGS.sharding_config,
-      shard_on_batch=FLAGS.shard_on_batch,
-  )
+  engine = create_engine_from_config_flags()
   server_config = ServerConfig(
-      interleaved_slices=(FLAGS.platform,),
+      interleaved_slices=(f"tpu={len(jax.devices())}",),
       interleaved_engine_create_fns=(lambda a: engine,),
   )
   print(f"server_config: {server_config}")
