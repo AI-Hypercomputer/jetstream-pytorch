@@ -26,11 +26,9 @@ from jetstream_pt import engine as je
 from jetstream_pt.config import (
     FLAGS,
     create_engine_from_config_flags,
-    define_common_flags,
     define_profiling_flags,
 )
 
-define_common_flags()
 define_profiling_flags()
 
 
