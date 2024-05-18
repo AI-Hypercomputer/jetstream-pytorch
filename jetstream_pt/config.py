@@ -31,9 +31,7 @@ flags.DEFINE_string("model_name", None, "model type", required=False)
 flags.DEFINE_string(
     "checkpoint_path", None, "Directory for .pth checkpoints", required=False
 )
-flags.DEFINE_bool(
-    "bf16_enable", True, "Whether to enable bf16", required=False
-)
+flags.DEFINE_bool("bf16_enable", True, "Whether to enable bf16", required=False)
 flags.DEFINE_integer(
     "context_length", 1024, "The context length", required=False
 )
@@ -59,7 +57,6 @@ flags.DEFINE_string(
 
 def define_profiling_flags():
   """Add profiling related config flags to global FLAG."""
-  
 
 
 def create_engine_from_config_flags():
