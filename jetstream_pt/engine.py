@@ -549,8 +549,7 @@ class PyTorchEngine(engine_api.Engine):
         (decode_state.current_position + 1) % self.env.cache_sequence_length,
         lens,
         decode_state.start,
-        # Stop the input_pos from increasing if it's 0, for better ragged attention performance
-        jnp.where(decode_state.input_pos == 0, 0, decode_state.input_pos + 1),
+        decode_state.input_pos + 1,
         mask,
     )
     print(
