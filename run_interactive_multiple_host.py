@@ -54,7 +54,7 @@ def create_engine():
 # pylint: disable-next=all
 def main(argv):
 
-  engine = create_engine()
+  engine = create_engine_from_config_flags()
 
   start = time.perf_counter()
   engine.load_params()
