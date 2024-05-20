@@ -127,7 +127,7 @@ class PyTorchEngine(engine_api.Engine):
         jnp.zeros((self.env.batch_size, 1), dtype=jnp.int32),
         caches,
         scalers,
-        self.env.block_size // 2,
+        self.env.starting_position,
         jnp.zeros((self.env.batch_size, 1), dtype=jnp.int32), # lens
         jnp.zeros((self.env.batch_size,), dtype=jnp.int32),  # start pos
         jnp.zeros((self.env.batch_size,), dtype=jnp.int32),  # input pos
@@ -724,6 +724,7 @@ def create_pytorch_engine(
     sharding_config=None,
     shard_on_batch=False,
     ragged_mha=False,
+    starting_position=512,
 ) -> PyTorchEngine:
   """Returns: The pytorch engine."""
 
@@ -783,6 +784,7 @@ def create_pytorch_engine(
       sharding_config_path=sharding_config,
       shard_on_batch=shard_on_batch,
       ragged_mha=ragged_mha,
+      starting_position=starting_position,
   )
 
   if shard_on_batch and sharding_config:

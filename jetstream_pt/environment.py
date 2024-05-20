@@ -93,6 +93,8 @@ class JetEngineEnvironmentData:
   # The block size for the ragged attention.
   block_size: int = 512
 
+  # Starting position
+  starting_position: int = 512
 # pylint: disable-next=all
 class JetEngineEnvironment:
 
@@ -103,7 +105,7 @@ class JetEngineEnvironment:
     self.cache_len = self._data.cache_sequence_length
     self.ragged_mha = self._data.ragged_mha
     self.block_size = self._data.block_size
-
+    self.starting_position = self._data.starting_position
     P = jax.sharding.PartitionSpec
 
     num_of_partitions = jax.device_count()
