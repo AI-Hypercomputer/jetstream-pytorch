@@ -117,14 +117,15 @@ class WeightOnlyPerChannelQuantizedLinear(torch.nn.Module):
     self._load_quantized_weights(w_q, scale, zp)
 
   def forward(self, inputs):
-    if self.is_symmetric:
-      return torch.mul(F.linear(inputs, self.weight), self.weight_scaler)
+    if not self.run_fake_quantize:
+      if self.is_symmetric:
+        return torch.mul(F.linear(inputs, self.weight), self.weight_scaler)
+      else:
+        out = torch.mul(F.linear(inputs, self.weight), self.weight_scaler)
+        zp_out = torch.einsum("...c,z->...z", inputs, self.zero_point)
+        return out - zp_out
     else:
-      out = torch.mul(F.linear(inputs, self.weight), self.weight_scaler)
-      zp_out = torch.einsum("...c,z->...z", inputs, self.zero_point)
-      return out - zp_out
-
-    if self.run_fake_quantize:
+      # Fake quantization, debugging purpose.
       scaler = self.weight_scaler.unsqueeze(-1)
       if not self.is_symmetric:
         zero_point = self.zero_point.unsqueeze(-1) / scaler
@@ -296,39 +297,39 @@ class WeightOnlyBlockwiseQuantizedLinear(torch.nn.Module):
     return out
 
   def forward(self, inputs):
-    # bsz, seqlen, _ = x.shape
-    if self.use_dot_general:
-      assert (
-          self.zero_point is None
-      ), "Blockwise quantized linear doesn't support zero_point in dot_general implementation."
-      return torchjax.call_jax(
-          WeightOnlyBlockwiseQuantizedLinear.blockwise_jax_kernel_dot_general,
-          inputs,
-          self.weight,
-          self.weight_scaler,
-          self.zero_point,
-      )
-    if self.flatten:
-      assert (
-          self.zero_point is None
-      ), "Blockwise quantized linear doesn't support zero_point in einsum (flattened) implementation."
-      return torchjax.call_jax(
-          WeightOnlyBlockwiseQuantizedLinear.blockwise_jax_kernel_einsum_flatten,
-          inputs,
-          self.weight,
-          self.weight_scaler,
-          self.zero_point,
-      )
+    if not self.run_fake_quantize:
+      if self.use_dot_general:
+        assert (
+            self.zero_point is None
+        ), "Blockwise quantized linear doesn't support zero_point in dot_general implementation."
+        return torchjax.call_jax(
+            WeightOnlyBlockwiseQuantizedLinear.blockwise_jax_kernel_dot_general,
+            inputs,
+            self.weight,
+            self.weight_scaler,
+            self.zero_point,
+        )
+      if self.flatten:
+        assert (
+            self.zero_point is None
+        ), "Blockwise quantized linear doesn't support zero_point in einsum (flattened) implementation."
+        return torchjax.call_jax(
+            WeightOnlyBlockwiseQuantizedLinear.blockwise_jax_kernel_einsum_flatten,
+            inputs,
+            self.weight,
+            self.weight_scaler,
+            self.zero_point,
+        )
+      else:
+        return torchjax.call_jax(
+            WeightOnlyBlockwiseQuantizedLinear.blockwise_jax_kernel,
+            inputs,
+            self.weight,
+            self.weight_scaler,
+            self.zero_point,
+        )
     else:
-      return torchjax.call_jax(
-          WeightOnlyBlockwiseQuantizedLinear.blockwise_jax_kernel,
-          inputs,
-          self.weight,
-          self.weight_scaler,
-          self.zero_point,
-      )
-
-    if self.run_fake_quantize:
+      # Fake quantization, debugging purpose.
       weight = self.weight.permute(2, 0, 1).to(torch.bfloat16)
       scaler = self.weight_scaler.unsqueeze(-1).transpose(1, 0)
       if not self.is_symmetric:
