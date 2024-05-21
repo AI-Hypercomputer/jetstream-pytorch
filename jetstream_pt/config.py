@@ -22,21 +22,12 @@ from jetstream_pt.environment import QuantizationConfig
 
 FLAGS = flags.FLAGS
 
-flags.DEFINE_string(
-    "tokenizer_path",
-    None,
-    "The tokenizer model path",
-    required=False,
-)
-flags.DEFINE_string("model_name", None, "model type", required=False)
-flags.DEFINE_string(
-    "checkpoint_path", None, "Directory for .pth checkpoints", required=False
-)
-flags.DEFINE_bool("bf16_enable", True, "Whether to enable bf16", required=False)
-flags.DEFINE_integer(
-    "context_length", 1024, "The context length", required=False
-)
-flags.DEFINE_integer("batch_size", 32, "The batch size", required=False)
+flags.DEFINE_string("tokenizer_path", None, "The tokenizer model path")
+flags.DEFINE_string("model_name", None, "model type")
+flags.DEFINE_string("checkpoint_path", None, "Directory for .pth checkpoints")
+flags.DEFINE_bool("bf16_enable", True, "Whether to enable bf16")
+flags.DEFINE_integer("context_length", 1024, "The context length")
+flags.DEFINE_integer("batch_size", 32, "The batch size")
 flags.DEFINE_string("size", "tiny", "size of model")
 flags.DEFINE_bool("quantize_kv_cache", False, "kv_cache_quantize")
 flags.DEFINE_integer("max_cache_length", 1024, "kv_cache_quantize")
@@ -46,14 +37,8 @@ flags.DEFINE_bool(
     False,
     "whether to shard on batch dimension"
     "If set true, sharding_config will be ignored.",
-    required=False,
 )
-flags.DEFINE_string(
-    "profiling_output",
-    "",
-    "The profiling output",
-    required=False,
-)
+flags.DEFINE_string("profiling_output", "", "The profiling output")
 
 # Quantization related flags
 flags.DEFINE_bool("quantize_weights", False, "weight quantization")
