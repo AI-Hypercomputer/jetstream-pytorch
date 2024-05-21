@@ -58,7 +58,26 @@ flags.register_validator(
     lambda value: value in _VALID_QUANTIZATION_TYPE,
     f"quantize_type is invalid, supported quantization types are {_VALID_QUANTIZATION_TYPE}",
 )
-
+flags.DEFINE_bool(
+    "profiling_prefill",
+    False, 
+    "Whether to profile the prefill, "
+    "if set to false, profile generate function only", 
+    required=False
+)
+flags.DEFINE_bool(
+    "ragged_mha",
+    False,
+    "Whether to enable Ragged multi head attention", 
+    required=False
+)
+flags.DEFINE_integer(
+    "starting_position", 
+    512, 
+    "The starting position of decoding, "
+    "for performance tuning and debugging only", 
+    required=False
+)
 
 def create_quantization_config_from_flags():
   """Create Quantization Config from cmd flags"""
@@ -112,6 +131,8 @@ def create_engine_from_config_flags():
       max_cache_length=FLAGS.max_cache_length,
       sharding_config=sharding_file_name,
       shard_on_batch=FLAGS.shard_on_batch,
+      ragged_mha=FLAGS.ragged_mha,
+      starting_position=FLAGS.starting_position,
   )
 
   print("Initialize engine", time.perf_counter() - start)
