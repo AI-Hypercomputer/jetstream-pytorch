@@ -131,8 +131,8 @@ class QuantizationTest(unittest.TestCase):
       # print(f"w_q_asym {w_q_asym}, s_asym {s_asym}, zp_asym {zp_asym}")
       w_dq_asym = dequantize_tensor(w_q_asym, s_asym, zp_asym)
       # print(f"w_dq_asym {w_dq_asym}")
-      self._print_diff(w, w_dq)
-      self._print_diff(w, w_dq_asym)
+      # self._print_diff(w, w_dq)
+      # self._print_diff(w, w_dq_asym)
       # Asymmetric is more accurate than symmetric.
       self.assertLess((w - w_dq_asym).norm(), (w - w_dq).norm())
       # Blockwise quant.
@@ -150,7 +150,7 @@ class QuantizationTest(unittest.TestCase):
       )
       w_block_asym_dq = dequantize_tensor(w_block_q, s_block, zero_point=zp)
       w_block_asym_dq = w_block_asym_dq.view(w_block_asym_dq.shape[0], -1)
-      self._print_diff(w, w_block_asym_dq)
+      # self._print_diff(w, w_block_asym_dq)
       # Blockwise asymmetric is more accurate than blockwise symmetric.
       self.assertLess((w - w_block_asym_dq).norm(), (w - w_block_dq).norm())
 
@@ -206,7 +206,7 @@ class QuantizationTest(unittest.TestCase):
     res, torch_res, per_channel_diff2 = run_and_compare(
         nn_linear, per_channel_q_linear, arg
     )
-    self._print_diff(res, torch_res)
+    # self._print_diff(res, torch_res)
     self.assertTrue(torch.allclose(res, torch_res, atol=2))
     block_q_linear = WeightOnlyBlockwiseQuantizedLinear(
         in_features, out_features, is_symmetric=False
@@ -215,7 +215,7 @@ class QuantizationTest(unittest.TestCase):
     res, torch_res, block_diff2 = run_and_compare(
         nn_linear, block_q_linear, arg
     )
-    self._print_diff(res, torch_res)
+    # self._print_diff(res, torch_res)
     self.assertLess(per_channel_diff2.norm(), per_channel_diff.norm())
     # FIXME: Now asymmetric blockwise quant has higher error than asymmetric per-channel.
     # self.assertLess(block_diff2.norm(), per_channel_diff2.norm())
