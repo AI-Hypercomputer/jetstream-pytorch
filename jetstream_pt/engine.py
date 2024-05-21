@@ -149,8 +149,8 @@ class PyTorchEngine(engine_api.Engine):
       mask,
       start,
       input_pos,
-      pre_batch,
-      pre_block,
+      ragged_batch_index,
+      ragged_block_index,
   ):
     if self.env.quant_config.enable_kv_quantization:
       caches_obj = [
@@ -168,7 +168,7 @@ class PyTorchEngine(engine_api.Engine):
       ]
     mask = jnp.expand_dims(mask, (1, 2))
 
-    args = (tokens, caches_obj, mask, start, input_pos, pre_batch, pre_block)
+    args = (tokens, caches_obj, mask, start, input_pos, ragged_batch_index, ragged_block_index)
     paramst, argst = torchjax.to_torch((weights, args))
     with self._lock:
       with torchjax.jax_mode:
@@ -505,8 +505,8 @@ class PyTorchEngine(engine_api.Engine):
 
     # fill mask first
     mask = decode_state.mask.at[:, decode_state.current_position].set(0)
-    pre_batch, pre_block = self.precompute_ragged_block_indices(decode_state)
-    pre_batch, pre_block = pre_batch.reshape((-1)), pre_block.reshape((-1))
+    ragged_batch_index, ragged_block_index = self.precompute_ragged_block_indices(decode_state)
+    ragged_batch_index, ragged_block_index = ragged_batch_index.reshape((-1)), ragged_block_index.reshape((-1))
 
     logits, new_caches, new_scales = self._call_model_generate(
         params,
@@ -517,8 +517,8 @@ class PyTorchEngine(engine_api.Engine):
         mask,
         decode_state.start,
         decode_state.input_pos,
-        pre_batch,
-        pre_block,
+        ragged_batch_index,
+        ragged_block_index,
     )
 
     next_token = self._sampling(logits, self.env.batch_size)

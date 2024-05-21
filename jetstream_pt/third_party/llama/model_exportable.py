@@ -111,12 +111,12 @@ class TransformerBlock(nn.Module):
       cache,
       start,
       end,
-      pre_batch,
-      pre_block,
+      ragged_batch_index,
+      ragged_block_index,
   ):
     with jax.named_scope("Attention"):
       attn = self.attention.forward(
-          self.attention_norm(x), freqs_cis, mask, cache, start, end, pre_batch, pre_block
+          self.attention_norm(x), freqs_cis, mask, cache, start, end, ragged_batch_index, ragged_block_index
       )
     with jax.named_scope("ffn_norm"):
       h = x + attn
@@ -188,9 +188,19 @@ class Transformer(nn.Module):
       mask,
       start,
       input_pos,
-      pre_batch,
-      pre_block,
+      ragged_batch_index,
+      ragged_block_index,
   ):
+    """
+      tokens: the input token for decoding
+      caches: kv caches
+      mask: causal mask to filter the attention results
+      start: the starting position for each slot
+      input_pos: the decoding position relative to the start, which is the length of the decoding results
+      ragged_batch_index: precomputed batch index for ragged attention
+      ragged_block_index: precomputed block index for ragged attention
+    """
+
     with jax.named_scope("transformer_tok"):
       seqlen = tokens.shape[-1]
       h = self.tok_embeddings(tokens)
@@ -206,7 +216,7 @@ class Transformer(nn.Module):
     end = None if start is None else (start + input_pos) % self.env.cache_len
     for layer, cache in zip(self.layers, caches):
       with jax.named_scope("TransformerBlock"):
-        h = layer(h, freqs_cis, mask, cache, start, end, pre_batch, pre_block)
+        h = layer(h, freqs_cis, mask, cache, start, end, ragged_batch_index, ragged_block_index)
 
     with jax.named_scope("transformer_norm"):
       h = self.norm(h)

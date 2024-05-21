@@ -135,6 +135,10 @@ class GemmaAttention(nn.Module):
       freqs_cis,
       mask,
       cache,
+      start,
+      end,
+      ragged_batch_index,
+      ragged_block_index,
   ) -> torch.Tensor:
     hidden_states_shape = hidden_states.shape
     assert len(hidden_states_shape) == 3
@@ -164,7 +168,7 @@ class GemmaAttention(nn.Module):
     xv = xv.transpose(1, 2)
     xq = xq.transpose(1, 2)
 
-    output = self.attention_kernel(xq, xk, xv, mask, cache)
+    output = self.attention_kernel(xq, xk, xv, mask, cache, start, end, ragged_batch_index, ragged_block_index)
 
     # [batch_size, input_len, hidden_dim]
     output = output.transpose(1, 2).contiguous().view(batch_size, input_len, -1)
@@ -264,6 +268,10 @@ class GemmaDecoderLayer(nn.Module):
       freqs_cis: torch.Tensor,
       cache: Any,
       mask: torch.Tensor,
+      start: torch.Tensor,
+      end: torch.Tensor,
+      ragged_batch_index: torch.Tensor,
+      ragged_block_index: torch.Tensor,
   ) -> torch.Tensor:
     # Self Attention
     residual = hidden_states
@@ -273,6 +281,10 @@ class GemmaDecoderLayer(nn.Module):
         freqs_cis=freqs_cis,
         mask=mask,
         cache=cache,
+        start=start,
+        end=end,
+        ragged_batch_index=ragged_batch_index,
+        ragged_block_index=ragged_block_index,
     )
     hidden_states = residual + hidden_states
 
@@ -318,10 +330,23 @@ class GemmaModel(nn.Module):
   def forward(
       self,
       tokens: torch.Tensor,
-      input_pos: torch.Tensor,
       caches: List[Any],
       mask,
+      start,
+      input_pos: torch.Tensor,
+      ragged_batch_index,
+      ragged_block_index,
   ):
+    """
+      tokens: the input token for decoding
+      caches: kv caches
+      mask: causal mask to filter the attention results
+      start: the starting position for each slot
+      input_pos: the decoding position relative to the start, which is the length of the decoding results
+      ragged_batch_index: precomputed batch index for ragged attention
+      ragged_block_index: precomputed block index for ragged attention
+    """
+
     with jax.named_scope("transformer_freq"):
       bsz, seqlen = tokens.shape
       freqs_cis = self.freqs_cis[input_pos]
@@ -330,6 +355,8 @@ class GemmaModel(nn.Module):
     hidden_states = self.embedder(tokens)
     hidden_states = hidden_states * (self.config.hidden_size**0.5)
 
+    end = None if start is None else (start + input_pos) % self.env.cache_len
+
     for i in range(len(self.layers)):
       layer = self.layers[i]
       hidden_states = layer(
@@ -337,6 +364,10 @@ class GemmaModel(nn.Module):
           freqs_cis=freqs_cis,
           cache=caches[i],
           mask=mask,
+          start=start,
+          end=end,
+          ragged_batch_index=ragged_batch_index,
+          ragged_block_index=ragged_block_index,
       )
     hidden_states = self.norm(hidden_states)
 

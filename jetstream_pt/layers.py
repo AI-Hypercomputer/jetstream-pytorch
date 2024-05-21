@@ -491,8 +491,8 @@ def ragged_mqa(
     end: jax.Array,
     k_scaler: jax.Array | None = None,
     v_scaler: jax.Array | None = None,
-    pre_batch = None,
-    pre_block = None,
+    ragged_batch_index = None,
+    ragged_block_index = None,
     bk: int = 512,
     mask_value: float = DEFAULT_MASK_VALUE,
     normalize_var: bool = True,
@@ -502,13 +502,13 @@ def ragged_mqa(
       batch_size, num_heads, head_dim = q.shape 
       seq_len = k.shape[1]  
 
-      def kv_index_map(b, i, start_ref, end_ref, line_end_ref, pre_batch_ref, pre_block_ref):
+      def kv_index_map(b, i, start_ref, end_ref, line_end_ref, ragged_batch_index_ref, ragged_block_index_ref):
         index = b * (seq_len // bk) + i
-        return pre_batch_ref[index], pre_block_ref[index], 0
+        return ragged_batch_index_ref[index], ragged_block_index_ref[index], 0
 
-      def q_index_map(b, i, start_ref, end_ref, line_end_ref, pre_batch_ref, pre_block_ref):
+      def q_index_map(b, i, start_ref, end_ref, line_end_ref, ragged_batch_index_ref, ragged_block_index_ref):
         index = b * (seq_len // bk) + i
-        return pre_batch_ref[index], 0, 0
+        return ragged_batch_index_ref[index], 0, 0
 
       def scaler_index_map(b, i, *_):
         return b, 0, i
@@ -547,7 +547,7 @@ def ragged_mqa(
                   jax.ShapeDtypeStruct((batch_size, num_heads, head_dim), jnp.float32),
                   jax.ShapeDtypeStruct((batch_size, num_heads, head_dim), jnp.float32),
               ],
-          )(start, end, line_end, pre_batch, pre_block, q, k, v, k_scaler, v_scaler)
+          )(start, end, line_end, ragged_batch_index, ragged_block_index, q, k, v, k_scaler, v_scaler)
       else:
         out, m, l = pl.pallas_call(
           functools.partial(
@@ -577,7 +577,7 @@ def ragged_mqa(
               jax.ShapeDtypeStruct((batch_size, num_heads, head_dim), jnp.float32),
               jax.ShapeDtypeStruct((batch_size, num_heads, head_dim), jnp.float32),
           ],
-        )(start, end, line_end, pre_batch, pre_block, q, k, v)
+        )(start, end, line_end, ragged_batch_index, ragged_block_index, q, k, v)
   return out, (m[..., 0], l[..., 0])
 
 
@@ -588,8 +588,8 @@ def ragged_mha(
     v: jax.Array,
     start: jax.Array,
     end: jax.Array,
-    pre_batch: jax.Array,
-    pre_block: jax.Array,
+    ragged_batch_index: jax.Array,
+    ragged_block_index: jax.Array,
     k_scaler: jax.Array | None = None,
     v_scaler: jax.Array | None = None,
     bk: int = 512,
@@ -622,10 +622,10 @@ def ragged_mha(
   seqlen = q.shape[-2]
   if k_scaler is None:
     replicated_in_axes = 4
-    replicated_inputs = (pre_batch, pre_block)
+    replicated_inputs = (ragged_batch_index, ragged_block_index)
   else:
     replicated_in_axes = 6
-    replicated_inputs = (jnp.squeeze(k_scaler, -1), jnp.squeeze(v_scaler, -1), pre_batch, pre_block)
+    replicated_inputs = (jnp.squeeze(k_scaler, -1), jnp.squeeze(v_scaler, -1), ragged_batch_index, ragged_block_index)
 
   with jax.named_scope("ragged_mha_vmap"):
     out, (m, l) = jax.vmap(
@@ -677,7 +677,7 @@ class AttentionKernel:
     self.binded_ragged_mha = shard_map(ragged_mha, env.mesh, in_specs=(*([qkv_pspec] * 3), *([others_pspec] * 4)), out_specs=(qkv_pspec, (others_pspec, others_pspec)), check_rep=False)
     self.binded_ragged_mha = jax.jit(self.binded_ragged_mha)
 
-  def __call__(self, xq, xk, xv, mask, cache, start, end, pre_batch, pre_block):
+  def __call__(self, xq, xk, xv, mask, cache, start, end, ragged_batch_index, ragged_block_index):
     """
     Args:
       xq: torch.Tensor of (batch size, num_heads, seqlen, head_dim)
@@ -699,7 +699,7 @@ class AttentionKernel:
   
     with jax.named_scope("attn_qkv"):
       if self.env.ragged_mha and seqlen == 1:
-        output, _ = torch_xla2.interop.call_jax(self.binded_ragged_mha, xq, keys, values, start, end, pre_batch, pre_block)
+        output, _ = torch_xla2.interop.call_jax(self.binded_ragged_mha, xq, keys, values, start, end, ragged_batch_index, ragged_block_index)
       else:
         output = dense_attention(xq, keys, values, None, None, mask)
 
@@ -722,7 +722,7 @@ class Int8KVAttentionKernel:
     self.binded_ragged_mha_quantized = shard_map(self.binded_ragged_mha_quantized, env.mesh, in_specs=(*([qkv_pspec] * 3), *([others_pspec]*6)), out_specs=(qkv_pspec, (others_pspec, others_pspec)), check_rep=False)
     self.binded_ragged_mha_quantized = jax.jit(self.binded_ragged_mha_quantized)
 
-  def __call__(self, xq, xk, xv, mask, cache, start, end, pre_batch, pre_block):
+  def __call__(self, xq, xk, xv, mask, cache, start, end, ragged_batch_index, ragged_block_index):
     """
     Args:
       xq: torch.Tensor of (batch size, num_heads, seqlen, head_dim)
@@ -745,7 +745,7 @@ class Int8KVAttentionKernel:
 
     with jax.named_scope("attn_qkv"):
       if self.env.ragged_mha and seqlen == 1:
-        output, _ = torch_xla2.interop.call_jax(self.binded_ragged_mha_quantized, xq, keys, values, start, end, pre_batch, pre_block, k_scaler, v_scaler)
+        output, _ = torch_xla2.interop.call_jax(self.binded_ragged_mha_quantized, xq, keys, values, start, end, ragged_batch_index, ragged_block_index, k_scaler, v_scaler)
       else:
         output= dense_attention(xq, keys, values, k_scaler, v_scaler, mask)
 
@@ -829,8 +829,8 @@ class Attention(nn.Module):
       cache,
       start,
       end,
-      pre_batch,
-      pre_block,
+      ragged_batch_index,
+      ragged_block_index,
   ):
     with jax.named_scope("attn_linear_before_cache"):
       bsz, seqlen = x.shape[0], x.shape[-2]
@@ -858,6 +858,6 @@ class Attention(nn.Module):
     xv = xv.transpose(1, 2)
     xq = xq.transpose(1, 2)
 
-    output = self.attention_kernel(xq, xk, xv, mask, cache, start, end, pre_batch, pre_block).type_as(xq)
+    output = self.attention_kernel(xq, xk, xv, mask, cache, start, end, ragged_batch_index, ragged_block_index).type_as(xq)
     output = output.transpose(-3, -2).contiguous().view(bsz, seqlen, -1)
     return self.wo(output)
