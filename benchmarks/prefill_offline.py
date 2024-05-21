@@ -21,7 +21,6 @@ import jax
 import numpy as np
 # pylint: disable-next=all
 from absl import app, flags
-from jetstream_pt import engine as je
 from jetstream_pt.config import FLAGS, create_engine_from_config_flags
 
 

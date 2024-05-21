@@ -349,7 +349,8 @@ def get_quantized_linear_layer(config: "QuantizationConfig"):
     return WeightOnlyBlockwiseQuantizedLinear
   else:
     return WeightOnlyPerChannelQuantizedLinear
-  
+
+
 def get_quantized_enbedding_layer(config: "QuantizationConfig"):
   if not config.enable_weight_quantization:
     return nn.Embedding

@@ -61,15 +61,13 @@ flags.DEFINE_string(
 
 
 _VALID_QUANTIZATION_TYPE = {
-  "int8_per_channel",
-  "int4_per_channel",
-  "int8_blockwise",
-  "int4_blockwise",
+    "int8_per_channel",
+    "int4_per_channel",
+    "int8_blockwise",
+    "int4_blockwise",
 }
 
-flags.DEFINE_string(
-      "quantize_type", "", "Type of quantization."
-  )
+flags.DEFINE_string("quantize_type", "", "Type of quantization.")
 flags.register_validator(
     "quantize_type",
     lambda value: value in _VALID_QUANTIZATION_TYPE,
@@ -78,6 +76,7 @@ flags.register_validator(
 
 
 def create_quantization_config_from_flags():
+  """Create Quantization Config from cmd flags"""
   config = QuantizationConfig()
   quantize_type = FLAGS.quantize_type
   if quantize_type == "":
@@ -90,7 +89,7 @@ def create_quantization_config_from_flags():
 
 
 def create_engine_from_config_flags():
-  """create a pytorch engine from config flag"""
+  """create a pytorch engine from cmd flag"""
   jax.config.update("jax_default_prng_impl", "unsafe_rbg")
   os.environ["TF_CPP_MIN_LOG_LEVEL"] = "0"
 
@@ -103,7 +102,10 @@ def create_engine_from_config_flags():
   sharding_config_path = FLAGS.sharding_config
   if not sharding_config_path:
     sharding_config_name = FLAGS.model_name
-    if quant_config.enable_weight_quantization and quant_config.is_blockwise_weight:
+    if (
+        quant_config.enable_weight_quantization
+        and quant_config.is_blockwise_weight
+    ):
       sharding_config_name += "-blockwise-quant"
     sharding_config_path = os.path.join(
         "default_shardings", sharding_config_name + ".yaml"
