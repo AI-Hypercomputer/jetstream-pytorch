@@ -710,7 +710,10 @@ def create_pytorch_engine(
   pt_model = None
 
   if not sharding_config:
-    sharding_config = os.path.join("default_shardings", model_name + ".yaml")
+    sharding_file_name = "llama" if model_name.startswith("llama") else "gemma"
+    sharding_config = os.path.join(
+        "default_shardings", sharding_file_name + ".yaml"
+    )
 
   quant_config = QuantizationConfig(
       enable_weight_quantization=quantize_weights,

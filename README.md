@@ -29,6 +29,7 @@ Follow the steps in
 ## Get the jetstream-pytorch code
 ```bash
 git clone https://github.com/google/jetstream-pytorch.git
+git checkout v0.2.2
 ```
 
 (optional) Create a virtual env using `venv` or `conda` and activate it.
@@ -39,7 +40,6 @@ git clone https://github.com/google/jetstream-pytorch.git
 cd jetstream-pytorch
 source install_everything.sh
 ```
-NOTE: the above script will export PYTHONPATH, so sourcing will make it to take effect in the current shell
 
 # Download and convert weights
 
@@ -104,10 +104,10 @@ python run_interactive.py --model_name=$model_name --size=7b --batch_size=64 --m
 
 
 # Run the server
-NOTE: the `--platform=tpu=8` need to specify number of tpu devices (which is 4 for v4-8 and 8 for v5light-8`)
+Here is an example to run the server with llama2 7B config.
 
 ```bash
-python run_server.py --param_size=7b --model_name=$model_name --batch_size=128 --max_cache_length=2048 --quantize_weights=$quantize --quantize_kv_cache=$quantize --checkpoint_path=$output_ckpt_dir   --tokenizer_path=$tokenizer_path --platform=tpu=8 --model=$model_name
+python run_server.py --model_name=$model_name --size=7b --batch_size=128 --max_cache_length=2048 --quantize_weights=$quantize --quantize_kv_cache=$quantize --checkpoint_path=$output_ckpt_dir   --tokenizer_path=$tokenizer_path --sharding_config="default_shardings/llama.yaml"
 ```
 
 Now you can fire gRPC to it.
@@ -122,13 +122,13 @@ Optional flags:
   the ones in default_shardings directory.
 
 # Run benchmark
-go to the deps/JetStream folder (downloaded during `install_everything.sh`)
+Start the server and then go to the deps/JetStream folder (downloaded during `install_everything.sh`)
 
 ```bash
 cd deps/JetStream
 wget https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/ShareGPT_V3_unfiltered_cleaned_split.json
 export dataset_path=ShareGPT_V3_unfiltered_cleaned_split.json
-python benchmarks/benchmark_serving.py --tokenizer $tokenizer_path --num-prompts 2000  --dataset-path  $dataset_path --dataset sharegpt --save-request-outputs --warm-up=True
+python benchmarks/benchmark_serving.py --tokenizer $tokenizer_path --num-prompts 2000  --dataset-path  $dataset_path --dataset sharegpt --save-request-outputs --warmup-first=True
 ```
 Please look at `deps/JetStream/benchmarks/README.md` for more information.
 

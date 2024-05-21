@@ -52,7 +52,7 @@ _OUTPUT_CHECKPOINT_DIR = epath.DEFINE_path(
 
 _MINIMIZE_MEMORY_FOOTPRINT = flags.DEFINE_bool(
     "minimize_memory_footprint",
-    True,
+    False,
     "When set to true, reduce memory usage by staging in-memory data on disk",
 )
 
@@ -348,9 +348,12 @@ def _get_llama_state_dict(input_ckpt_dir):
   print(f"Loading checkpoints takes {end - start} seconds")
 
   start = time.perf_counter()
-  state_dict = _merge_llama_weights(
-      checkpoints, _MINIMIZE_MEMORY_FOOTPRINT.value, _ENABLE_FLOAT32.value
-  )
+  if len(checkpoints) > 1:
+    state_dict = _merge_llama_weights(
+        checkpoints, _MINIMIZE_MEMORY_FOOTPRINT.value, _ENABLE_FLOAT32.value
+    )
+  else:
+    state_dict = checkpoints[0]
   end = time.perf_counter()
   print(f"Merging weights takes {end - start} seconds")
   return state_dict, params

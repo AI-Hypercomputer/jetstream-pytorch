@@ -1,0 +1,6 @@
+[submodule "deps/JetStream"]
+	path = deps/JetStream
+	url = https://github.com/google/JetStream.git
+[submodule "deps/xla"]
+	path = deps/xla
+	url = https://github.com/pytorch/xla.git

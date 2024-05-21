@@ -12,31 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-TORCHXLA_TAG=f26c35c2fa5eb1d22d042a2a8a8dc34f11b99f60 # updated May 14, 2024
-JETSTREAM_TAG=v0.2.1
-
 # Uninstall existing jax
 pip show jax && pip uninstall -y jax
 pip show jaxlib && pip uninstall -y jaxlib
 pip show libtpu-nightly && pip uninstall -y libtpu-nightly
+pip show tensorflow && pip uninstall -y tensorflow
 
-pip install pip install jax[tpu] -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+pip install jax[tpu]==0.4.28 -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
 # torch cpu
-pip install torch --index-url https://download.pytorch.org/whl/cpu
+pip install torch==2.2.1+cpu --index-url https://download.pytorch.org/whl/cpu
 pip install tensorflow flatbuffers absl-py flax sentencepiece seqio google-cloud-storage 
 pip install safetensors colorama coverage ray[default] humanize
 
-mkdir -p deps
-pushd deps
-git clone https://github.com/google/JetStream.git
-git clone https://github.com/pytorch/xla.git
-pushd xla/experimental/torch_xla2
-git checkout $TORCHXLA_TAG
-pip install .
-popd  # now at the folder deps
-pushd JetStream
-git checkout $JETSTREAM_TAG
-pip install .
-popd # now at the folder deps
-popd # now at the folder current file
+git submodule update --init --recursive
+pip show google-jetstream && pip uninstall -y google-jetstream
+pip show torch_xla2 && pip uninstall -y torch_xla2
 pip install -e .
