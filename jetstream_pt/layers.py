@@ -335,9 +335,7 @@ class WeightOnlyBlockwiseQuantizedLinear(torch.nn.Module):
         zero_point = self.zero_point.unsqueeze(-1).transpose(1, 0) / scaler
       else:
         zero_point = None
-      w_dequantized = dequantize_tensor(
-          self.weight, scaler, zero_point, block_size=128
-      )
+      w_dequantized = dequantize_tensor(self.weight, scaler, zero_point)
       w_dequantized = w_dequantized.reshape(w_dequantized.shape[0], -1)
       return F.linear(inputs, w_dequantized)
 

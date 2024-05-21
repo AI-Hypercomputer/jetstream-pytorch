@@ -47,7 +47,6 @@ def quantize_tensor(
     reduce_axis = (reduce_axis,)
 
   if block_size > 0:
-    assert len(reduce_axis) == 1, "blockwise quant only works along 1 dim."
     axis = reduce_axis[0]
     w_shape = w.shape
     assert w_shape[axis] % block_size == 0
@@ -68,13 +67,13 @@ def quantize_tensor(
     zero_point = 0
 
   w = torch.clamp(
-      torch.round(w * (1.0 / scales)) + zero_point, min_int, max_int
+      torch.round(w * (1.0 / scales) + zero_point), min_int, max_int
   ).to(torch.int8)
 
   return w, scales, zero_point if not symmetric else None
 
 
-def dequantize_tensor(w, scale, zero_point=None, block_size=-1):
+def dequantize_tensor(w, scale, zero_point=None):
   """Dequantize tensor quantized by quantize_tensor."""
   if zero_point is not None:
     return (w - zero_point) * scale

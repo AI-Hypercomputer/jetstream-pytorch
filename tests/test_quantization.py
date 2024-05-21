@@ -114,9 +114,12 @@ class QuantizationTest(unittest.TestCase):
   def test_quantize_dequantize_tensor(self):
 
     def quantize_dequantize_weight(w, n_bit):
+      # print(f"original w {w}")
       # Per-channel qdq.
       w_q, s, _ = quantize_tensor(w, (1,), n_bit=n_bit, symmetric=True)
+      # print(f"w_q {w_q}, s {s}")
       w_dq = dequantize_tensor(w_q, s)
+      # print(f"w_dq {w_dq}")
       if n_bit == 8:
         self.assertTrue(torch.allclose(w, w_dq, atol=0.1))
       elif n_bit == 4:
@@ -125,31 +128,33 @@ class QuantizationTest(unittest.TestCase):
       w_q_asym, s_asym, zp_asym = quantize_tensor(
           w, (1,), n_bit=n_bit, symmetric=False
       )
+      # print(f"w_q_asym {w_q_asym}, s_asym {s_asym}, zp_asym {zp_asym}")
       w_dq_asym = dequantize_tensor(w_q_asym, s_asym, zp_asym)
+      # print(f"w_dq_asym {w_dq_asym}")
+      self._print_diff(w, w_dq)
+      self._print_diff(w, w_dq_asym)
       # Asymmetric is more accurate than symmetric.
       self.assertLess((w - w_dq_asym).norm(), (w - w_dq).norm())
       # Blockwise quant.
       w_block_q, s_block, _ = quantize_tensor(
-          w, (1,), n_bit=n_bit, symmetric=True, block_size=128
+          w, (1,), n_bit=n_bit, symmetric=True, block_size=2
       )
-      w_block_dq = dequantize_tensor(w_block_q, s_block, block_size=128)
+      w_block_dq = dequantize_tensor(w_block_q, s_block)
       w_block_dq = w_block_dq.view(w_block_dq.shape[0], -1)
       # self._print_diff(w, w_block_dq)
       # Blockwise quant is more accurate than per-channel.
       self.assertLess((w - w_block_dq).norm(), (w - w_dq).norm())
       # Blockwise asymmetric
       w_block_q, s_block, zp = quantize_tensor(
-          w, (1,), n_bit=n_bit, symmetric=False, block_size=128
+          w, (1,), n_bit=n_bit, symmetric=False, block_size=2
       )
-      w_block_asym_dq = dequantize_tensor(
-          w_block_q, s_block, zero_point=zp, block_size=128
-      )
+      w_block_asym_dq = dequantize_tensor(w_block_q, s_block, zero_point=zp)
       w_block_asym_dq = w_block_asym_dq.view(w_block_asym_dq.shape[0], -1)
-      # self._print_diff(w, w_block_asym_dq)
+      self._print_diff(w, w_block_asym_dq)
       # Blockwise asymmetric is more accurate than blockwise symmetric.
       self.assertLess((w - w_block_asym_dq).norm(), (w - w_block_dq).norm())
 
-    w = torch.randn(128, 2048)
+    w = torch.randn(2, 8)
     for bit in [4, 8]:
       with self.subTest(bit=bit):
         quantize_dequantize_weight(w, bit)
