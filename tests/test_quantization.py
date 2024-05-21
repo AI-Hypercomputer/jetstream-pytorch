@@ -211,7 +211,7 @@ class QuantizationTest(unittest.TestCase):
     block_q_linear = WeightOnlyBlockwiseQuantizedLinear(
         in_features, out_features, is_symmetric=False
     )
-    block_q_linear.run_fake_quantize = True
+    # block_q_linear.run_fake_quantize = True
     res, torch_res, block_diff2 = run_and_compare(
         nn_linear, block_q_linear, arg
     )
