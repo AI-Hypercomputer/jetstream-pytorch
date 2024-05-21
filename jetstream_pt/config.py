@@ -38,10 +38,6 @@ flags.DEFINE_integer(
 )
 flags.DEFINE_integer("batch_size", 32, "The batch size", required=False)
 flags.DEFINE_string("size", "tiny", "size of model")
-# flags.DEFINE_bool("quantize_weights", False, "weight quantization")
-# flags.DEFINE_string(
-#     "quantize_type", "int8_per_channel", "Type of quantization."
-# )
 flags.DEFINE_bool("quantize_kv_cache", False, "kv_cache_quantize")
 flags.DEFINE_integer("max_cache_length", 1024, "kv_cache_quantize")
 flags.DEFINE_string("sharding_config", "", "config file for sharding")
@@ -59,6 +55,11 @@ flags.DEFINE_string(
     required=False,
 )
 
+# Quantization related flags
+flags.DEFINE_bool("quantize_weights", False, "weight quantization")
+flags.DEFINE_string(
+    "quantize_type", "int8_per_channel", "Type of quantization."
+)
 
 _VALID_QUANTIZATION_TYPE = {
     "int8_per_channel",
@@ -67,7 +68,6 @@ _VALID_QUANTIZATION_TYPE = {
     "int4_blockwise",
 }
 
-flags.DEFINE_string("quantize_type", "", "Type of quantization.")
 flags.register_validator(
     "quantize_type",
     lambda value: value in _VALID_QUANTIZATION_TYPE,
