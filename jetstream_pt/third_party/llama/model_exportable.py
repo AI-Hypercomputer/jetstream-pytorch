@@ -12,6 +12,7 @@ from jetstream_pt.layers import (
     RMSNorm,
     WeightOnlyBlockwiseQuantizedLinear,
     WeightOnlyPerChannelQuantizedLinear,
+    get_quantized_enbedding_layer,
     get_quantized_linear_layer,
 )
 from torch import nn
@@ -29,7 +30,6 @@ class FeedForward(nn.Module):
       multiple_of: int,
       ffn_dim_multiplier: Optional[float],
       device="meta",
-      quantize=False,
       env=None,
   ):
     super().__init__()
@@ -95,7 +95,6 @@ class TransformerBlock(nn.Module):
         multiple_of=args.multiple_of,
         ffn_dim_multiplier=args.ffn_dim_multiplier,
         device=args.device,
-        quantize=args.quantize,
         env=env,
     )
     self.layer_id = layer_id
@@ -148,7 +147,7 @@ class Transformer(nn.Module):
     self.vocab_size = params.vocab_size
     self.n_layers = params.n_layers
 
-    Embedding = Int8Embedding if params.quantize else nn.Embedding
+    Embedding = get_quantized_enbedding_layer(env.quant_config)
     self.tok_embeddings = Embedding(
         params.vocab_size,
         params.dim,
@@ -223,4 +222,26 @@ class Transformer(nn.Module):
   def get_quantized_embedding_weight_to_scaler_map():
     return {
         "tok_embeddings.weight": "tok_embeddings.weight_scaler",
+    }
+
+  @staticmethod
+  def get_weight_sharding_type():
+    # ParallelEmbedding is col partitioned across the shards.
+    # ColumnParallelLinear is row partitioned across shards due to transpose.
+    # RowParallelLinear is col partitioned across shards due to transpose.
+    # None is no partitioning and tensor should be identical across shards
+    return {
+      "tok_embeddings.weight": "ParallelEmbedding",
+      "rope.freqs": None,
+      "attention.wq.weight": "ColumnParallelLinear",
+      "attention.wk.weight": "ColumnParallelLinear",
+      "attention.wv.weight": "ColumnParallelLinear",
+      "attention.wo.weight": "RowParallelLinear",
+      "feed_forward.w1.weight": "ColumnParallelLinear",
+      "feed_forward.w2.weight": "RowParallelLinear",
+      "feed_forward.w3.weight": "ColumnParallelLinear",
+      "attention_norm.weight": None,
+      "ffn_norm.weight": None,
+      "norm.weight": None,
+      "output.weight": "ColumnParallelLinear",
     }

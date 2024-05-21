@@ -226,24 +226,6 @@ class QuantizationTest(unittest.TestCase):
 
   def test_blockwise_quantized_linear_sharding(self):
 
-    # TODO(lsy323): Move sharding_by_axis outside of JetEngineEnvironment to a sharding util file
-    # and reuse the util functions.
-    def sharding_by_axis(axis):
-      """return sharding partition spc by axis, options are x, y, -1 or Noe"""
-      num_of_partitions = jax.device_count()
-      mesh = jsharding.Mesh(
-          mesh_utils.create_device_mesh((num_of_partitions, 1)),
-          axis_names=("x", "y"),
-      )
-      if axis == -1 or axis is None:
-        return jsharding.NamedSharding(mesh, jax.sharding.PartitionSpec())
-      sharding = [None] * (axis + 1)
-      sharding[axis] = "x"
-      sharding_spec = jsharding.NamedSharding(
-          mesh, jax.sharding.PartitionSpec(*sharding)
-      )
-      return sharding_spec
-
     @functools.partial(
         jax.jit,
         static_argnums=(0,),
@@ -273,9 +255,10 @@ class QuantizationTest(unittest.TestCase):
       post_opt = f.lower(layer, state_dict_jax, input).compile().as_text()
       return post_opt
 
+    env, _ = helpers.make_env_tiny()
     shardings = [
-        (sharding_by_axis(0), sharding_by_axis(0)),  # wq/wk/wv sharding
-        (sharding_by_axis(2), sharding_by_axis(1)),  # wo sharding
+        (env.sharding_by_axis(0), env.sharding_by_axis(0)),  # wq/wk/wv sharding
+        (env.sharding_by_axis(2), env.sharding_by_axis(1)),  # wo sharding
         #  (sharding_by_axis(1), sharding_by_axis(0)), # bad sharding
     ]
     for sharding in shardings:

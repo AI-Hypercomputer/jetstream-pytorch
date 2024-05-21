@@ -22,40 +22,7 @@ import numpy as np
 # pylint: disable-next=all
 from absl import app, flags
 from jetstream_pt import engine as je
-from jetstream_pt.config import (
-    FLAGS,
-    create_engine_from_config_flags,
-    define_profiling_flags,
-)
-
-define_profiling_flags()
-
-
-def create_engine():
-  """create a pytorch engine"""
-  jax.config.update("jax_default_prng_impl", "unsafe_rbg")
-  os.environ["TF_CPP_MIN_LOG_LEVEL"] = "0"
-
-  devices = jax.devices()
-  start = time.perf_counter()
-  engine = je.create_pytorch_engine(
-      model_name=FLAGS.model_name,
-      devices=devices,
-      tokenizer_path=FLAGS.tokenizer_path,
-      ckpt_path=FLAGS.checkpoint_path,
-      bf16_enable=FLAGS.bf16_enable,
-      param_size=FLAGS.size,
-      context_length=FLAGS.context_length,
-      batch_size=FLAGS.batch_size,
-      quantize_weights=FLAGS.quantize_weights,
-      quantize_kv=FLAGS.quantize_kv_cache,
-      max_cache_length=FLAGS.max_cache_length,
-      sharding_config=FLAGS.sharding_config,
-      shard_on_batch=FLAGS.shard_on_batch,
-  )
-
-  print("Initialize engine", time.perf_counter() - start)
-  return engine
+from jetstream_pt.config import FLAGS, create_engine_from_config_flags
 
 
 def delete_pytree(p):

@@ -174,7 +174,6 @@ class PyTorchRayWorker:
           model_name + "-" + param_size, context_length, batch_size, bf16_enable
       )
       args.device = "meta"
-      args.quantize = quantize_weights
       env_data.cache_shape = (
           batch_size,
           args.n_kv_heads,

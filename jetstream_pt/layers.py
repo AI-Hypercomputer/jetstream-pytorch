@@ -109,12 +109,11 @@ class WeightOnlyPerChannelQuantizedLinear(torch.nn.Module):
     assert weight.shape == (
         self.out_features,
         self.in_features,
-    ), f"Unexpected weight shape ({self.out_features}, {self.in_features})."
+    ), f"Got unexpected weight of shape {weight.shape}, expected weight shape ({self.out_features}, {self.in_features})."
     w_q, scale, zp = quantize_tensor(
         weight, (1,), self.n_bit, self.is_symmetric, block_size=-1
     )
     w_dq = dequantize_tensor(w_q, scale, zp)
-    print("check qweight cosine dist: ", _calc_cosine_dist(weight, w_dq))
     self._load_quantized_weights(w_q, scale, zp)
 
   def forward(self, inputs):
@@ -350,6 +349,12 @@ def get_quantized_linear_layer(config: "QuantizationConfig"):
     return WeightOnlyBlockwiseQuantizedLinear
   else:
     return WeightOnlyPerChannelQuantizedLinear
+  
+def get_quantized_enbedding_layer(config: "QuantizationConfig"):
+  if not config.enable_weight_quantization:
+    return nn.Embedding
+  else:
+    return Int8Embedding
 
 
 class RMSNorm(torch.nn.Module):

@@ -34,6 +34,7 @@ from absl import app, flags
 from etils import epath
 from google.cloud import storage
 from jetstream_pt import quantize
+from jetstream_pt.config import FLAGS
 from jetstream_pt.third_party.gemma import model as gemma_model
 from jetstream_pt.third_party.llama import model_exportable as llama_model
 from safetensors.torch import save_file
@@ -67,38 +68,6 @@ _OUTPUT_SAFETENSORS = flags.DEFINE_bool(
     True,
     "When set to true, save to HugginFace SafeTensors format",
 )
-_QUANTIZE = flags.DEFINE_bool(
-    "quantize", False, "When set to true, produces quantized weights"
-)
-_QUANTIZE_NUM_BITS_WEIGHTS = flags.DEFINE_integer(
-    "quantize_num_bits_weights", 8, "number of bits of quantized weight."
-)
-_QUANTIZE_IS_BLOCKWISE_WEIGHTS = flags.DEFINE_bool(
-    "quantize_is_blockwise_weights",
-    False,
-    "wheter apply blockwise quantization for weight.",
-)
-_MODEL_TYPE = flags.DEFINE_string("model_name", "llama", "Type of the model.")
-
-# ParallelEmbedding is col partitioned across the shards.
-# ColumnParallelLinear is row partitioned across shards due to transpose.
-# RowParallelLinear is col partitioned across shards due to transpose.
-# None is no partitioning and tensor should be identical across shards
-_WEIGHT_SHARDING_TYPE = {
-    "tok_embeddings.weight": "ParallelEmbedding",
-    "rope.freqs": None,
-    "attention.wq.weight": "ColumnParallelLinear",
-    "attention.wk.weight": "ColumnParallelLinear",
-    "attention.wv.weight": "ColumnParallelLinear",
-    "attention.wo.weight": "RowParallelLinear",
-    "feed_forward.w1.weight": "ColumnParallelLinear",
-    "feed_forward.w2.weight": "RowParallelLinear",
-    "feed_forward.w3.weight": "ColumnParallelLinear",
-    "attention_norm.weight": None,
-    "ffn_norm.weight": None,
-    "norm.weight": None,
-    "output.weight": "ColumnParallelLinear",
-}
 
 
 def _find_scale_name(name, map):
@@ -210,7 +179,7 @@ def _merge_llama_weights(
         f"{len(tensors)} shards (shape = {tensors[0].shape}) for {key})"
     )
     state_dict_for_key = {}
-    for pattern, kind in _WEIGHT_SHARDING_TYPE.items():
+    for pattern, kind in llama_model.get_weight_sharding_type.items():
       if not key.endswith(pattern):
         continue
       with torch.no_grad():
@@ -405,7 +374,7 @@ def _get_gemma_state_dict(input_ckpt_dir):
 def main(argv) -> None:
   """merge weights"""
 
-  if _MODEL_TYPE.value == "gemma":
+  if FLAGS.model_name == "gemma":
     state_dict, params = _get_gemma_state_dict(_INPUT_CHECKPOINT_DIR.value)
     quantize_linear_weight_map = (
         gemma_model.GemmaModel.get_quantized_linear_weight_to_scaler_map()
@@ -422,9 +391,9 @@ def main(argv) -> None:
         llama_model.Transformer.get_quantized_embedding_weight_to_scaler_map()
     )
 
-  if _QUANTIZE.value:
-    quantize_num_bits = _QUANTIZE_NUM_BITS_WEIGHTS.value
-    is_blockwise = _QUANTIZE_IS_BLOCKWISE_WEIGHTS.value
+  if FLAGS.quantize_type:
+    quantize_num_bits = 8 if "int8" in FLAGS.quantize_type else 4
+    is_blockwise = "blockwise" in FLAGS.quantize_type
     weight_axis = lambda x: 0 if x in quantize_embedding_weight_map else 1
     start = time.perf_counter()
     state_dict = _quantize_state_dict(

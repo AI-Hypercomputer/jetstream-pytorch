@@ -28,10 +28,6 @@ class ModelArgs:
   infer_length = 0
   device = "cpu"
 
-  quantize = False
-  quantize_n_bits = 8
-  is_blockwise = False
-
   rope_theta: float = 10000.0
 
 

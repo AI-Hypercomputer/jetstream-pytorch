@@ -57,7 +57,6 @@ def create_model():
         bf16_enable=True,
     )
     args.device = "meta"
-    args.quantize = False
     env = JetEngineEnvironment(env_data)
     return model_exportable.Transformer(args, env)
   elif model_name == "gemma":

@@ -662,10 +662,7 @@ def create_pytorch_engine(
     batch_size: int = 1,
     max_decode_length: int = 4096,
     model_name="llama-2",
-    quantize_weights=False,
-    quantize_num_bits_weights=8,
-    quanitze_is_blockwise_weight=False,
-    quantize_kv=False,
+    quant_config: QuantizationConfig = QuantizationConfig(),
     max_cache_length=1024,
     sharding_config=None,
     shard_on_batch=False,
@@ -715,13 +712,6 @@ def create_pytorch_engine(
         "default_shardings", sharding_file_name + ".yaml"
     )
 
-  quant_config = QuantizationConfig(
-      enable_weight_quantization=quantize_weights,
-      num_bits_weight=quantize_num_bits_weights,
-      is_blockwise_weight=quanitze_is_blockwise_weight,
-      enable_kv_quantization=quantize_kv,
-  )
-
   env_data = JetEngineEnvironmentData(
       tokenizer_path=tokenizer_path,
       checkpoint_path=checkpoint_path,
@@ -745,7 +735,6 @@ def create_pytorch_engine(
         model_name + "-" + param_size, context_length, batch_size, bf16_enable
     )
     args.device = "meta"
-    args.quantize = quantize_weights
     env_data.cache_shape = (
         batch_size,
         args.n_kv_heads,
