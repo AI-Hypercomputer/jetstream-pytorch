@@ -69,22 +69,23 @@ def main(argv):
     complete = np.zeros((1,), dtype=np.bool_)
     while True:
       decode_state, result_tokens = engine.generate(params, decode_state)
+      result_tokens = result_tokens.convert_to_numpy()
       output, complete = token_utils.process_result_tokens(
-          tokenizer, slot, max_output_length, result_tokens, complete
+          tokenizer=tokenizer,
+          slot=slot,
+          slot_max_length=max_output_length,
+          result_tokens=result_tokens,
+          complete=complete,
       )
       if complete[0]:
         break
-      sampled_tokens_list = output[0]
-      # output_str = tokenizer.decode_str([token_id])
-      # print(Fore.GREEN + output_str, end="", flush=True)
-
-    # print(Style.RESET_ALL + "\n")
-    # print("---- Streaming decode finished.")
+      token_ids = output[0].token_ids
+      sampled_tokens_list.extend(token_ids)
 
     print("---- All output tokens.")
     print(sampled_tokens_list)
     print("---- All output text.")
-    print(token_utils.text_tokens_to_str(sampled_tokens_list))
+    print(tokenizer.decode(sampled_tokens_list))
 
   if profiling_output:
     jax.profiler.stop_trace()
