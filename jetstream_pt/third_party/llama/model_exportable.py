@@ -109,10 +109,10 @@ class TransformerBlock(nn.Module):
       freqs_cis: torch.Tensor,
       mask: Optional[torch.Tensor],
       cache,
-      start,
-      end,
-      ragged_batch_index,
-      ragged_block_index,
+      start = None,
+      end = None,
+      ragged_batch_index = None,
+      ragged_block_index = None,
   ):
     with jax.named_scope("Attention"):
       attn = self.attention.forward(
@@ -186,10 +186,10 @@ class Transformer(nn.Module):
       tokens: torch.Tensor,
       caches: List[Any],
       mask,
-      start,
-      input_pos,
-      ragged_batch_index,
-      ragged_block_index,
+      start = None,
+      input_pos = None,
+      ragged_batch_index = None,
+      ragged_block_index = None,
   ):
     """
       tokens: the input token for decoding

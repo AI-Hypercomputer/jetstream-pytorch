@@ -135,10 +135,10 @@ class GemmaAttention(nn.Module):
       freqs_cis,
       mask,
       cache,
-      start,
-      end,
-      ragged_batch_index,
-      ragged_block_index,
+      start = None,
+      end = None,
+      ragged_batch_index = None,
+      ragged_block_index = None,
   ) -> torch.Tensor:
     hidden_states_shape = hidden_states.shape
     assert len(hidden_states_shape) == 3
@@ -268,10 +268,10 @@ class GemmaDecoderLayer(nn.Module):
       freqs_cis: torch.Tensor,
       cache: Any,
       mask: torch.Tensor,
-      start: torch.Tensor,
-      end: torch.Tensor,
-      ragged_batch_index: torch.Tensor,
-      ragged_block_index: torch.Tensor,
+      start: torch.Tensor | None = None,
+      end: torch.Tensor | None = None,
+      ragged_batch_index: torch.Tensor | None = None,
+      ragged_block_index: torch.Tensor | None = None,
   ) -> torch.Tensor:
     # Self Attention
     residual = hidden_states
@@ -332,10 +332,10 @@ class GemmaModel(nn.Module):
       tokens: torch.Tensor,
       caches: List[Any],
       mask,
-      start,
-      input_pos: torch.Tensor,
-      ragged_batch_index,
-      ragged_block_index,
+      start = None,
+      input_pos = None,
+      ragged_batch_index = None,
+      ragged_block_index = None,
   ):
     """
       tokens: the input token for decoding
