@@ -263,5 +263,5 @@ class RaggedAttentionKernel:
     self.binded_ragged_mha = shard_map(ragged_mha, env.mesh, input_specs, output_specs, check_rep=False)
     self.binded_ragged_mha = jax.jit(self.binded_ragged_mha)
 
-  def __call__(self, xq, keys, values, start, end, ragged_batch_index, ragged_block_index):
-    return self.binded_ragged_mha(xq, keys, values, start, end, ragged_batch_index, ragged_block_index)
+  def __call__(self, xq, keys, values, start, end, ragged_batch_index, ragged_block_index, k_scaler=None, v_scaler=None):
+    return self.binded_ragged_mha(xq, keys, values, start, end, ragged_batch_index, ragged_block_index, k_scaler, v_scaler)
