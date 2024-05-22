@@ -458,12 +458,18 @@ class PyTorchEngine(engine_api.Engine):
     )
 
   def precompute_ragged_block_indices(self, decode_state: DecodeState):
+    """Precompute the ragged attention block indices. Ragged attention iterates the grid 
+    and relies on the computed grid index to skip the unnecessary blocks. The basic idea 
+    is to use input_pos, which is the length of each slot to determine if we should 
+    work on the next block of the slot or move to the next slot. """
     start = decode_state.start
     end = (start + decode_state.input_pos) % self.env.cache_len
     batch_size = start.shape[0]
     bk = self.env.block_size
+    # The batch index
     b = jnp.arange(batch_size).reshape((batch_size, 1))
     num_bk = self.env.cache_len // self.env.block_size
+    # The block index
     i = jnp.arange(num_bk).reshape((1, num_bk))
     i = jnp.broadcast_to(i, (batch_size, num_bk))
 
@@ -476,14 +482,14 @@ class PyTorchEngine(engine_api.Engine):
     next_b = jnp.where(am_last_batch, b, b + 1)
     next_i = jnp.where(am_last_batch, last_good_block, 0)
 
-    # start < end
+    # start < end, continue work on the block is there is overlap with the [start, end)
     def true_comp(b, i, bk, start, end, next_b, next_i):
       b_next = jnp.where(i * bk >= end, next_b, b)
       i_next = jnp.where(i * bk >= end, next_i, i)
       i_next = jnp.where((i + 1) * bk <= start, jax.lax.div(start, bk), i_next)
       return b_next, i_next
 
-    # start > end
+    # start > end, continue work on the block is there is no overlap with [end, start)
     def false_comp(b, i, bk, start, end):
       b_next = b
       i_next = jnp.where(jnp.logical_and(i * bk >= end, (i + 1) * bk <= start), jax.lax.div(start, bk), i)
