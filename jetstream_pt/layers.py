@@ -515,59 +515,36 @@ def ragged_mqa(
 
       line_end = jnp.where(start < end, end, seq_len - 1)
 
-
+      in_specs = [
+                pl.BlockSpec(q_index_map, (None, num_heads, head_dim)),
+                pl.BlockSpec(kv_index_map, (None, bk, head_dim)),
+                pl.BlockSpec(kv_index_map, (None, bk, head_dim)),
+      ]
+      inputs = (start, end, line_end, ragged_batch_index, ragged_block_index, q, k, v)
+      quantized = False
       if k_scaler is not None:
-          out, m, l = pl.pallas_call(
-              functools.partial(
-                  ragged_flash_attention_kernel,
-                  bk=bk,
-                  mask_value=mask_value,
-                  normalize_var=normalize_var,
-                  quantized=False,
-              ),
-              grid_spec=pltpu.PrefetchScalarGridSpec(
-                  num_scalar_prefetch=5,
-                  in_specs=[
-                      pl.BlockSpec(q_index_map, (None, num_heads, head_dim)),
-                      pl.BlockSpec(kv_index_map, (None, bk, head_dim)),
-                      pl.BlockSpec(kv_index_map, (None, bk, head_dim)),
-                      pl.BlockSpec(scaler_index_map, (None, 1, bk)),
-                      pl.BlockSpec(scaler_index_map, (None, 1, bk)),
-                  ],
-                  out_specs=[
-                      pl.BlockSpec(q_index_map, (None, num_heads, head_dim)),
-                      pl.BlockSpec(q_index_map, (None, num_heads, head_dim)),
-                      pl.BlockSpec(q_index_map, (None, num_heads, head_dim)),
-                  ],
-                  grid=(batch_size, seq_len // bk),
-              ),
-              compiler_params=dict(dimension_semantics=("parallel", "arbitrary")),
-              out_shape=[
-                  q,
-                  jax.ShapeDtypeStruct((batch_size, num_heads, head_dim), jnp.float32),
-                  jax.ShapeDtypeStruct((batch_size, num_heads, head_dim), jnp.float32),
-              ],
-          )(start, end, line_end, ragged_batch_index, ragged_block_index, q, k, v, k_scaler, v_scaler)
-      else:
-        out, m, l = pl.pallas_call(
+        in_specs = in_specs + [
+          pl.BlockSpec(scaler_index_map, (None, 1, bk)),
+          pl.BlockSpec(scaler_index_map, (None, 1, bk)),
+        ]
+        inputs = inputs + (k_scaler, v_scaler)
+        quantized = True
+
+      out, m, l = pl.pallas_call(
           functools.partial(
               ragged_flash_attention_kernel,
               bk=bk,
               mask_value=mask_value,
               normalize_var=normalize_var,
-              quantized=True,
+              quantized=quantized,
           ),
           grid_spec=pltpu.PrefetchScalarGridSpec(
               num_scalar_prefetch=5,
-              in_specs=[
-                pl.BlockSpec(q_index_map, (None, num_heads, head_dim)),
-                pl.BlockSpec(kv_index_map, (None, bk, head_dim)),
-                pl.BlockSpec(kv_index_map, (None, bk, head_dim)),
-              ],
+              in_specs=in_specs,
               out_specs=[
-                pl.BlockSpec(q_index_map, (None, num_heads, head_dim)),
-                pl.BlockSpec(q_index_map, (None, num_heads, head_dim)),
-                pl.BlockSpec(q_index_map, (None, num_heads, head_dim)),
+                  pl.BlockSpec(q_index_map, (None, num_heads, head_dim)),
+                  pl.BlockSpec(q_index_map, (None, num_heads, head_dim)),
+                  pl.BlockSpec(q_index_map, (None, num_heads, head_dim)),
               ],
               grid=(batch_size, seq_len // bk),
           ),
@@ -577,7 +554,7 @@ def ragged_mqa(
               jax.ShapeDtypeStruct((batch_size, num_heads, head_dim), jnp.float32),
               jax.ShapeDtypeStruct((batch_size, num_heads, head_dim), jnp.float32),
           ],
-        )(start, end, line_end, ragged_batch_index, ragged_block_index, q, k, v)
+      )(*inputs)
   return out, (m[..., 0], l[..., 0])
 
 
