@@ -1,3 +1,6 @@
+import os
+os.environ["JAX_PLATFORM_NAME"] = "cpu"
+
 import unittest
 import torch
 import torch_xla2
@@ -10,7 +13,6 @@ class JaxTorchTest(unittest.TestCase):
 
   def test_matmul_bfloat16_xla2(self):
     """test jax vs torch matmul diff with bfloat16 on cpu"""
-    jax.config.update("jax_platform_name", "cpu")
     torch.set_default_dtype(torch.bfloat16)
     r = c = 1000
     q = torch.randn((r, c))
@@ -30,7 +32,6 @@ class JaxTorchTest(unittest.TestCase):
 
   def test_matmul_bfloat32(self):
     """test jax vs torch matmul diff with bfloat32 on cpu"""
-    jax.config.update("jax_platform_name", "cpu")
     torch.set_default_dtype(torch.float32)
     r = c = 1000
     q = torch.randn((r, c))

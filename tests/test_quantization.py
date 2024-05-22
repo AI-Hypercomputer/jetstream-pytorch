@@ -11,6 +11,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import os
+os.environ["JAX_PLATFORM_NAME"] = "cpu"
 
 import unittest
 import jax
@@ -31,9 +33,8 @@ class QuantizationTest(unittest.TestCase):
     return torch_xla2.default_env().to_xla(res)
 
   def test_kv_cache(self):
-    """test kv cache quantization"""
-    cache_shape = (3, 2, 100, 2)  # bs, num heads, seqlen, dim
-    with jax.default_device(jax.devices("cpu")[0]):
+      """test kv cache quantization"""
+      cache_shape = (3, 2, 100, 2)  # bs, num heads, seqlen, dim
       cache = cache_manager.Int8KVCacheGenerate.empty(cache_shape, None, False)
       # seqlen is 1
       k = self._xla_tensor((3, 2, 1, 2))
@@ -52,9 +53,8 @@ class QuantizationTest(unittest.TestCase):
       )
 
   def test_kv_kernel(self):
-    """test kv cache quantization"""
-    cache_shape = (3, 2, 100, 2)  # bs, num heads, seqlen, dim
-    with jax.default_device(jax.devices("cpu")[0]):
+      """test kv cache quantization"""
+      cache_shape = (3, 2, 100, 2)  # bs, num heads, seqlen, dim
       env, _ = helpers.make_env_tiny(False)
       key = jax.random.PRNGKey(123)
       key2 = jax.random.PRNGKey(456)

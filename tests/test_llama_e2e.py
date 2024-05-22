@@ -15,6 +15,7 @@
 
 import unittest
 import os
+os.environ["JAX_PLATFORM_NAME"] = "cpu"
 
 import numpy as np
 import jax
@@ -63,7 +64,6 @@ class LlamaE2ETest(unittest.TestCase):
 
   def test_original_llama2_seed(self):
     """test original llama2 output with different seed"""
-    jax.config.update("jax_platform_name", "cpu")
     print(f"---------> {jax.devices()}")
     torch.set_default_dtype(torch.bfloat16)
     # pylint: disable-next=all
@@ -90,7 +90,6 @@ class LlamaE2ETest(unittest.TestCase):
   # pylint: disable-next=all
   def test_jetstream_llama2_seed(self):
     """test llama2 output with different seed on jetstream inference engine"""
-    jax.config.update("jax_platform_name", "cpu")
     print(f"---------> {jax.devices()}")
 
     # pylint: disable-next=all
@@ -216,7 +215,6 @@ class LlamaE2ETest(unittest.TestCase):
 
   def test_llama_e2e_float32(self):
     """end to end jetstream llama test with float32"""
-    jax.config.update("jax_platform_name", "cpu")
     print(f"---------> {jax.devices()}")
 
     env, model_arg = helpers.make_env_tiny(bf16_enable=False)
@@ -225,7 +223,6 @@ class LlamaE2ETest(unittest.TestCase):
 
   def test_llama_e2e_bfloat16(self):
     "end to end jetstream llama test with bfloat16"
-    jax.config.update("jax_platform_name", "cpu")
     jax.config.update("jax_default_matmul_precision", jax.lax.Precision.HIGHEST)
     print(f"---------> {jax.devices()}")
 
@@ -236,7 +233,6 @@ class LlamaE2ETest(unittest.TestCase):
   # pylint: disable-next=all
   def test_llama_e2e_two_addtional_tokens(self):
     """end to end jetstream llama with addtional tokens"""
-    jax.config.update("jax_platform_name", "cpu")
     print(f"---------> {jax.devices()}")
 
     # pylint: disable-next=all
@@ -308,7 +304,6 @@ class LlamaE2ETest(unittest.TestCase):
   # pylint: disable-next=all
   def test_llama_e2e_four_addtional_tokens(self):
     """Add four addtional token to end to end jetstream llama test"""
-    jax.config.update("jax_platform_name", "cpu")
     print(f"---------> {jax.devices()}")
 
     # pylint: disable-next=all
@@ -378,7 +373,6 @@ class LlamaE2ETest(unittest.TestCase):
   # pylint: disable-next=all
   def test_llama_with_original_prefill_decode_32(self):
     """test jetstream llama by comparing original prefill and decode steps"""
-    jax.config.update("jax_platform_name", "cpu")
     print(f"---------> {jax.devices()}")
 
     env, model_arg = helpers.make_env_tiny(bf16_enable=False)
@@ -453,7 +447,6 @@ class LlamaE2ETest(unittest.TestCase):
   # pylint: disable-next=all
   def test_llama_with_original_prefill_decode(self):
     """test jetstream llama by comparing original prefill and decode steps with bf16"""
-    jax.config.update("jax_platform_name", "cpu")
     print(f"---------> {jax.devices()}")
 
     env, model_arg = helpers.make_env_tiny(bf16_enable=True)

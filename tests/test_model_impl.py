@@ -12,6 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
+os.environ["JAX_PLATFORM_NAME"] = "cpu"
+
 import unittest
 import jax
 import jax.numpy as jnp
@@ -34,7 +37,6 @@ class ModelComponentTest(unittest.TestCase):
 
   def setUp(self):
     """setup torch env"""
-    jax.config.update("jax_platform_name", "cpu")
     jax.config.update("jax_enable_x64", False)
     torch.set_default_dtype(torch.float32)
 
