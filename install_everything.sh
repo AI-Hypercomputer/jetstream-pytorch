@@ -17,12 +17,16 @@ pip show jax && pip uninstall -y jax
 pip show jaxlib && pip uninstall -y jaxlib
 pip show libtpu-nightly && pip uninstall -y libtpu-nightly
 pip show tensorflow && pip uninstall -y tensorflow
+pip show ray && pip uninstall -y ray
+pip show flax && pip uninstall -y flax
 
+pip install flax==0.8.3
 pip install jax[tpu]==0.4.28 -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+pip install ray[default]==2.22.0
 # torch cpu
 pip install torch==2.2.1+cpu --index-url https://download.pytorch.org/whl/cpu
-pip install tensorflow flatbuffers absl-py flax sentencepiece seqio google-cloud-storage 
-pip install safetensors colorama coverage ray[default] humanize
+pip install tensorflow flatbuffers absl-py sentencepiece seqio google-cloud-storage 
+pip install safetensors colorama coverage humanize
 
 git submodule update --init --recursive
 pip show google-jetstream && pip uninstall -y google-jetstream
