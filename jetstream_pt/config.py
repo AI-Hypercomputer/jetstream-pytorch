@@ -18,26 +18,17 @@ import time
 import jax
 from absl import flags
 from jetstream_pt.engine import create_pytorch_engine
+from jetstream_pt.environment import QuantizationConfig
 
 FLAGS = flags.FLAGS
 
-flags.DEFINE_string(
-    "tokenizer_path",
-    None,
-    "The tokenizer model path",
-    required=True,
-)
-flags.DEFINE_string("model_name", None, "model type", required=False)
-flags.DEFINE_string(
-    "checkpoint_path", None, "Directory for .pth checkpoints", required=False
-)
-flags.DEFINE_bool("bf16_enable", True, "Whether to enable bf16", required=False)
-flags.DEFINE_integer(
-    "context_length", 1024, "The context length", required=False
-)
-flags.DEFINE_integer("batch_size", 32, "The batch size", required=False)
+flags.DEFINE_string("tokenizer_path", None, "The tokenizer model path")
+flags.DEFINE_string("model_name", None, "model type")
+flags.DEFINE_string("checkpoint_path", None, "Directory for .pth checkpoints")
+flags.DEFINE_bool("bf16_enable", True, "Whether to enable bf16")
+flags.DEFINE_integer("context_length", 1024, "The context length")
+flags.DEFINE_integer("batch_size", 32, "The batch size")
 flags.DEFINE_string("size", "tiny", "size of model")
-flags.DEFINE_bool("quantize_weights", False, "weight quantization")
 flags.DEFINE_bool("quantize_kv_cache", False, "kv_cache_quantize")
 flags.DEFINE_integer("max_cache_length", 1024, "kv_cache_quantize")
 flags.DEFINE_string("sharding_config", "", "config file for sharding")
@@ -47,25 +38,67 @@ flags.DEFINE_bool(
     "whether to shard on batch dimension"
     "If set true, sharding_config will be ignored.",
 )
+flags.DEFINE_string("profiling_output", "", "The profiling output")
+
+# Quantization related flags
+flags.DEFINE_bool("quantize_weights", False, "weight quantization")
 flags.DEFINE_string(
-    "profiling_output",
-    "",
-    "The profiling output",
-    required=False,
+    "quantize_type", "int8_per_channel", "Type of quantization."
+)
+
+_VALID_QUANTIZATION_TYPE = {
+    "int8_per_channel",
+    "int4_per_channel",
+    "int8_blockwise",
+    "int4_blockwise",
+}
+
+flags.register_validator(
+    "quantize_type",
+    lambda value: value in _VALID_QUANTIZATION_TYPE,
+    f"quantize_type is invalid, supported quantization types are {_VALID_QUANTIZATION_TYPE}",
 )
 
 
-def define_profiling_flags():
-  """Add profiling related config flags to global FLAG."""
+def create_quantization_config_from_flags():
+  """Create Quantization Config from cmd flags"""
+  config = QuantizationConfig()
+  quantize_weights = FLAGS.quantize_weights
+  quantize_type = FLAGS.quantize_type
+  if not quantize_weights:
+    return config
+  config.enable_weight_quantization = True
+  config.num_bits_weight = 8 if "int8" in quantize_type else 4
+  config.is_blockwise_weight = "blockwise" in quantize_type
+  config.enable_kv_quantization = FLAGS.quantize_kv_cache
+  return config
 
 
 def create_engine_from_config_flags():
-  """create a pytorch engine from config flag"""
+  """create a pytorch engine from cmd flag"""
   jax.config.update("jax_default_prng_impl", "unsafe_rbg")
   os.environ["TF_CPP_MIN_LOG_LEVEL"] = "0"
 
   devices = jax.devices()
   start = time.perf_counter()
+
+  # Create quant config.
+  quant_config = create_quantization_config_from_flags()
+  # Derive sharding_config_path if it's not given by user.
+  sharding_file_name = FLAGS.sharding_config
+  if not sharding_file_name:
+    sharding_file_name = (
+        "llama" if FLAGS.model_name.startswith("llama") else "gemma"
+    )
+    if (
+        quant_config.enable_weight_quantization
+        and quant_config.is_blockwise_weight
+    ):
+      sharding_file_name += "-blockwise-quant"
+    sharding_file_name = os.path.join(
+        "default_shardings", sharding_file_name + ".yaml"
+    )
+
   engine = create_pytorch_engine(
       model_name=FLAGS.model_name,
       devices=devices,
@@ -75,10 +108,9 @@ def create_engine_from_config_flags():
       param_size=FLAGS.size,
       context_length=FLAGS.context_length,
       batch_size=FLAGS.batch_size,
-      quantize_weights=FLAGS.quantize_weights,
-      quantize_kv=FLAGS.quantize_kv_cache,
+      quant_config=quant_config,
       max_cache_length=FLAGS.max_cache_length,
-      sharding_config=FLAGS.sharding_config,
+      sharding_config=sharding_file_name,
       shard_on_batch=FLAGS.shard_on_batch,
   )
 

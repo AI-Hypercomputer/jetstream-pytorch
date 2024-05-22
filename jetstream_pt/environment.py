@@ -28,6 +28,16 @@ from jetstream_pt import cache_manager
 
 @dataclasses.dataclass
 # pylint: disable-next=all
+class QuantizationConfig:
+  enable_weight_quantization: bool = False
+  num_bits_weight: int = 8
+  is_blockwise_weight: bool = False
+
+  enable_kv_quantization: bool = False
+
+
+@dataclasses.dataclass
+# pylint: disable-next=all
 class JetEngineEnvironmentData:
   checkpoint_path: str = ""  # if empty string then use model's state_dict()
   checkpoint_format: str = "safetensors"  # torch, safetensors
@@ -39,8 +49,7 @@ class JetEngineEnvironmentData:
   batch_size: int = 32  # batch size is generate step batch size
   cache_sequence_length: int = 2048  # size of the cache.
 
-  enable_weight_quantization: bool = False
-  enable_kv_quantization: bool = False
+  quant_config: QuantizationConfig = QuantizationConfig()
 
   model_type: str = "llama-2-13b"  # this implies the model config
 
@@ -159,7 +168,7 @@ class JetEngineEnvironment:
     shape = self._data.cache_shape
 
     for _ in range(self.num_layers):
-      if self.enable_kv_quantization:
+      if self._data.quant_config.enable_kv_quantization:
         caches.append(
             cache_manager.Int8KVCacheGenerate.empty(
                 shape, self.cache_sharding, self.bf16_enable

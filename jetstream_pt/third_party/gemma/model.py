@@ -93,8 +93,8 @@ class GemmaAttention(nn.Module):
     self.scaling = self.head_dim**-0.5
 
     Linear = (
-        layers.WeightOnlyInt8Linear
-        if env.enable_weight_quantization
+        layers.WeightOnlyPerChannelQuantizedLinear
+        if env.quant_config.enable_weight_quantization
         else torch.nn.Linear
     )
     self.wq = Linear(
@@ -124,7 +124,7 @@ class GemmaAttention(nn.Module):
 
     Kernel = (
         layers.Int8KVAttentionKernel
-        if env.enable_kv_quantization
+        if env.quant_config.enable_kv_quantization
         else layers.AttentionKernel
     )
     self.attention_kernel = Kernel(env)
@@ -209,8 +209,8 @@ class GemmaMLP(nn.Module):
   ):
     super().__init__()
     Linear = (
-        layers.WeightOnlyInt8Linear
-        if env.enable_weight_quantization
+        layers.WeightOnlyPerChannelQuantizedLinear
+        if env.quant_config.enable_weight_quantization
         else torch.nn.Linear
     )
     self.gate_proj = Linear(
@@ -301,7 +301,7 @@ class GemmaModel(nn.Module):
     )
     Embedding = (
         layers.Int8Embedding
-        if env.enable_weight_quantization
+        if env.quant_config.enable_weight_quantization
         else torch.nn.Embedding
     )
 
@@ -345,3 +345,21 @@ class GemmaModel(nn.Module):
       embedder_weight = embedder_weight * self.embedder.weight_scaler
     logits = torch.matmul(hidden_states, embedder_weight.t())
     return logits
+
+  @staticmethod
+  def get_quantized_linear_weight_to_scaler_map():
+    return {
+        "self_attn.o_proj.weight": "self_attn.o_proj.weight_scaler",
+        "self_attn.wq.weight": "self_attn.wq.weight_scaler",
+        "self_attn.wk.weight": "self_attn.wk.weight_scaler",
+        "self_attn.wv.weight": "self_attn.wv.weight_scaler",
+        "mlp.gate_proj.weight": "mlp.gate_proj.weight_scaler",
+        "mlp.up_proj.weight": "mlp.up_proj.weight_scaler",
+        "mlp.down_proj.weight": "mlp.down_proj.weight_scaler",
+    }
+
+  @staticmethod
+  def get_quantized_embedding_weight_to_scaler_map():
+    return {
+        "embedder.weight": "embedder.weight_scaler",
+    }

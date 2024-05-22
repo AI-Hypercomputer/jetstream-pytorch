@@ -34,8 +34,8 @@ from torch.utils import _pytree as pytree
 from jetstream_pt import cache_manager
 from jetstream_pt import quantize
 from jetstream_pt import torchjax
-from jetstream_pt.environment import JetEngineEnvironment, JetEngineEnvironmentData
-from jetstream_pt.third_party.llama import model_exportable, model_args
+from jetstream_pt.environment import JetEngineEnvironment, JetEngineEnvironmentData, QuantizationConfig
+from jetstream_pt.third_party.llama import model_exportable as llama_model, model_args
 from jetstream_pt.third_party.gemma import config as gemma_config, model as gemma_model
 
 
@@ -114,14 +114,13 @@ class PyTorchEngine(engine_api.Engine):
     #      out_shardings=self.get_decode_state_sharding())
     self._lock = threading.RLock()
 
-  # pylint: disable-next=all
   def init_decode_state(
       self,
   ) -> DecodeState:
     caches_obj = self.env.make_caches_generate()
     caches = [c.state() for c in caches_obj]
     scalers = []
-    if self.env.enable_kv_quantization:
+    if self.env.quant_config.enable_kv_quantization:
       scalers = [c.scalers() for c in caches_obj]
     return DecodeState(
         jnp.zeros((self.env.batch_size, 1), dtype=jnp.int32),
@@ -148,7 +147,7 @@ class PyTorchEngine(engine_api.Engine):
       mask,
       input_pos,
   ):
-    if self.env.enable_kv_quantization:
+    if self.env.quant_config.enable_kv_quantization:
       caches_obj = [
           cache_manager.Int8KVCacheGenerate(k, v, ks, vs, input_indexes)
           for (k, v), (ks, vs) in torchjax.to_torch(
@@ -173,7 +172,7 @@ class PyTorchEngine(engine_api.Engine):
         res = torch.func.functional_call(self.pt_model, paramst, argst)
     updated_caches = [c.state() for c in caches_obj]
     scales = []
-    if self.env.enable_kv_quantization:
+    if self.env.quant_config.enable_kv_quantization:
       scales = [c.scalers() for c in caches_obj]
     return torchjax.from_torch((res, updated_caches, scales))
 
@@ -183,7 +182,9 @@ class PyTorchEngine(engine_api.Engine):
   )
   def _call_model_prefill(self, weights, tokens, input_indexes):
     caches = [
-        cache_manager.KVCachePrefill(self.env.enable_kv_quantization)
+        cache_manager.KVCachePrefill(
+            self.env.quant_config.enable_kv_quantization
+        )
         for _ in self.pt_model.layers
     ]
     mask = jnp.full(
@@ -272,7 +273,7 @@ class PyTorchEngine(engine_api.Engine):
     mask_insert = jnp.where(cond, 0, float("-inf"))
     mask = decode_state.mask.at[slot].set(mask_insert)
     input_pos = decode_state.input_pos.at[slot].set(prefix.seq_len)
-    if not self.env.enable_kv_quantization:
+    if not self.env.quant_config.enable_kv_quantization:
 
       @functools.partial(jax.jit, donate_argnums=(0, 1), inline=True)
       def insert(cache, new_entry):
@@ -293,8 +294,8 @@ class PyTorchEngine(engine_api.Engine):
       @functools.partial(jax.jit, donate_argnums=(0, 1), inline=True)
       def insert(cache, scaler, new_entry):
         reduce_axis = (1, 3)
-        vals, scales = torch_xla2.interop.call_torch(
-            quantize.quantize_torch_int8, new_entry, reduce_axis
+        vals, scales, _ = torchjax.call_torch(
+            quantize.quantize_tensor, new_entry, reduce_axis
         )
         new_scaler = jax.lax.dynamic_update_slice(
             scaler,
@@ -373,7 +374,7 @@ class PyTorchEngine(engine_api.Engine):
 
     scales = []
     caches = []
-    if not self.env.enable_kv_quantization:
+    if not self.env.quant_config.enable_kv_quantization:
 
       @functools.partial(jax.jit, donate_argnums=(0, 1), inline=True)
       def insert(cache, new_entry):
@@ -392,8 +393,8 @@ class PyTorchEngine(engine_api.Engine):
       def insert(cache, scaler, new_entry):
         new_entry = jnp.transpose(new_entry.squeeze(0), (1, 0, 2))
         reduce_axis = (1, 2)
-        vals, scales = torch_xla2.interop.call_torch(
-            quantize.quantize_torch_int8, new_entry, reduce_axis
+        vals, scales, _ = torchjax.call_torch(
+            quantize.quantize_tensor, new_entry, reduce_axis
         )
         new_scaler = scaler.at[slot, :, update_indexes, :].set(scales)
         new_scaler = jax.lax.with_sharding_constraint(
@@ -537,26 +538,16 @@ class PyTorchEngine(engine_api.Engine):
     return pytree.tree_map_only(torch.Tensor, make_array, model_args_meta)
 
   def _load_from_safetensors(self, path):
-
     weights = {}
     with safe_open(path, framework="flax", device="cpu") as f:
       for key, model_weights in self.pt_model.state_dict().items():
         if key == "freqs_cis":
           continue
-        arr = jax.device_put(f.get_tensor(key), self.env.sharding_by_name(key))
+        weights[key] = f.get_tensor(key)
         assert tuple(model_weights.shape) == tuple(
-            arr.shape
-        ), f"key: {key} error: {model_weights.shape} != {arr.shape}"
-        weights[key] = arr
-
-    freqs_cis = torch_xla2.tensor.t2j(self.pt_model.freqs_cis)
-    weights["freqs_cis"] = jax.device_put(freqs_cis, self.replicated)
-
-    for k, v in weights.items():
-      if k.startswith("layers") and not k.startswith("layers.0"):
-        continue
-      print(f"Name: {k}, shape: {v.shape} x {v.dtype}")
-
+            weights[key].shape
+        ), f"key: {key} error: {model_weights.shape} != {weights[key].shape}"
+    weights["freqs_cis"] = torch_xla2.tensor.t2j(self.pt_model.freqs_cis)
     return weights
 
   def _load_from_state_dict(self, path):
@@ -564,19 +555,10 @@ class PyTorchEngine(engine_api.Engine):
     weights = {}
     for key, model_weights in self.pt_model.state_dict().items():
       assert key in state_dict, f"key: {key} not found"
-      arr = jax.device_put(
-          torchjax.from_torch(state_dict[key]), self.env.sharding_by_name(key)
-      )
+      weights[key] = torchjax.from_torch(state_dict[key])
       assert tuple(model_weights.shape) == tuple(
-          arr.shape
-      ), f"key: {key} error: {model_weights.shape} != {arr.shape}"
-      weights[key] = arr
-
-    for k, v in weights.items():
-      if k.startswith("layers") and not k.startswith("layers.0"):
-        continue
-      print(f"Name: {k}, shape: {v.shape} x {v.dtype}")
-
+          weights[key].shape
+      ), f"key: {key} error: {model_weights.shape} != {weights[key].shape}"
     return weights
 
   # pylint: disable-next=all
@@ -585,20 +567,35 @@ class PyTorchEngine(engine_api.Engine):
     with jax.default_device(self.colocated_cpus):
       if self.env.checkpoint_path:
         if self.env.checkpoint_format == "safetensors":
-          return self._load_from_safetensors(self.env.checkpoint_path)
+          jax_weights = self._load_from_safetensors(self.env.checkpoint_path)
         elif self.env.checkpoint_format == "state_dict":
-          return self._load_from_state_dict(self.env.checkpoint_path)
+          jax_weights = self._load_from_state_dict(self.env.checkpoint_path)
       else:
         jax_weights = self._make_state_dict_jax(self.pt_model.state_dict())
-    jax_weights = {
-        key: jax.device_put(value, self.env.sharding_by_name(key))
-        for key, value in jax_weights.items()
-    }
-    for k, v in jax_weights.items():
-      if k.startswith("layers") and not k.startswith("layers.0"):
-        continue
-      print(f"Name: {k}, shape: {v.shape} x {v.dtype}")
-    return jax_weights
+
+      if self.env.quant_config.num_bits_weight == 4:
+        assert (
+            "gemma" not in self.env.model_type
+        ), "int-4 is not supported in Gemma model yet."
+        quantize_linear_weights_scaler_map = (
+            self.pt_model.get_quantized_linear_weight_to_scaler_map()
+        )
+        with jax.default_device(jax.devices("cpu")[0]):
+          for key, val in jax_weights.items():
+            for qname in quantize_linear_weights_scaler_map.keys():
+              if key.endswith(qname):
+                val = val.astype(jnp.int4)
+                jax_weights[key] = val
+
+      jax_weights = {
+          key: jax.device_put(value, self.env.sharding_by_name(key))
+          for key, value in jax_weights.items()
+      }
+      for k, v in jax_weights.items():
+        if k.startswith("layers") and not k.startswith("layers.0"):
+          continue
+        print(f"Name: {k}, shape: {v.shape} x {v.dtype}")
+      return jax_weights
 
   @property
   def colocated_cpus(self) -> Union[list[engine_api.CpuDevices], None]:
@@ -665,8 +662,7 @@ def create_pytorch_engine(
     batch_size: int = 1,
     max_decode_length: int = 4096,
     model_name="llama-2",
-    quantize_weights=False,
-    quantize_kv=False,
+    quant_config: QuantizationConfig = QuantizationConfig(),
     max_cache_length=1024,
     sharding_config=None,
     shard_on_batch=False,
@@ -723,8 +719,7 @@ def create_pytorch_engine(
       batch_size=batch_size,
       max_decode_length=max_decode_length,
       max_input_sequence_length=context_length,
-      enable_weight_quantization=quantize_weights,
-      enable_kv_quantization=quantize_kv,
+      quant_config=quant_config,
       cache_sequence_length=max_cache_length,
       bf16_enable=bf16_enable,
       sharding_config_path=sharding_config,
@@ -740,7 +735,6 @@ def create_pytorch_engine(
         model_name + "-" + param_size, context_length, batch_size, bf16_enable
     )
     args.device = "meta"
-    args.quantize = quantize_weights
     env_data.cache_shape = (
         batch_size,
         args.n_kv_heads,
@@ -750,7 +744,7 @@ def create_pytorch_engine(
     env_data.model_type = model_name + "-" + param_size
     env_data.num_layers = args.n_layers
     env = JetEngineEnvironment(env_data)
-    pt_model = model_exportable.Transformer(args, env)
+    pt_model = llama_model.Transformer(args, env)
   elif model_name == "gemma":
     args = gemma_config.get_model_config(param_size)
     env_data.cache_shape = (

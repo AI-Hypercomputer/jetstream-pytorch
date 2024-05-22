@@ -27,7 +27,6 @@ class ModelArgs:
   head_dim = -1
   infer_length = 0
   device = "cpu"
-  quantize = False
 
   rope_theta: float = 10000.0
 

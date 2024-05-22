@@ -28,16 +28,16 @@ import json
 import os
 import time
 
-from absl import app
-from absl import flags
-from etils import epath
-
-from safetensors.torch import save_file
 import torch
+import torch.utils._pytree as pytree
+from absl import app, flags
+from etils import epath
 from google.cloud import storage
-
 from jetstream_pt import quantize
-
+from jetstream_pt.config import FLAGS
+from jetstream_pt.third_party.gemma import model as gemma_model
+from jetstream_pt.third_party.llama import model_exportable as llama_model
+from safetensors.torch import save_file
 
 _INPUT_CHECKPOINT_DIR = epath.DEFINE_path(
     "input_checkpoint_dir",
@@ -68,66 +68,53 @@ _OUTPUT_SAFETENSORS = flags.DEFINE_bool(
     True,
     "When set to true, save to HugginFace SafeTensors format",
 )
-_QUANTIZE = flags.DEFINE_bool(
-    "quantize", False, "When set to true, produces quantized weights"
-)
-_MODEL_TYPE = flags.DEFINE_string("model_name", "llama", "Type of the model.")
-
-# ParallelEmbedding is col partitioned across the shards.
-# ColumnParallelLinear is row partitioned across shards due to transpose.
-# RowParallelLinear is col partitioned across shards due to transpose.
-# None is no partitioning and tensor should be identical across shards
-_WEIGHT_SHARDING_TYPE = {
-    "tok_embeddings.weight": "ParallelEmbedding",
-    "rope.freqs": None,
-    "attention.wq.weight": "ColumnParallelLinear",
-    "attention.wk.weight": "ColumnParallelLinear",
-    "attention.wv.weight": "ColumnParallelLinear",
-    "attention.wo.weight": "RowParallelLinear",
-    "feed_forward.w1.weight": "ColumnParallelLinear",
-    "feed_forward.w2.weight": "RowParallelLinear",
-    "feed_forward.w3.weight": "ColumnParallelLinear",
-    "attention_norm.weight": None,
-    "ffn_norm.weight": None,
-    "norm.weight": None,
-    "output.weight": "ColumnParallelLinear",
-}
-
-_LLAMA_QUANTIZED_WEIGHTS_TO_SCALER_NAME = {
-    "tok_embeddings.weight": "tok_embeddings.weight_scaler",
-    "attention.wq.weight": "attention.wq.weight_scaler",
-    "attention.wk.weight": "attention.wk.weight_scaler",
-    "attention.wv.weight": "attention.wv.weight_scaler",
-    "attention.wo.weight": "attention.wo.weight_scaler",
-    "feed_forward.w1.weight": "feed_forward.w1.weight_scaler",
-    "feed_forward.w2.weight": "feed_forward.w2.weight_scaler",
-    "feed_forward.w3.weight": "feed_forward.w3.weight_scaler",
-    "output.weight": "output.weight_scaler",
-}
-
-_GEMMA_QUANTIZED_WEIGHTS_TO_SCALER_NAME = {
-    "self_attn.o_proj.weight": "self_attn.o_proj.weight_scaler",
-    "self_attn.wq.weight": "self_attn.wq.weight_scaler",
-    "self_attn.wk.weight": "self_attn.wk.weight_scaler",
-    "self_attn.wv.weight": "self_attn.wv.weight_scaler",
-    "mlp.gate_proj.weight": "mlp.gate_proj.weight_scaler",
-    "mlp.up_proj.weight": "mlp.up_proj.weight_scaler",
-    "mlp.down_proj.weight": "mlp.down_proj.weight_scaler",
-    "embedder.weight": "embedder.weight_scaler",
-}
 
 
-def _quantize_state_dict(state_dict, weight_map, weight_axis):
+def _find_scale_name(name, map):
+  for key, val in map.items():
+    if name.endswith(key):
+      return key, val
+  return "", ""
+
+
+def _quantize_state_dict(
+    state_dict,
+    linear_weight_map,
+    embedding_weight_names,
+    weight_axis,
+    n_bit,
+    is_blockwise,
+):
   updated_weights = {}
-  for key, val in state_dict.items():
-    for qname, qscale_name in weight_map.items():
-      if key.endswith(qname):
-        new_weights, scaler = quantize.quantize_torch_int8(
-            val, reduce_axis=(weight_axis(key),)
-        )
-        updated_weights[key] = new_weights
-        scale_name = key[: -len(qname)] + qscale_name
-        updated_weights[scale_name] = scaler.squeeze()
+  block_size = 128 if is_blockwise else -1
+  for name, val in state_dict.items():
+    name_suffix, qscale_name = _find_scale_name(name, embedding_weight_names)
+    is_embedding = qscale_name != ""
+    if is_embedding:
+      # Embedding layers do not support blockwise and int4 quant now.
+      # Quantize to per-channel int8 for now.
+      orig_block_size = block_size
+      block_size = -1
+      orig_n_bit = n_bit
+      n_bit = 8
+    else:
+      name_suffix, qscale_name = _find_scale_name(name, linear_weight_map)
+    if qscale_name != "":
+      new_weights, scaler, _ = quantize.quantize_tensor(
+          val,
+          reduce_axis=(weight_axis(name),),
+          n_bit=n_bit,
+          block_size=block_size,
+      )
+      new_weights, scaler, _ = quantize.load_q_weight_helper(
+          new_weights, scaler, zp=None, block_size=block_size
+      )
+      updated_weights[name] = new_weights
+      scale_name = name[: -len(name_suffix)] + qscale_name
+      updated_weights[scale_name] = scaler.squeeze()
+      if is_embedding:
+        block_size = orig_block_size
+        n_bit = orig_n_bit
   state_dict.update(updated_weights)
   return state_dict
 
@@ -192,7 +179,7 @@ def _merge_llama_weights(
         f"{len(tensors)} shards (shape = {tensors[0].shape}) for {key})"
     )
     state_dict_for_key = {}
-    for pattern, kind in _WEIGHT_SHARDING_TYPE.items():
+    for pattern, kind in llama_model.get_weight_sharding_type.items():
       if not key.endswith(pattern):
         continue
       with torch.no_grad():
@@ -303,6 +290,12 @@ def _export_to_local(output_ckpt_dir: epath.Path, params, state_dict):
   output_ckpt_dir.mkdir(parents=True, exist_ok=True)
   (output_ckpt_dir / "params.json").write_text(json.dumps(params))
   if _OUTPUT_SAFETENSORS.value:
+    # safetensors.torch.save_file expects tensor to be contiguous.
+    state_dict = pytree.tree_map_only(
+        torch.Tensor,
+        lambda t: t.contiguous() if not t.is_contiguous() else t,
+        state_dict,
+    )
     save_file(state_dict, os.fspath(output_ckpt_dir / "model.safetensors"))
   else:
     torch.save(state_dict, os.fspath(output_ckpt_dir / "consolidated.00.pth"))
@@ -381,19 +374,35 @@ def _get_gemma_state_dict(input_ckpt_dir):
 def main(argv) -> None:
   """merge weights"""
 
-  if _MODEL_TYPE.value == "gemma":
+  if FLAGS.model_name == "gemma":
     state_dict, params = _get_gemma_state_dict(_INPUT_CHECKPOINT_DIR.value)
-    quantize_weight_map = _GEMMA_QUANTIZED_WEIGHTS_TO_SCALER_NAME
-    weight_axis = lambda x: 0 if x == "embedder.weight" else 1
+    quantize_linear_weight_map = (
+        gemma_model.GemmaModel.get_quantized_linear_weight_to_scaler_map()
+    )
+    quantize_embedding_weight_map = (
+        gemma_model.GemmaModel.get_quantized_embedding_weight_to_scaler_map()
+    )
   else:
     state_dict, params = _get_llama_state_dict(_INPUT_CHECKPOINT_DIR.value)
-    quantize_weight_map = _LLAMA_QUANTIZED_WEIGHTS_TO_SCALER_NAME
-    weight_axis = lambda x: 0 if x == "tok_embeddings.weight" else 1
+    quantize_linear_weight_map = (
+        llama_model.Transformer.get_quantized_linear_weight_to_scaler_map()
+    )
+    quantize_embedding_weight_map = (
+        llama_model.Transformer.get_quantized_embedding_weight_to_scaler_map()
+    )
 
-  if _QUANTIZE.value:
+  if FLAGS.quantize_type:
+    quantize_num_bits = 8 if "int8" in FLAGS.quantize_type else 4
+    is_blockwise = "blockwise" in FLAGS.quantize_type
+    weight_axis = lambda x: 0 if x in quantize_embedding_weight_map else 1
     start = time.perf_counter()
     state_dict = _quantize_state_dict(
-        state_dict, quantize_weight_map, weight_axis
+        state_dict,
+        quantize_linear_weight_map,
+        quantize_embedding_weight_map,
+        weight_axis,
+        quantize_num_bits,
+        is_blockwise,
     )
     end = time.perf_counter()
     print(f"Quantizing weights takes {end - start} seconds")

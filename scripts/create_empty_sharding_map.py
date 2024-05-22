@@ -34,12 +34,14 @@ _COLLAPSE_SAME_LAYERS = flags.DEFINE_bool("collapse_same_layers", True, "")
 
 def create_model():
   batch_size = 3
+  quant_config = QuantizationConfig(
+      enable_weight_quantization=True, enable_kv_quantization=True
+  )
   env_data = JetEngineEnvironmentData(
       batch_size=3,
       max_decode_length=1024,
       max_input_sequence_length=1024,
-      enable_weight_quantization=True,
-      enable_kv_quantization=True,
+      quant_config=quant_config,
       cache_sequence_length=1024,
       bf16_enable=True,
   )
@@ -55,7 +57,6 @@ def create_model():
         bf16_enable=True,
     )
     args.device = "meta"
-    args.quantize = False
     env = JetEngineEnvironment(env_data)
     return model_exportable.Transformer(args, env)
   elif model_name == "gemma":

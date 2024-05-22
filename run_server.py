@@ -21,13 +21,7 @@ import jetstream_pt
 from absl import app, flags
 from jetstream.core import server_lib
 from jetstream.core.config_lib import ServerConfig
-from jetstream_pt.config import (
-    FLAGS,
-    create_engine_from_config_flags,
-    define_profiling_flags,
-)
-
-define_profiling_flags()
+from jetstream_pt.config import FLAGS, create_engine_from_config_flags
 
 flags.DEFINE_integer("port", 9000, "port to listen on")
 flags.DEFINE_integer("threads", 64, "number of worker threads in thread pool")
@@ -45,7 +39,9 @@ def main(argv: Sequence[str]):
   # No devices for local cpu test. A None for prefill and a None for generate.
   devices = server_lib.get_devices()
   print(f"devices: {devices}")
+
   engine = create_engine_from_config_flags()
+
   server_config = ServerConfig(
       interleaved_slices=(f"tpu={len(jax.devices())}",),
       interleaved_engine_create_fns=(lambda a: engine,),

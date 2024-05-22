@@ -3,14 +3,21 @@
 
 from typing import Any, List, Optional
 
+import jax
 import torch
-from torch import nn
 import torch.nn.functional as F
+from jetstream_pt.layers import (
+    Attention,
+    Int8Embedding,
+    RMSNorm,
+    WeightOnlyBlockwiseQuantizedLinear,
+    WeightOnlyPerChannelQuantizedLinear,
+    get_quantized_enbedding_layer,
+    get_quantized_linear_layer,
+)
+from torch import nn
 
 from . import model_args
-import jax
-
-from jetstream_pt.layers import Attention, RMSNorm, Int8Embedding, WeightOnlyInt8Linear
 
 
 class FeedForward(nn.Module):
@@ -23,7 +30,6 @@ class FeedForward(nn.Module):
       multiple_of: int,
       ffn_dim_multiplier: Optional[float],
       device="meta",
-      quantize=False,
       env=None,
   ):
     super().__init__()
@@ -34,7 +40,7 @@ class FeedForward(nn.Module):
       hidden_dim = int(ffn_dim_multiplier * hidden_dim)
     hidden_dim = multiple_of * ((hidden_dim + multiple_of - 1) // multiple_of)
 
-    LinearLayer = WeightOnlyInt8Linear if quantize else nn.Linear
+    LinearLayer = get_quantized_linear_layer(env.quant_config)
 
     self.w1 = LinearLayer(
         dim,
@@ -89,7 +95,6 @@ class TransformerBlock(nn.Module):
         multiple_of=args.multiple_of,
         ffn_dim_multiplier=args.ffn_dim_multiplier,
         device=args.device,
-        quantize=args.quantize,
         env=env,
     )
     self.layer_id = layer_id
@@ -142,7 +147,7 @@ class Transformer(nn.Module):
     self.vocab_size = params.vocab_size
     self.n_layers = params.n_layers
 
-    Embedding = Int8Embedding if params.quantize else nn.Embedding
+    Embedding = get_quantized_enbedding_layer(env.quant_config)
     self.tok_embeddings = Embedding(
         params.vocab_size,
         params.dim,
@@ -154,7 +159,7 @@ class Transformer(nn.Module):
       self.layers.append(TransformerBlock(layer_id, params, env))
     self.norm = RMSNorm(params.dim, eps=params.norm_eps, device=params.device)
 
-    LinearLayer = WeightOnlyInt8Linear if params.quantize else nn.Linear
+    LinearLayer = get_quantized_linear_layer(env.quant_config)
 
     self.output = LinearLayer(
         params.dim,
@@ -199,3 +204,44 @@ class Transformer(nn.Module):
       h = self.norm(h)
       output = self.output(h).float()
     return output
+
+  @staticmethod
+  def get_quantized_linear_weight_to_scaler_map():
+    return {
+        "attention.wq.weight": "attention.wq.weight_scaler",
+        "attention.wk.weight": "attention.wk.weight_scaler",
+        "attention.wv.weight": "attention.wv.weight_scaler",
+        "attention.wo.weight": "attention.wo.weight_scaler",
+        "feed_forward.w1.weight": "feed_forward.w1.weight_scaler",
+        "feed_forward.w2.weight": "feed_forward.w2.weight_scaler",
+        "feed_forward.w3.weight": "feed_forward.w3.weight_scaler",
+        "output.weight": "output.weight_scaler",
+    }
+
+  @staticmethod
+  def get_quantized_embedding_weight_to_scaler_map():
+    return {
+        "tok_embeddings.weight": "tok_embeddings.weight_scaler",
+    }
+
+  @staticmethod
+  def get_weight_sharding_type():
+    # ParallelEmbedding is col partitioned across the shards.
+    # ColumnParallelLinear is row partitioned across shards due to transpose.
+    # RowParallelLinear is col partitioned across shards due to transpose.
+    # None is no partitioning and tensor should be identical across shards
+    return {
+        "tok_embeddings.weight": "ParallelEmbedding",
+        "rope.freqs": None,
+        "attention.wq.weight": "ColumnParallelLinear",
+        "attention.wk.weight": "ColumnParallelLinear",
+        "attention.wv.weight": "ColumnParallelLinear",
+        "attention.wo.weight": "RowParallelLinear",
+        "feed_forward.w1.weight": "ColumnParallelLinear",
+        "feed_forward.w2.weight": "RowParallelLinear",
+        "feed_forward.w3.weight": "ColumnParallelLinear",
+        "attention_norm.weight": None,
+        "ffn_norm.weight": None,
+        "norm.weight": None,
+        "output.weight": "ColumnParallelLinear",
+    }
