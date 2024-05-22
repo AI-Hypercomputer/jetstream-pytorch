@@ -102,7 +102,7 @@ def main(argv):
   print("======= decode starting ===")
   dec_times = []
   for i in range(10):
-    if i == 7 and profiling_output:
+    if profiling_output and i == 7:
       jax.profiler.start_trace(profiling_output)
     start = time.perf_counter()
     # pylint: disable-next=all
