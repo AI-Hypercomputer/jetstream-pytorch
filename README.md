@@ -69,10 +69,9 @@ Need to manually modify the `config.json` in the checkpoint folder to make it a 
 ```bash
 export input_ckpt_dir=Original llama weights directory
 export output_ckpt_dir=The output directory
-export quantize=True #whether to quantize
 export model_name="llama-3" # or "llama-2", "gemma"
-export quantize_type="int8_per_channel" # Availabe quantize type: {"int8", "int4"} x {"per_channel", "blockwise"}
-python -m convert_checkpoints --model_name=$model_name --input_checkpoint_dir=$input_ckpt_dir --output_checkpoint_dir=$output_ckpt_dir --quantize=$quantize --quantize_type=$quantize_type
+export quantize_type="int8_per_channel" # Availabe quantize type: {"int8", "int4"} x {"per_channel", "blockwise"}, setting this will quantize the weights
+python -m convert_checkpoints --model_name=$model_name --input_checkpoint_dir=$input_ckpt_dir --output_checkpoint_dir=$output_ckpt_dir --quantize_type=$quantize_type
 ```
 
 
