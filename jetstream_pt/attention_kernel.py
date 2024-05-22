@@ -3,8 +3,14 @@ import jax.numpy as jnp
 from jax.experimental import pallas as pl
 from jax.experimental.pallas import tpu as pltpu
 from jax.experimental.shard_map import shard_map
+import functools
+
+import torch
 
 import numpy as np
+
+import math
+import torch.nn.functional as F
 
 DEFAULT_MASK_VALUE = -0.7 * float(np.finfo(np.dtype("float32")).max)
 
@@ -252,7 +258,7 @@ def dense_attention(xq, keys, values, k_scaler=None, v_scaler=None, mask=None):
 
 class RaggedAttentionKernel:
 
-  def __init(self, env, input_specs, output_specs, sharding_axis):
+  def __init__(self, env, input_specs, output_specs, sharding_axis):
     self.binded_ragged_mha = functools.partial(ragged_mha, bk=env.block_size, shard_axis=sharding_axis)
     self.binded_ragged_mha = shard_map(ragged_mha, env.mesh, input_specs, output_specs, check_rep=False)
     self.binded_ragged_mha = jax.jit(self.binded_ragged_mha)

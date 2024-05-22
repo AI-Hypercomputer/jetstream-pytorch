@@ -15,9 +15,7 @@
 # pylint: disable-all
 """This version contains modification to make it easier to trace and support batch."""
 
-import math
 from typing import Optional, Tuple
-import functools
 
 import jax
 from . import attention_kernel as ak
@@ -409,8 +407,8 @@ class AttentionKernel:
     self.dense_attention = ak.dense_attention
     self.ragged_attention = ak.RaggedAttentionKernel(
       env, 
-      in_specs=(*([qkv_pspec] * 3), *([others_pspec] * 4)), 
-      out_specs=(qkv_pspec, (others_pspec, others_pspec)), 
+      input_specs=(*([qkv_pspec] * 3), *([others_pspec] * 4)), 
+      output_specs=(qkv_pspec, (others_pspec, others_pspec)), 
       sharding_axis=self.shard_axis
     )
 
@@ -458,8 +456,8 @@ class Int8KVAttentionKernel:
     self.dense_attention = ak.dense_attention
     self.ragged_attention = ak.RaggedAttentionKernel(
       env, 
-      in_specs=(*([qkv_pspec] * 3), *([others_pspec] * 6)), 
-      out_specs=(qkv_pspec, (others_pspec, others_pspec)), 
+      input_specs=(*([qkv_pspec] * 3), *([others_pspec] * 6)), 
+      output_specs=(qkv_pspec, (others_pspec, others_pspec)), 
       sharding_axis=self.shard_axis
     )
 
