@@ -63,8 +63,9 @@ flags.register_validator(
 def create_quantization_config_from_flags():
   """Create Quantization Config from cmd flags"""
   config = QuantizationConfig()
+  quantize_weights = FLAGS.quantize_weights
   quantize_type = FLAGS.quantize_type
-  if quantize_type == "":
+  if not quantize_weights:
     return config
   config.enable_weight_quantization = True
   config.num_bits_weight = 8 if "int8" in quantize_type else 4
@@ -84,16 +85,18 @@ def create_engine_from_config_flags():
   # Create quant config.
   quant_config = create_quantization_config_from_flags()
   # Derive sharding_config_path if it's not given by user.
-  sharding_config_path = FLAGS.sharding_config
-  if not sharding_config_path:
-    sharding_config_name = FLAGS.model_name
+  sharding_file_name = FLAGS.sharding_config
+  if not sharding_file_name:
+    sharding_file_name = (
+        "llama" if FLAGS.model_name.startswith("llama") else "gemma"
+    )
     if (
         quant_config.enable_weight_quantization
         and quant_config.is_blockwise_weight
     ):
-      sharding_config_name += "-blockwise-quant"
-    sharding_config_path = os.path.join(
-        "default_shardings", sharding_config_name + ".yaml"
+      sharding_file_name += "-blockwise-quant"
+    sharding_file_name = os.path.join(
+        "default_shardings", sharding_file_name + ".yaml"
     )
 
   engine = create_pytorch_engine(
@@ -107,7 +110,7 @@ def create_engine_from_config_flags():
       batch_size=FLAGS.batch_size,
       quant_config=quant_config,
       max_cache_length=FLAGS.max_cache_length,
-      sharding_config=sharding_config_path,
+      sharding_config=sharding_file_name,
       shard_on_batch=FLAGS.shard_on_batch,
   )
 
