@@ -20,10 +20,8 @@ from typing import Optional, Tuple
 import functools
 
 import jax
+from . import attention_kernel as ak
 import jax.numpy as jnp
-from jax.experimental import pallas as pl
-from jax.experimental.pallas import tpu as pltpu
-from jax.experimental.shard_map import shard_map
 import torch
 import torch.nn.functional as F
 import torch_xla2
@@ -35,6 +33,7 @@ from jetstream_pt.quantize import (
     quantize_tensor,
 )
 from torch import nn
+from . import attention_kernel as ak
 
 
 def _calc_cosine_dist(x, y):
@@ -399,249 +398,6 @@ def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
       .reshape(bs, n_kv_heads * n_rep, slen, head_dim)
   )
 
-DEFAULT_MASK_VALUE = -0.7 * float(np.finfo(np.dtype("float32")).max)
-
-def ragged_flash_attention_kernel(
-    start_ref,
-    end_ref,
-    line_end_ref,
-    pre_b_ref,
-    pre_i_ref,
-    q_ref,
-    k_ref,
-    v_ref,
-    k_scaler_ref,
-    v_scaler_ref,
-    o_ref,
-    m_ref,
-    l_ref,
-    bk: int,
-    mask_value: float,
-    normalize_var: bool,
-    quantized: bool,
-):
-  """Pallas kernel for flash attention."""
-  with jax.named_scope("attention_kernel"):
-      b, i = pl.program_id(0), pl.program_id(1)
-
-      @pl.when(i == 0)
-      def init():
-        with jax.named_scope("init"):
-            m_ref[...] = jnp.full_like(m_ref, -jnp.inf)
-            l_ref[...] = jnp.zeros_like(l_ref)
-            o_ref[...] = jnp.zeros_like(o_ref)
-
-      length = line_end_ref[b]
-      start = start_ref[b]
-      end = end_ref[b]
-
-      @pl.when(jnp.logical_and(i * bk < length, start != end))
-      def run():
-        with jax.named_scope("run_qk"):
-            q = q_ref[...].astype(jnp.float32)
-            k = k_ref[...].astype(jnp.float32)
-            v = v_ref[...].astype(jnp.float32)
-            m_prev, l_prev = m_ref[...], l_ref[...]
-
-            qk = jax.lax.dot_general(
-                q, k, (((1,), (1,)), ((), ())), preferred_element_type=jnp.float32
-            )
-            if normalize_var:
-              qk = qk / jnp.sqrt(k.shape[-1])
-            if quantized:
-              qk = qk * k_scaler_ref[...]
-        with jax.named_scope("run_mask"):
-            start = start_ref[b]
-            end = end_ref[b]
-            iota = jax.lax.broadcasted_iota(jnp.int32, qk.shape, 1)
-            mask_start_lt_end = jnp.logical_and(i * bk + iota >= start, i * bk + iota < end).astype(jnp.int32)
-            mask_start_gt_end = jnp.logical_or(i * bk + iota >= start, i * bk + iota < end).astype(jnp.int32)
-            #mask = jax.lax.cond(start <= end, lambda: mask_start_lt_end, lambda: mask_start_gt_end)
-            mask = jnp.where(start <= end, mask_start_lt_end, mask_start_gt_end)
-
-            qk = qk + jnp.where(mask, 0.0, mask_value)
-
-        with jax.named_scope("run_softmax"):
-            m_curr = qk.max(axis=-1)
-
-            s_curr = jnp.exp(qk - m_curr[..., None])
-
-            l_curr = jax.lax.broadcast_in_dim(s_curr.sum(axis=-1), l_prev.shape, (0,))
-            if quantized:
-              s_curr = s_curr * v_scaler_ref[...]
-            o_curr_times_l_curr = jnp.dot(s_curr, v)
-            m_curr = jax.lax.broadcast_in_dim(m_curr, m_prev.shape, (0,))
-            m_next = jnp.maximum(m_prev, m_curr)
-            alpha = jnp.exp(m_prev - m_next)
-            beta = jnp.exp(m_curr - m_next)
-            l_next = alpha * l_prev + beta * l_curr
-            l_next_safe = jnp.where(l_next == 0.0, 1.0, l_next)
-
-            m_ref[...], l_ref[...] = m_next, l_next_safe
-            o_ref[...] = (
-                (l_prev * alpha * o_ref[...] + beta * o_curr_times_l_curr) / l_next_safe
-            ).astype(o_ref.dtype)
-
-@functools.partial(jax.jit, static_argnames=["bk", "mask_value", "normalize_var"])
-def ragged_mqa(
-    q: jax.Array,
-    k: jax.Array,
-    v: jax.Array,
-    start: jax.Array,
-    end: jax.Array,
-    k_scaler: jax.Array | None = None,
-    v_scaler: jax.Array | None = None,
-    ragged_batch_index = None,
-    ragged_block_index = None,
-    bk: int = 512,
-    mask_value: float = DEFAULT_MASK_VALUE,
-    normalize_var: bool = True,
-) -> tuple[jax.Array, tuple[jax.Array, jax.Array]]:
-  """Ragged multi query attention."""
-  with jax.named_scope("ragged_mqa"):
-      batch_size, num_heads, head_dim = q.shape 
-      seq_len = k.shape[1]  
-
-      def kv_index_map(b, i, start_ref, end_ref, line_end_ref, ragged_batch_index_ref, ragged_block_index_ref):
-        index = b * (seq_len // bk) + i
-        return ragged_batch_index_ref[index], ragged_block_index_ref[index], 0
-
-      def q_index_map(b, i, start_ref, end_ref, line_end_ref, ragged_batch_index_ref, ragged_block_index_ref):
-        index = b * (seq_len // bk) + i
-        return ragged_batch_index_ref[index], 0, 0
-
-      def scaler_index_map(b, i, *_):
-        return b, 0, i
-
-      line_end = jnp.where(start < end, end, seq_len - 1)
-
-      in_specs = [
-                pl.BlockSpec(q_index_map, (None, num_heads, head_dim)),
-                pl.BlockSpec(kv_index_map, (None, bk, head_dim)),
-                pl.BlockSpec(kv_index_map, (None, bk, head_dim)),
-      ]
-      inputs = (start, end, line_end, ragged_batch_index, ragged_block_index, q, k, v)
-      quantized = False
-      if k_scaler is not None:
-        in_specs = in_specs + [
-          pl.BlockSpec(scaler_index_map, (None, 1, bk)),
-          pl.BlockSpec(scaler_index_map, (None, 1, bk)),
-        ]
-        inputs = inputs + (k_scaler, v_scaler)
-        quantized = True
-
-      out, m, l = pl.pallas_call(
-          functools.partial(
-              ragged_flash_attention_kernel,
-              bk=bk,
-              mask_value=mask_value,
-              normalize_var=normalize_var,
-              quantized=quantized,
-          ),
-          grid_spec=pltpu.PrefetchScalarGridSpec(
-              num_scalar_prefetch=5,
-              in_specs=in_specs,
-              out_specs=[
-                  pl.BlockSpec(q_index_map, (None, num_heads, head_dim)),
-                  pl.BlockSpec(q_index_map, (None, num_heads, head_dim)),
-                  pl.BlockSpec(q_index_map, (None, num_heads, head_dim)),
-              ],
-              grid=(batch_size, seq_len // bk),
-          ),
-          compiler_params=dict(dimension_semantics=("parallel", "arbitrary")),
-          out_shape=[
-              q,
-              jax.ShapeDtypeStruct((batch_size, num_heads, head_dim), jnp.float32),
-              jax.ShapeDtypeStruct((batch_size, num_heads, head_dim), jnp.float32),
-          ],
-      )(*inputs)
-  return out, (m[..., 0], l[..., 0])
-
-
-@functools.partial(jax.jit, static_argnames=['bk', 'mask_value', 'normalize_var', 'shard_axis'])
-def ragged_mha(
-    q: jax.Array,
-    k: jax.Array,
-    v: jax.Array,
-    start: jax.Array,
-    end: jax.Array,
-    ragged_batch_index: jax.Array,
-    ragged_block_index: jax.Array,
-    k_scaler: jax.Array | None = None,
-    v_scaler: jax.Array | None = None,
-    bk: int = 512,
-    mask_value : float = DEFAULT_MASK_VALUE,
-    normalize_var: bool = True,
-    shard_axis: int = 1
-) -> tuple[jax.Array, tuple[jax.Array, jax.Array]]:
-  """Ragged multi head attention.
-  Args:
-    q: A [batch_size, compute_dim, num_heads, head_dim] jax.Array.
-    k: A [batch_size, num_heads, seq_len, head_dim] jax.Array or
-      PartitionQuantizedTensor.
-    v: A [batch_size, num_heads, seq_len, head_dim] jax.Array or
-      PartitionQuantizedTensor.
-    start: A i32[batch_size] jax.Array
-    end: A i32[batch_size] jax.Array
-    bk: An integer that is the sequence block size.
-    logit_cap: An optional float that caps logits via tanh. By default there is
-      no logit capping.
-    mask_value: The value used for padding in attention. By default it is a very
-      negative floating point number.
-    out_dtype: An optional dtype for the output. If not provided, the output
-      dtype will be q's dtype.
-  Returns:
-    The output of attention([batch_size, num_heads, compute_dim, head_dim]),
-    along with the max logit ([batch_size, num_heads, compute_dim, 1]) and
-    softmax denominator ([batch_size, num_heads, compute_dim, 1]).
-  """
-  mask_value = DEFAULT_MASK_VALUE
-  seqlen = q.shape[-2]
-  if k_scaler is None:
-    replicated_in_axes = 4
-    replicated_inputs = (ragged_batch_index, ragged_block_index)
-  else:
-    replicated_in_axes = 6
-    replicated_inputs = (jnp.squeeze(k_scaler, -1), jnp.squeeze(v_scaler, -1), ragged_batch_index, ragged_block_index)
-
-  with jax.named_scope("ragged_mha_vmap"):
-    out, (m, l) = jax.vmap(
-      functools.partial(
-          ragged_mqa,
-          bk=bk,
-          mask_value=mask_value,
-          normalize_var=normalize_var,
-          #out_dtype=out_dtype,
-      ),
-      in_axes=(shard_axis, shard_axis, shard_axis, *([None]*replicated_in_axes)),
-      out_axes=shard_axis,
-    )(q, k, v, start, end, *replicated_inputs)
-  return out, (m, l)
-
-
-def dense_attention(xq, keys, values, k_scaler=None, v_scaler=None, mask=None):
-  bsz, _, _, head_dim = xq.shape
-  with jax.named_scope("attn_mat1"):
-      ## Attention start
-      # scores = torch.einsum(jnp.einsum, "ijkl,ikml->ikjm", xq, keys) / math.sqrt(self.head_dim)
-      scores = torch.einsum("ikjl,ikml->ikjm", xq, keys) / math.sqrt(head_dim)
-      if k_scaler is not None:
-        scores = scores * (k_scaler.reshape(bsz, 1, 1, keys.shape[2]))
-      if mask is not None:
-        # if mask.shape != (1,1,16,16):
-        #   breakpoint()
-        scores = scores + mask  # (bs, n_local_heads, seqlen, max_seqlen)
-  with jax.named_scope("attn_soft"):
-    scores = F.softmax(scores.float(), dim=-1).type_as(xq)
-    if v_scaler is not None:
-      scores = scores * v_scaler.reshape((bsz, 1, 1, keys.shape[2]))
-
-  with jax.named_scope("attn_mat2"):
-    # output = torch.einsum(
-    #    "ikjm,ikml->ikjl", scores, values
-    # )  # (bs, n_local_heads, seqlen, head_dim)
-    output = torch.einsum("ikjm,ikml->ikjl", scores, values)
-  return output
 
 class AttentionKernel:
 
@@ -650,9 +406,13 @@ class AttentionKernel:
     self.shard_axis = 0 if self.env.shard_on_batch else 1
     qkv_pspec = self.env.partition_by_axis(self.shard_axis) # Number of heads
     others_pspec = self.env.partition_by_axis()
-    self.binded_ragged_mha = functools.partial(ragged_mha, bk=self.env.block_size, shard_axis=self.shard_axis)
-    self.binded_ragged_mha = shard_map(ragged_mha, env.mesh, in_specs=(*([qkv_pspec] * 3), *([others_pspec] * 4)), out_specs=(qkv_pspec, (others_pspec, others_pspec)), check_rep=False)
-    self.binded_ragged_mha = jax.jit(self.binded_ragged_mha)
+    self.dense_attention = ak.dense_attention
+    self.ragged_attention = ak.RaggedAttentionKernel(
+      env, 
+      in_specs=(*([qkv_pspec] * 3), *([others_pspec] * 4)), 
+      out_specs=(qkv_pspec, (others_pspec, others_pspec)), 
+      sharding_axis=self.shard_axis
+    )
 
   def __call__(self, xq, xk, xv, mask, cache, start, end, ragged_batch_index, ragged_block_index):
     """
@@ -666,7 +426,7 @@ class AttentionKernel:
     bsz, num_heads, seqlen, head_dim = xq.shape
     _, num_kv_heads, _, kv_head_dim = xk.shape
     n_rep = num_heads // num_kv_heads
-    if seqlen == 1:
+    if not self.env.ragged_mha and seqlen == 1:
       xq = torch.broadcast_to(xq, (xq.shape[0], xq.shape[1], 2, xq.shape[3]))
 
     with jax.named_scope("attn_insert_cache"):
@@ -676,11 +436,11 @@ class AttentionKernel:
   
     with jax.named_scope("attn_qkv"):
       if self.env.ragged_mha and seqlen == 1:
-        output, _ = torch_xla2.interop.call_jax(self.binded_ragged_mha, xq, keys, values, start, end, ragged_batch_index, ragged_block_index)
+        output, _ = torch_xla2.interop.call_jax(self.ragged_attention, xq, keys, values, start, end, ragged_batch_index, ragged_block_index)
       else:
-        output = dense_attention(xq, keys, values, None, None, mask)
+        output = self.dense_attention(xq, keys, values, None, None, mask)
 
-      if seqlen == 1:
+      if not self.env.ragged_mha and seqlen == 1:
         output = output[:, :, 0:1, :]
       # For XLA matmul performance boost
       # output = torch.matmul(scores, values)
@@ -695,9 +455,13 @@ class Int8KVAttentionKernel:
     self.shard_axis = 0 if self.env.shard_on_batch else 1
     qkv_pspec = self.env.partition_by_axis(self.shard_axis) # Number of heads
     others_pspec = self.env.partition_by_axis()
-    self.binded_ragged_mha_quantized = functools.partial(ragged_mha, bk=self.env.block_size, shard_axis=self.shard_axis)
-    self.binded_ragged_mha_quantized = shard_map(self.binded_ragged_mha_quantized, env.mesh, in_specs=(*([qkv_pspec] * 3), *([others_pspec]*6)), out_specs=(qkv_pspec, (others_pspec, others_pspec)), check_rep=False)
-    self.binded_ragged_mha_quantized = jax.jit(self.binded_ragged_mha_quantized)
+    self.dense_attention = ak.dense_attention
+    self.ragged_attention = ak.RaggedAttentionKernel(
+      env, 
+      in_specs=(*([qkv_pspec] * 3), *([others_pspec] * 6)), 
+      out_specs=(qkv_pspec, (others_pspec, others_pspec)), 
+      sharding_axis=self.shard_axis
+    )
 
   def __call__(self, xq, xk, xv, mask, cache, start, end, ragged_batch_index, ragged_block_index):
     """
@@ -712,7 +476,7 @@ class Int8KVAttentionKernel:
     _, num_kv_heads, _, kv_head_dim = xk.shape
     n_rep = num_heads // num_kv_heads
 
-    if seqlen == 1:
+    if not self.env.ragged_mha and seqlen == 1:
       xq = torch.broadcast_to(xq, (xq.shape[0], xq.shape[1], 2, xq.shape[3]))
 
     with jax.named_scope("attn_insert_cache"):
@@ -722,11 +486,11 @@ class Int8KVAttentionKernel:
 
     with jax.named_scope("attn_qkv"):
       if self.env.ragged_mha and seqlen == 1:
-        output, _ = torch_xla2.interop.call_jax(self.binded_ragged_mha_quantized, xq, keys, values, start, end, ragged_batch_index, ragged_block_index, k_scaler, v_scaler)
+        output, _ = torch_xla2.interop.call_jax(self.ragged_attention, xq, keys, values, start, end, ragged_batch_index, ragged_block_index, k_scaler, v_scaler)
       else:
-        output= dense_attention(xq, keys, values, k_scaler, v_scaler, mask)
+        output= self.dense_attention(xq, keys, values, k_scaler, v_scaler, mask)
 
-      if seqlen == 1:
+      if not self.env.ragged_mha and seqlen == 1:
         output = output[:, :, 0:1, :]
 
       self.env.apply_sharding(output, axis=self.shard_axis)
