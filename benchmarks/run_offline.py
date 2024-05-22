@@ -102,9 +102,8 @@ def main(argv):
   print("======= decode starting ===")
   dec_times = []
   for i in range(10):
-    if i == 7:
-      if profiling_output:
-        jax.profiler.start_trace(profiling_output)
+    if i == 7 and profiling_output:
+      jax.profiler.start_trace(profiling_output)
     start = time.perf_counter()
     # pylint: disable-next=all
     decode_state, sampled_tokens = engine.generate(params, decode_state)
