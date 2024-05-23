@@ -412,7 +412,7 @@ class AttentionKernel:
       sharding_axis=self.shard_axis
     )
 
-  def __call__(self, xq, xk, xv, mask, cache, start, end, ragged_batch_index, ragged_block_index):
+  def __call__(self, xq, xk, xv, mask, cache, start=None, end=None, ragged_batch_index=None, ragged_block_index=None):
     """
     Args:
       xq: torch.Tensor of (batch size, num_heads, seqlen, head_dim)
@@ -566,10 +566,10 @@ class Attention(nn.Module):
       freqs_cis: torch.Tensor,
       mask: Optional[torch.Tensor],
       cache,
-      start,
-      end,
-      ragged_batch_index,
-      ragged_block_index,
+      start=None,
+      end=None,
+      ragged_batch_index=None,
+      ragged_block_index=None,
   ):
     with jax.named_scope("attn_linear_before_cache"):
       bsz, seqlen = x.shape[0], x.shape[-2]
