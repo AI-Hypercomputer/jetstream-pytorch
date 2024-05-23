@@ -341,7 +341,7 @@ class GemmaModel(nn.Module):
     hidden_states = self.norm(hidden_states)
 
     embedder_weight = self.embedder.weight
-    if self.env.enable_weight_quantization:
+    if self.env.quant_config.enable_weight_quantization:
       embedder_weight = embedder_weight * self.embedder.weight_scaler
     logits = torch.matmul(hidden_states, embedder_weight.t())
     return logits
