@@ -461,7 +461,7 @@ class Int8KVAttentionKernel:
       sharding_axis=self.shard_axis
     )
 
-  def __call__(self, xq, xk, xv, mask, cache, start, end, ragged_batch_index, ragged_block_index):
+  def __call__(self, xq, xk, xv, mask, cache, start=None, end=None, ragged_batch_index=None, ragged_block_index=None):
     """
     Args:
       xq: torch.Tensor of (batch size, num_heads, seqlen, head_dim)
