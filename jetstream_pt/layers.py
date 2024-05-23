@@ -15,10 +15,10 @@
 # pylint: disable-all
 """This version contains modification to make it easier to trace and support batch."""
 
-import math
 from typing import Optional, Tuple
 
 import jax
+from . import attention_kernel as ak
 import jax.numpy as jnp
 import torch
 import torch.nn.functional as F
@@ -31,12 +31,16 @@ from jetstream_pt.quantize import (
     quantize_tensor,
 )
 from torch import nn
+from . import attention_kernel as ak
 
 
 def _calc_cosine_dist(x, y):
   x = x.flatten().to(torch.float32)
   y = y.flatten().to(torch.float32)
   return (torch.dot(x, y) / (x.norm() * y.norm())).item()
+
+
+import numpy as np
 
 
 class Int8Embedding(torch.nn.Module):
@@ -399,8 +403,29 @@ class AttentionKernel:
 
   def __init__(self, env):
     self.env = env
+    self.shard_axis = 0 if self.env.shard_on_batch else 1
+    qkv_pspec = self.env.partition_by_axis(self.shard_axis)  # Number of heads
+    others_pspec = self.env.partition_by_axis()
+    self.dense_attention = ak.dense_attention
+    self.ragged_attention = ak.RaggedAttentionKernel(
+        env,
+        input_specs=(*([qkv_pspec] * 3), *([others_pspec] * 4)),
+        output_specs=(qkv_pspec, (others_pspec, others_pspec)),
+        sharding_axis=self.shard_axis,
+    )
 
-  def __call__(self, xq, xk, xv, mask, cache):
+  def __call__(
+      self,
+      xq,
+      xk,
+      xv,
+      mask,
+      cache,
+      start=None,
+      end=None,
+      ragged_batch_index=None,
+      ragged_block_index=None,
+  ):
     """
     Args:
       xq: torch.Tensor of (batch size, num_heads, seqlen, head_dim)
@@ -412,35 +437,34 @@ class AttentionKernel:
     bsz, num_heads, seqlen, head_dim = xq.shape
     _, num_kv_heads, _, kv_head_dim = xk.shape
     n_rep = num_heads // num_kv_heads
-    if seqlen == 1:
+    if not self.env.ragged_mha and seqlen == 1:
       xq = torch.broadcast_to(xq, (xq.shape[0], xq.shape[1], 2, xq.shape[3]))
 
     with jax.named_scope("attn_insert_cache"):
       keys, values = cache.update(xk, xv)
       keys = repeat_kv(keys, n_rep)
       values = repeat_kv(values, n_rep)
-    with jax.named_scope("attn_mat1"):
-      ## Attention start
-      # scores = torch.einsum(jnp.einsum, "ijkl,ikml->ikjm", xq, keys) / math.sqrt(self.head_dim)
-      scores = torch.einsum("ikjl,ikml->ikjm", xq, keys) / math.sqrt(head_dim)
-      if mask is not None:
-        # if mask.shape != (1,1,16,16):
-        #   breakpoint()
-        scores = scores + mask  # (bs, n_local_heads, seqlen, max_seqlen)
-    with jax.named_scope("attn_soft"):
-      scores = F.softmax(scores.float(), dim=-1).type_as(xq)
 
-    with jax.named_scope("attn_mat2"):
-      # output = torch.einsum(
-      #    "ikjm,ikml->ikjl", scores, values
-      # )  # (bs, n_local_heads, seqlen, head_dim)
-      output = torch.einsum("ikjm,ikml->ikjl", scores, values)
-      if seqlen == 1:
+    with jax.named_scope("attn_qkv"):
+      if self.env.ragged_mha and seqlen == 1:
+        output, _ = torch_xla2.interop.call_jax(
+            self.ragged_attention,
+            xq,
+            keys,
+            values,
+            start,
+            end,
+            ragged_batch_index,
+            ragged_block_index,
+        )
+      else:
+        output = self.dense_attention(xq, keys, values, None, None, mask)
+
+      if not self.env.ragged_mha and seqlen == 1:
         output = output[:, :, 0:1, :]
       # For XLA matmul performance boost
       # output = torch.matmul(scores, values)
-      shard_axis = 0 if self.env.shard_on_batch else 1
-      self.env.apply_sharding(output, axis=shard_axis)
+      self.env.apply_sharding(output, axis=self.shard_axis)
       return output
 
 
@@ -448,8 +472,29 @@ class Int8KVAttentionKernel:
 
   def __init__(self, env):
     self.env = env
+    self.shard_axis = 0 if self.env.shard_on_batch else 1
+    qkv_pspec = self.env.partition_by_axis(self.shard_axis)  # Number of heads
+    others_pspec = self.env.partition_by_axis()
+    self.dense_attention = ak.dense_attention
+    self.ragged_attention = ak.RaggedAttentionKernel(
+        env,
+        input_specs=(*([qkv_pspec] * 3), *([others_pspec] * 6)),
+        output_specs=(qkv_pspec, (others_pspec, others_pspec)),
+        sharding_axis=self.shard_axis,
+    )
 
-  def __call__(self, xq, xk, xv, mask, cache):
+  def __call__(
+      self,
+      xq,
+      xk,
+      xv,
+      mask,
+      cache,
+      start=None,
+      end=None,
+      ragged_batch_index=None,
+      ragged_block_index=None,
+  ):
     """
     Args:
       xq: torch.Tensor of (batch size, num_heads, seqlen, head_dim)
@@ -461,37 +506,38 @@ class Int8KVAttentionKernel:
     bsz, num_heads, seqlen, head_dim = xq.shape
     _, num_kv_heads, _, kv_head_dim = xk.shape
     n_rep = num_heads // num_kv_heads
-    if seqlen == 1:
+
+    if not self.env.ragged_mha and seqlen == 1:
       xq = torch.broadcast_to(xq, (xq.shape[0], xq.shape[1], 2, xq.shape[3]))
 
     with jax.named_scope("attn_insert_cache"):
       keys, values, k_scaler, v_scaler = cache.update(xk, xv)
       keys = repeat_kv(keys, n_rep)
       values = repeat_kv(values, n_rep)
-    with jax.named_scope("attn_mat1"):
-      ## Attention start
-      # scores = torch.einsum(jnp.einsum, "ijkl,ikml->ikjm", xq, keys) / math.sqrt(self.head_dim)
-      scores = (
-          torch.einsum("ikjl,ikml->ikjm", xq, keys)
-          / math.sqrt(head_dim)
-          * (k_scaler.reshape(bsz, 1, 1, keys.shape[2]))
-      )
-      if mask is not None:
-        scores = scores + mask  # (bs, n_local_heads, seqlen, max_seqlen)
-    with jax.named_scope("attn_soft"):
-      scores = F.softmax(scores.float(), dim=-1).type_as(xq)
-      scores = scores * v_scaler.reshape((bsz, 1, 1, keys.shape[2]))
 
-    with jax.named_scope("attn_mat2"):
-      # output = torch.einsum(
-      #    "ikjm,ikml->ikjl", scores, values
-      # )  # (bs, n_local_heads, seqlen, head_dim)
-      output = torch.einsum("ikjm,ikml->ikjl", scores, values)
-      if seqlen == 1:
+    with jax.named_scope("attn_qkv"):
+      if self.env.ragged_mha and seqlen == 1:
+        output, _ = torch_xla2.interop.call_jax(
+            self.ragged_attention,
+            xq,
+            keys,
+            values,
+            start,
+            end,
+            ragged_batch_index,
+            ragged_block_index,
+            k_scaler,
+            v_scaler,
+        )
+      else:
+        output = self.dense_attention(
+            xq, keys, values, k_scaler, v_scaler, mask
+        )
+
+      if not self.env.ragged_mha and seqlen == 1:
         output = output[:, :, 0:1, :]
-      # output = torch.matmul(scores, values)
-      shard_axis = 0 if self.env.shard_on_batch else 1
-      self.env.apply_sharding(output, axis=shard_axis)
+
+      self.env.apply_sharding(output, axis=self.shard_axis)
       return output
 
 
@@ -566,6 +612,10 @@ class Attention(nn.Module):
       freqs_cis: torch.Tensor,
       mask: Optional[torch.Tensor],
       cache,
+      start=None,
+      end=None,
+      ragged_batch_index=None,
+      ragged_block_index=None,
   ):
     with jax.named_scope("attn_linear_before_cache"):
       bsz, seqlen = x.shape[0], x.shape[-2]
@@ -593,6 +643,16 @@ class Attention(nn.Module):
     xv = xv.transpose(1, 2)
     xq = xq.transpose(1, 2)
 
-    output = self.attention_kernel(xq, xk, xv, mask, cache)
+    output = self.attention_kernel(
+        xq,
+        xk,
+        xv,
+        mask,
+        cache,
+        start,
+        end,
+        ragged_batch_index,
+        ragged_block_index,
+    ).type_as(xq)
     output = output.transpose(-3, -2).contiguous().view(bsz, seqlen, -1)
     return self.wo(output)
