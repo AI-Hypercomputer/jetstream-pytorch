@@ -1,16 +1,16 @@
+import functools
+import math
+
 import jax
 import jax.numpy as jnp
 from jax.experimental import pallas as pl
 from jax.experimental.pallas import tpu as pltpu
 from jax.experimental.shard_map import shard_map
-import functools
 
 import torch
+import torch.nn.functional as F
 
 import numpy as np
-
-import math
-import torch.nn.functional as F
 
 DEFAULT_MASK_VALUE = -0.7 * float(np.finfo(np.dtype("float32")).max)
 
@@ -197,7 +197,7 @@ def ragged_mqa(
             ],
             grid=(batch_size, seq_len // bk),
         ),
-        compiler_params=dict(dimension_semantics=("parallel", "arbitrary")),
+        compiler_params={"dimension_semantics": ("parallel", "arbitrary")},
         out_shape=[
             q,
             jax.ShapeDtypeStruct(
@@ -251,7 +251,6 @@ def ragged_mha(
     softmax denominator ([batch_size, num_heads, compute_dim, 1]).
   """
   mask_value = DEFAULT_MASK_VALUE
-  seqlen = q.shape[-2]
   if k_scaler is None:
     replicated_in_axes = 4
     replicated_inputs = (ragged_batch_index, ragged_block_index)
@@ -285,6 +284,8 @@ def ragged_mha(
 
 
 def dense_attention(xq, keys, values, k_scaler=None, v_scaler=None, mask=None):
+  """The vanilla attention kernel implementation."""
+
   bsz, _, _, head_dim = xq.shape
   with jax.named_scope("attn_mat1"):
     ## Attention start
@@ -310,6 +311,7 @@ def dense_attention(xq, keys, values, k_scaler=None, v_scaler=None, mask=None):
 
 
 class RaggedAttentionKernel:
+  """Ragged attention kernel."""
 
   def __init__(self, env, input_specs, output_specs, sharding_axis):
     self.binded_ragged_mha = functools.partial(
