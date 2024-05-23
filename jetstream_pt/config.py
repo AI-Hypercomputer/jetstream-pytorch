@@ -60,24 +60,25 @@ flags.register_validator(
 )
 flags.DEFINE_bool(
     "profiling_prefill",
-    False, 
+    False,
     "Whether to profile the prefill, "
-    "if set to false, profile generate function only", 
-    required=False
+    "if set to false, profile generate function only",
+    required=False,
 )
 flags.DEFINE_bool(
     "ragged_mha",
     False,
-    "Whether to enable Ragged multi head attention", 
-    required=False
+    "Whether to enable Ragged multi head attention",
+    required=False,
 )
 flags.DEFINE_integer(
-    "starting_position", 
-    512, 
+    "starting_position",
+    512,
     "The starting position of decoding, "
-    "for performance tuning and debugging only", 
-    required=False
+    "for performance tuning and debugging only",
+    required=False,
 )
+
 
 def create_quantization_config_from_flags():
   """Create Quantization Config from cmd flags"""
