@@ -64,7 +64,7 @@ class DecodeState:
   ]  # only present in quantized kv
   current_position: int
   lens: jax.Array  # [batch_size, 1]
-  start: jax.Array # [batch_size, 1], the starting pos for each slot
+  start: jax.Array  # [batch_size, 1], the starting pos for each slot
   input_pos: jax.Array  # [batch_size, 1] input pos for each slot
   mask: jax.Array  # [batch_size, seqlen] -inf for invalid; 0 for valid
 
@@ -128,7 +128,7 @@ class PyTorchEngine(engine_api.Engine):
         caches,
         scalers,
         self.env.starting_position,
-        jnp.zeros((self.env.batch_size, 1), dtype=jnp.int32), # lens
+        jnp.zeros((self.env.batch_size, 1), dtype=jnp.int32),  # lens
         jnp.zeros((self.env.batch_size,), dtype=jnp.int32),  # start pos
         jnp.zeros((self.env.batch_size,), dtype=jnp.int32),  # input pos
         jnp.full(
@@ -168,7 +168,15 @@ class PyTorchEngine(engine_api.Engine):
       ]
     mask = jnp.expand_dims(mask, (1, 2))
 
-    args = (tokens, input_pos, caches_obj, mask, start, ragged_batch_index, ragged_block_index)
+    args = (
+        tokens,
+        input_pos,
+        caches_obj,
+        mask,
+        start,
+        ragged_batch_index,
+        ragged_block_index,
+    )
     paramst, argst = torchjax.to_torch((weights, args))
     with self._lock:
       with torchjax.jax_mode:
@@ -277,7 +285,9 @@ class PyTorchEngine(engine_api.Engine):
     cond = jnp.logical_and(x <= decode_state.current_position, x >= pos)
     mask_insert = jnp.where(cond, 0, float("-inf"))
     mask = decode_state.mask.at[slot].set(mask_insert)
-    start = decode_state.start.at[slot].set(pos % self.env.cache_sequence_length)
+    start = decode_state.start.at[slot].set(
+        pos % self.env.cache_sequence_length
+    )
     input_pos = decode_state.input_pos.at[slot].set(prefix.seq_len)
     if not self.env.quant_config.enable_kv_quantization:
 
@@ -458,10 +468,10 @@ class PyTorchEngine(engine_api.Engine):
     )
 
   def precompute_ragged_block_indices(self, decode_state: DecodeState):
-    """Precompute the ragged attention block indices. Ragged attention iterates the grid 
-    and relies on the computed grid index to skip the unnecessary blocks. The basic idea 
-    is to use input_pos, which is the length of each slot to determine if we should 
-    work on the next block of the slot or move to the next slot. """
+    """Precompute the ragged attention block indices. Ragged attention iterates the grid
+    and relies on the computed grid index to skip the unnecessary blocks. The basic idea
+    is to use input_pos, which is the length of each slot to determine if we should
+    work on the next block of the slot or move to the next slot."""
     start = decode_state.start
     end = (start + decode_state.input_pos) % self.env.cache_len
     batch_size = start.shape[0]
@@ -477,7 +487,11 @@ class PyTorchEngine(engine_api.Engine):
     end = end.reshape((batch_size, 1))
 
     am_last_batch = b == batch_size - 1
-    last_good_block = jnp.where(start < end, jax.lax.div(end - 1, bk), jax.lax.div(self.env.cache_len -1, bk))
+    last_good_block = jnp.where(
+        start < end,
+        jax.lax.div(end - 1, bk),
+        jax.lax.div(self.env.cache_len - 1, bk),
+    )
 
     next_b = jnp.where(am_last_batch, b, b + 1)
     next_i = jnp.where(am_last_batch, last_good_block, 0)
@@ -492,14 +506,22 @@ class PyTorchEngine(engine_api.Engine):
     # start > end, continue work on the block is there is no overlap with [end, start)
     def false_comp(b, i, bk, start, end):
       b_next = b
-      i_next = jnp.where(jnp.logical_and(i * bk >= end, (i + 1) * bk <= start), jax.lax.div(start, bk), i)
+      i_next = jnp.where(
+          jnp.logical_and(i * bk >= end, (i + 1) * bk <= start),
+          jax.lax.div(start, bk),
+          i,
+      )
       return b_next, i_next
 
     true_comp_b, true_comp_i = true_comp(b, i, bk, start, end, next_b, next_i)
     false_comp_b, false_comp_i = false_comp(b, i, bk, start, end)
 
-    b_next = jnp.where(start < end, true_comp_b, jnp.where(start == end, next_b, false_comp_b))
-    i_next = jnp.where(start < end, true_comp_i, jnp.where(start == end, next_i, false_comp_i))
+    b_next = jnp.where(
+        start < end, true_comp_b, jnp.where(start == end, next_b, false_comp_b)
+    )
+    i_next = jnp.where(
+        start < end, true_comp_i, jnp.where(start == end, next_i, false_comp_i)
+    )
     return b_next, i_next
 
   def generate(
@@ -511,8 +533,12 @@ class PyTorchEngine(engine_api.Engine):
 
     # fill mask first
     mask = decode_state.mask.at[:, decode_state.current_position].set(0)
-    ragged_batch_index, ragged_block_index = self.precompute_ragged_block_indices(decode_state)
-    ragged_batch_index, ragged_block_index = ragged_batch_index.reshape((-1)), ragged_block_index.reshape((-1))
+    ragged_batch_index, ragged_block_index = (
+        self.precompute_ragged_block_indices(decode_state)
+    )
+    ragged_batch_index, ragged_block_index = ragged_batch_index.reshape(
+        (-1)
+    ), ragged_block_index.reshape((-1))
 
     logits, new_caches, new_scales = self._call_model_generate(
         params,

@@ -39,7 +39,9 @@ def _calc_cosine_dist(x, y):
   y = y.flatten().to(torch.float32)
   return (torch.dot(x, y) / (x.norm() * y.norm())).item()
 
+
 import numpy as np
+
 
 class Int8Embedding(torch.nn.Module):
 
@@ -402,17 +404,28 @@ class AttentionKernel:
   def __init__(self, env):
     self.env = env
     self.shard_axis = 0 if self.env.shard_on_batch else 1
-    qkv_pspec = self.env.partition_by_axis(self.shard_axis) # Number of heads
+    qkv_pspec = self.env.partition_by_axis(self.shard_axis)  # Number of heads
     others_pspec = self.env.partition_by_axis()
     self.dense_attention = ak.dense_attention
     self.ragged_attention = ak.RaggedAttentionKernel(
-      env, 
-      input_specs=(*([qkv_pspec] * 3), *([others_pspec] * 4)), 
-      output_specs=(qkv_pspec, (others_pspec, others_pspec)), 
-      sharding_axis=self.shard_axis
+        env,
+        input_specs=(*([qkv_pspec] * 3), *([others_pspec] * 4)),
+        output_specs=(qkv_pspec, (others_pspec, others_pspec)),
+        sharding_axis=self.shard_axis,
     )
 
-  def __call__(self, xq, xk, xv, mask, cache, start=None, end=None, ragged_batch_index=None, ragged_block_index=None):
+  def __call__(
+      self,
+      xq,
+      xk,
+      xv,
+      mask,
+      cache,
+      start=None,
+      end=None,
+      ragged_batch_index=None,
+      ragged_block_index=None,
+  ):
     """
     Args:
       xq: torch.Tensor of (batch size, num_heads, seqlen, head_dim)
@@ -431,10 +444,19 @@ class AttentionKernel:
       keys, values = cache.update(xk, xv)
       keys = repeat_kv(keys, n_rep)
       values = repeat_kv(values, n_rep)
-  
+
     with jax.named_scope("attn_qkv"):
       if self.env.ragged_mha and seqlen == 1:
-        output, _ = torch_xla2.interop.call_jax(self.ragged_attention, xq, keys, values, start, end, ragged_batch_index, ragged_block_index)
+        output, _ = torch_xla2.interop.call_jax(
+            self.ragged_attention,
+            xq,
+            keys,
+            values,
+            start,
+            end,
+            ragged_batch_index,
+            ragged_block_index,
+        )
       else:
         output = self.dense_attention(xq, keys, values, None, None, mask)
 
@@ -451,17 +473,28 @@ class Int8KVAttentionKernel:
   def __init__(self, env):
     self.env = env
     self.shard_axis = 0 if self.env.shard_on_batch else 1
-    qkv_pspec = self.env.partition_by_axis(self.shard_axis) # Number of heads
+    qkv_pspec = self.env.partition_by_axis(self.shard_axis)  # Number of heads
     others_pspec = self.env.partition_by_axis()
     self.dense_attention = ak.dense_attention
     self.ragged_attention = ak.RaggedAttentionKernel(
-      env, 
-      input_specs=(*([qkv_pspec] * 3), *([others_pspec] * 6)), 
-      output_specs=(qkv_pspec, (others_pspec, others_pspec)), 
-      sharding_axis=self.shard_axis
+        env,
+        input_specs=(*([qkv_pspec] * 3), *([others_pspec] * 6)),
+        output_specs=(qkv_pspec, (others_pspec, others_pspec)),
+        sharding_axis=self.shard_axis,
     )
 
-  def __call__(self, xq, xk, xv, mask, cache, start=None, end=None, ragged_batch_index=None, ragged_block_index=None):
+  def __call__(
+      self,
+      xq,
+      xk,
+      xv,
+      mask,
+      cache,
+      start=None,
+      end=None,
+      ragged_batch_index=None,
+      ragged_block_index=None,
+  ):
     """
     Args:
       xq: torch.Tensor of (batch size, num_heads, seqlen, head_dim)
@@ -484,9 +517,22 @@ class Int8KVAttentionKernel:
 
     with jax.named_scope("attn_qkv"):
       if self.env.ragged_mha and seqlen == 1:
-        output, _ = torch_xla2.interop.call_jax(self.ragged_attention, xq, keys, values, start, end, ragged_batch_index, ragged_block_index, k_scaler, v_scaler)
+        output, _ = torch_xla2.interop.call_jax(
+            self.ragged_attention,
+            xq,
+            keys,
+            values,
+            start,
+            end,
+            ragged_batch_index,
+            ragged_block_index,
+            k_scaler,
+            v_scaler,
+        )
       else:
-        output= self.dense_attention(xq, keys, values, k_scaler, v_scaler, mask)
+        output = self.dense_attention(
+            xq, keys, values, k_scaler, v_scaler, mask
+        )
 
       if not self.env.ragged_mha and seqlen == 1:
         output = output[:, :, 0:1, :]
@@ -597,6 +643,16 @@ class Attention(nn.Module):
     xv = xv.transpose(1, 2)
     xq = xq.transpose(1, 2)
 
-    output = self.attention_kernel(xq, xk, xv, mask, cache, start, end, ragged_batch_index, ragged_block_index).type_as(xq)
+    output = self.attention_kernel(
+        xq,
+        xk,
+        xv,
+        mask,
+        cache,
+        start,
+        end,
+        ragged_batch_index,
+        ragged_block_index,
+    ).type_as(xq)
     output = output.transpose(-3, -2).contiguous().view(bsz, seqlen, -1)
     return self.wo(output)

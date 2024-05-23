@@ -135,10 +135,10 @@ class GemmaAttention(nn.Module):
       freqs_cis,
       mask,
       cache,
-      start = None,
-      end = None,
-      ragged_batch_index = None,
-      ragged_block_index = None,
+      start=None,
+      end=None,
+      ragged_batch_index=None,
+      ragged_block_index=None,
   ) -> torch.Tensor:
     hidden_states_shape = hidden_states.shape
     assert len(hidden_states_shape) == 3
@@ -168,7 +168,17 @@ class GemmaAttention(nn.Module):
     xv = xv.transpose(1, 2)
     xq = xq.transpose(1, 2)
 
-    output = self.attention_kernel(xq, xk, xv, mask, cache, start, end, ragged_batch_index, ragged_block_index)
+    output = self.attention_kernel(
+        xq,
+        xk,
+        xv,
+        mask,
+        cache,
+        start,
+        end,
+        ragged_batch_index,
+        ragged_block_index,
+    )
 
     # [batch_size, input_len, hidden_dim]
     output = output.transpose(1, 2).contiguous().view(batch_size, input_len, -1)
@@ -333,18 +343,18 @@ class GemmaModel(nn.Module):
       input_pos: torch.Tensor,
       caches: List[Any],
       mask,
-      start = None,
-      ragged_batch_index = None,
-      ragged_block_index = None,
+      start=None,
+      ragged_batch_index=None,
+      ragged_block_index=None,
   ):
     """
-      tokens: the input token for decoding
-      caches: kv caches
-      mask: causal mask to filter the attention results
-      start: the starting position for each slot
-      input_pos: the decoding position relative to the start, which is the length of the decoding results
-      ragged_batch_index: precomputed batch index for ragged attention
-      ragged_block_index: precomputed block index for ragged attention
+    tokens: the input token for decoding
+    caches: kv caches
+    mask: causal mask to filter the attention results
+    start: the starting position for each slot
+    input_pos: the decoding position relative to the start, which is the length of the decoding results
+    ragged_batch_index: precomputed batch index for ragged attention
+    ragged_block_index: precomputed block index for ragged attention
     """
 
     with jax.named_scope("transformer_freq"):

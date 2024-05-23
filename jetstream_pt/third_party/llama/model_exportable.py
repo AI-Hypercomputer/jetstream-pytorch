@@ -109,14 +109,21 @@ class TransformerBlock(nn.Module):
       freqs_cis: torch.Tensor,
       mask: Optional[torch.Tensor],
       cache,
-      start = None,
-      end = None,
-      ragged_batch_index = None,
-      ragged_block_index = None,
+      start=None,
+      end=None,
+      ragged_batch_index=None,
+      ragged_block_index=None,
   ):
     with jax.named_scope("Attention"):
       attn = self.attention.forward(
-          self.attention_norm(x), freqs_cis, mask, cache, start, end, ragged_batch_index, ragged_block_index
+          self.attention_norm(x),
+          freqs_cis,
+          mask,
+          cache,
+          start,
+          end,
+          ragged_batch_index,
+          ragged_block_index,
       )
     with jax.named_scope("ffn_norm"):
       h = x + attn
@@ -187,18 +194,18 @@ class Transformer(nn.Module):
       input_pos: torch.Tensor,
       caches: List[Any],
       mask,
-      start = None,
-      ragged_batch_index = None,
-      ragged_block_index = None,
+      start=None,
+      ragged_batch_index=None,
+      ragged_block_index=None,
   ):
     """
-      tokens: the input token for decoding
-      caches: kv caches
-      mask: causal mask to filter the attention results
-      start: the starting position for each slot
-      input_pos: the decoding position relative to the start, which is the length of the decoding results
-      ragged_batch_index: precomputed batch index for ragged attention
-      ragged_block_index: precomputed block index for ragged attention
+    tokens: the input token for decoding
+    caches: kv caches
+    mask: causal mask to filter the attention results
+    start: the starting position for each slot
+    input_pos: the decoding position relative to the start, which is the length of the decoding results
+    ragged_batch_index: precomputed batch index for ragged attention
+    ragged_block_index: precomputed block index for ragged attention
     """
 
     with jax.named_scope("transformer_tok"):
@@ -216,7 +223,16 @@ class Transformer(nn.Module):
     end = None if start is None else (start + input_pos) % self.env.cache_len
     for layer, cache in zip(self.layers, caches):
       with jax.named_scope("TransformerBlock"):
-        h = layer(h, freqs_cis, mask, cache, start, end, ragged_batch_index, ragged_block_index)
+        h = layer(
+            h,
+            freqs_cis,
+            mask,
+            cache,
+            start,
+            end,
+            ragged_batch_index,
+            ragged_block_index,
+        )
 
     with jax.named_scope("transformer_norm"):
       h = self.norm(h)

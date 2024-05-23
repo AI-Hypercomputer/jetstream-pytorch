@@ -95,6 +95,8 @@ class JetEngineEnvironmentData:
 
   # Starting position
   starting_position: int = 512
+
+
 # pylint: disable-next=all
 class JetEngineEnvironment:
 
