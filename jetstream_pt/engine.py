@@ -168,7 +168,7 @@ class PyTorchEngine(engine_api.Engine):
       ]
     mask = jnp.expand_dims(mask, (1, 2))
 
-    args = (tokens, caches_obj, mask, start, input_pos, ragged_batch_index, ragged_block_index)
+    args = (tokens, input_pos, caches_obj, mask, start, ragged_batch_index, ragged_block_index)
     paramst, argst = torchjax.to_torch((weights, args))
     with self._lock:
       with torchjax.jax_mode:
@@ -198,7 +198,7 @@ class PyTorchEngine(engine_api.Engine):
         dtype=self.default_dtype,
     )
     mask = jnp.triu(mask, k=1)
-    args = (tokens, caches, mask, None, input_indexes, None, None)
+    args = (tokens, input_indexes, caches, mask)
 
     paramst, argst = torchjax.to_torch((weights, args))
     with self._lock:

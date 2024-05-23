@@ -184,10 +184,10 @@ class Transformer(nn.Module):
   def forward(
       self,
       tokens: torch.Tensor,
+      input_pos: torch.Tensor,
       caches: List[Any],
       mask,
       start = None,
-      input_pos = None,
       ragged_batch_index = None,
       ragged_block_index = None,
   ):
