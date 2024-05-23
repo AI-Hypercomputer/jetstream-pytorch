@@ -26,9 +26,9 @@ def ragged_flash_attention_kernel(
     v_ref,
     k_scaler_ref,
     v_scaler_ref,
-    o_ref,
-    m_ref,
-    l_ref,
+    o_ref, # outputs
+    m_ref, # row max
+    l_ref, # propogation coefficient
     bk: int,
     mask_value: float,
     normalize_var: bool,
