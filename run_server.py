@@ -49,11 +49,11 @@ def main(argv: Sequence[str]):
   )
   print(f"server_config: {server_config}")
 
-  metrics_server_config : server_lib.MetricsServerConfig | None = None
+  metrics_server_config: server_lib.MetricsServerConfig | None = None
   if FLAGS.prometheus_port != 0:
     metrics_server_config = server_lib.MetricsServerConfig(
         port=FLAGS.prometheus_port
-      )
+    )
 
   # We separate credential from run so that we can unit test it with local credentials.
   # We would like to add grpc credentials for OSS.
@@ -62,7 +62,7 @@ def main(argv: Sequence[str]):
       port=FLAGS.port,
       config=server_config,
       devices=devices,
-      metrics_server_config=metrics_server_config
+      metrics_server_config=metrics_server_config,
   )
   print("Started jetstream_server....")
   jetstream_server.wait_for_termination()
