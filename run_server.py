@@ -62,7 +62,7 @@ def main(argv: Sequence[str]):
       port=FLAGS.port,
       config=server_config,
       devices=devices,
-      metrics_server_config=metrics_server_config,
+      #metrics_server_config=metrics_server_config,
   )
   print("Started jetstream_server....")
   jetstream_server.wait_for_termination()
