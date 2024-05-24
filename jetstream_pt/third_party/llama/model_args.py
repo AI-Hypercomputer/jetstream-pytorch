@@ -90,6 +90,19 @@ def get_arg(
         "norm_eps": 1e-05,
         "rope_theta": 500000.0,
     }
+  elif model_name == "llama-3-70b":
+    data = {
+        "dim": 8192,
+        "ffn_dim_multiplier": 1.3,
+        "multiple_of": 4096,
+        "n_heads": 64,
+        "n_kv_heads": 8,
+        "n_layers": 80,
+        "norm_eps": 1e-05,
+        "vocab_size": 128256,
+        "rope_theta": 500000.0,
+    }
+
   return ModelArgs(
       max_seq_len=seqlen,
       max_batch_size=batch_size,

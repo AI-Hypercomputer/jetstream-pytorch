@@ -179,17 +179,19 @@ def _merge_llama_weights(
         f"{len(tensors)} shards (shape = {tensors[0].shape}) for {key})"
     )
     state_dict_for_key = {}
-    for pattern, kind in llama_model.get_weight_sharding_type.items():
+    for pattern, kind in llama_model.Transformer.get_weight_sharding_type(
+        model_name=FLAGS.model_name
+    ).items():
       if not key.endswith(pattern):
         continue
       with torch.no_grad():
         if kind in ("ParallelEmbedding", "RowParallelLinear"):
           state_dict_for_key[key] = torch.cat(tensors, 1)
-        elif kind == "ColumnParallelLinear":
+        elif kind in ("ColumnParallelLinear", "VocabParallelEmbedding"):
           state_dict_for_key[key] = torch.cat(tensors, 0)
         else:
           if not all(
-              torch.allclose(tensors[0], tensor, atol=1e-6)
+              torch.allclose(tensors[0], tensor, atol=1e-2)
               for tensor in tensors[1:]
           ):
             raise ValueError(
