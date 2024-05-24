@@ -166,7 +166,7 @@ class PyTorchRayWorker:
         bf16_enable=bf16_enable,
         sharding_config_path=sharding_config,
     )
-    
+
     if model_name.startswith("llama"):
 
       args = model_args.get_model_args(
