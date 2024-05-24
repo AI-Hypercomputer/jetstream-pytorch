@@ -237,7 +237,7 @@ class QuantizationTest(unittest.TestCase):
     )
     def f(layer, weights, args):
       paramst, argst = torchjax.to_torch((weights, args))
-      with torchjax.jax_mode:
+      with torch_xla2.default_env():
         res = torch.func.functional_call(layer, paramst, argst)
       return torchjax.from_torch(res)
 

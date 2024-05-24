@@ -179,7 +179,7 @@ class PyTorchEngine(engine_api.Engine):
     )
     paramst, argst = torchjax.to_torch((weights, args))
     with self._lock:
-      with torchjax.jax_mode:
+      with torch_xla2.default_env():
         # The mode is needed so that tensors created inside of
         # the model (such as via torch.ones etc) also have the right type
         res = torch.func.functional_call(self.pt_model, paramst, argst)
@@ -210,7 +210,7 @@ class PyTorchEngine(engine_api.Engine):
 
     paramst, argst = torchjax.to_torch((weights, args))
     with self._lock:
-      with torchjax.jax_mode:
+      with torch_xla2.default_env():
         res = torch.func.functional_call(self.pt_model, paramst, argst)[0]
     caches_res = [c.state() for c in caches]
     return torchjax.from_torch((res, caches_res))
