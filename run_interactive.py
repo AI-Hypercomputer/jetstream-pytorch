@@ -40,7 +40,8 @@ def main(argv):
   max_output_length = 1024
 
   profiling_output = FLAGS.profiling_output
-  if profiling_output:
+  profiling_prefill = FLAGS.profiling_prefill
+  if profiling_output and profiling_prefill:
     jax.profiler.start_trace(profiling_output)
 
   decode_state = engine.init_decode_state()
@@ -68,7 +69,11 @@ def main(argv):
     print(f"---- Streaming decode started on #slot{slot}.")
     complete = np.zeros((1,), dtype=np.bool_)
     while True:
+      if profiling_output and not profiling_prefill:
+        jax.profiler.start_trace(profiling_output)
       decode_state, result_tokens = engine.generate(params, decode_state)
+      if profiling_output and not profiling_prefill:
+        jax.profiler.stop_trace()
       result_tokens = result_tokens.convert_to_numpy()
       output, complete = token_utils.process_result_tokens(
           tokenizer=tokenizer,
@@ -87,7 +92,7 @@ def main(argv):
     print("---- All output text.")
     print(tokenizer.decode(sampled_tokens_list))
 
-  if profiling_output:
+  if profiling_output and profiling_prefill:
     jax.profiler.stop_trace()
 
 
