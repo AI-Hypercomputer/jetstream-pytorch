@@ -231,9 +231,9 @@ class Transformer(nn.Module):
     # ColumnParallelLinear is row partitioned across shards due to transpose.
     # RowParallelLinear is col partitioned across shards due to transpose.
     # None is no partitioning and tensor should be identical across shards
-    expected_model_names = ('llama-2', 'llama-3')
+    expected_model_names = ("llama-2", "llama-3")
     assert (
-      model_name in expected_model_names
+        model_name in expected_model_names
     ), f"Expected model_name to one of {expected_model_names}"
     sharding_dict = {
         "rope.freqs": None,
