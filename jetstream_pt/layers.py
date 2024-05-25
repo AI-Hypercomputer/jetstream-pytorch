@@ -246,7 +246,6 @@ class WeightOnlyBlockwiseQuantizedLinear(torch.nn.Module):
         weight, (1,), self.n_bit, self.is_symmetric_weight, self.block_size
     )
     w_dq = dequantize_tensor(w_q, scale, zp)
-    print("check qweight cosine dist: ", _calc_cosine_dist(weight, w_dq))
     self._load_quantized_weights(w_q, scale, zp)
 
   def forward(self, inputs):
