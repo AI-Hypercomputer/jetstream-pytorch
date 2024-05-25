@@ -391,7 +391,7 @@ def main(argv) -> None:
         llama_model.Transformer.get_quantized_embedding_weight_to_scaler_map()
     )
 
-  if FLAGS.quantize_type:
+  if FLAGS.quantize_weights:
     quantize_num_bits = 8 if "int8" in FLAGS.quantize_type else 4
     is_blockwise = "blockwise" in FLAGS.quantize_type
     weight_axis = lambda x: 0 if x in quantize_embedding_weight_map else 1
