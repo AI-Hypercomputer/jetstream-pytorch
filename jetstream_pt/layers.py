@@ -142,7 +142,7 @@ class WeightOnlyPerChannelQuantizedLinear(torch.nn.Module):
             self.weight,
             (((2,), (1)), ((), ())),
             None,
-            torch.int32,
+            jnp.int32.dtype,
         )
       result = result * self.weight_scaler
       if self.quantize_activation:
