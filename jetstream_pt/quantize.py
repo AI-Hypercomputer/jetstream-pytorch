@@ -15,6 +15,7 @@
 from typing import Tuple, Union
 
 import torch
+import jax.numpy as jnp
 
 EPS = 1e-5
 
@@ -95,3 +96,65 @@ def load_q_weight_helper(w_q, scale, zp=None, block_size=-1):
       zp = (zp * scale).transpose(1, 0).squeeze(-1).to(torch.bfloat16)
     scale = scale.transpose(1, 0).squeeze(-1).to(torch.bfloat16)
   return w_q, scale, zp
+
+
+def blockwise_jax_kernel(inputs, weight, weight_scaler, zero_point):
+  """Blockwise Matmul kernel impl in JAX using einsum"""
+  weight = weight.astype(jnp.int8)
+  block_size = weight.shape[1]
+  inputs_shape = inputs.shape
+  inputs_new_shape = inputs_shape[:-1] + (
+      inputs_shape[-1] // block_size,
+      block_size,
+  )
+  inputs = inputs.reshape(inputs_new_shape)
+  out = jnp.einsum("scz,bdsc->bdsz", weight, inputs)
+  out = jnp.einsum("bdsz,sz->bdz", out, weight_scaler)
+  if zero_point is not None:
+    zp_out = jnp.einsum("bdsc,sz->bdz", inputs, zero_point)
+    out = out - zp_out
+  return out
+
+
+def blockwise_jax_kernel_dot_general(
+    inputs, weight, weight_scaler, zero_point
+):
+  """Blockwise Matmul kernel impl in JAX using dot general"""
+  inputs_shape = inputs.shape
+  block_size = weight.shape[2]
+  bs = inputs_shape[0]
+  inputs_new_shape = inputs_shape[:-1] + (
+      inputs_shape[-1] // block_size,
+      block_size,
+  )
+  inputs = inputs.reshape(inputs_new_shape)
+  inputs = jax.lax.collapse(inputs, 0, 2)
+  out = jax.lax.dot_general(
+      inputs, weight, dimension_numbers=([(2), (2)], [(1), (0)])
+  )
+  out = jax.lax.dot_general(
+      out, weight_scaler, dimension_numbers=([(0), (0)], [(2), (1)])
+  )
+  out = jax.lax.transpose(out, [1, 0])
+  out = out.reshape((bs, -1) + out.shape[1:])
+  return out
+
+
+def blockwise_jax_kernel_einsum_flatten(
+    inputs, weight, weight_scaler, zero_point
+):
+  """Blockwise Matmul kernel impl in JAX using einsum, with operands flattened"""
+  weight = weight.astype(jnp.int8)
+  block_size = weight.shape[1]
+  inputs_shape = inputs.shape
+  bs = inputs_shape[0]
+  inputs_new_shape = inputs_shape[:-1] + (
+      inputs_shape[-1] // block_size,
+      block_size,
+  )
+  inputs = inputs.reshape(inputs_new_shape)
+  inputs = jax.lax.collapse(inputs, 0, 2)
+  out = jnp.einsum("scz,bsc->bsz", weight, inputs)
+  out = jnp.einsum("bsz,sz->bz", out, weight_scaler)
+  out = out.reshape((bs, -1) + out.shape[1:])
+  return out

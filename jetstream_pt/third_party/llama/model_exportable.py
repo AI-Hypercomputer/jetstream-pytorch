@@ -41,24 +41,30 @@ class FeedForward(nn.Module):
     hidden_dim = multiple_of * ((hidden_dim + multiple_of - 1) // multiple_of)
 
     LinearLayer = get_quantized_linear_layer(env.quant_config)
+    linear_kwargs = {}
+    if LinearLayer != torch.nn.Linear:
+      linear_kwargs["quant_config"] = env.quant_config
 
     self.w1 = LinearLayer(
         dim,
         hidden_dim,
         bias=False,
         device=device,
+        **linear_kwargs,
     )
     self.w2 = LinearLayer(
         hidden_dim,
         dim,
         bias=False,
         device=device,
+        **linear_kwargs,
     )
     self.w3 = LinearLayer(
         dim,
         hidden_dim,
         bias=False,
         device=device,
+        **linear_kwargs,
     )
 
   def forward(self, x):
@@ -171,12 +177,16 @@ class Transformer(nn.Module):
     self.norm = RMSNorm(params.dim, eps=params.norm_eps, device=params.device)
 
     LinearLayer = get_quantized_linear_layer(env.quant_config)
+    linear_kwargs = {}
+    if LinearLayer != torch.nn.Linear:
+      linear_kwargs["quant_config"] = env.quant_config
 
     self.output = LinearLayer(
         params.dim,
         params.vocab_size,
         bias=False,
         device=params.device,
+        **linear_kwargs,
     )
     # TODO what to do with this
     freqs_cis = precompute_freqs_cis(

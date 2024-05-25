@@ -97,29 +97,37 @@ class GemmaAttention(nn.Module):
         if env.quant_config.enable_weight_quantization
         else torch.nn.Linear
     )
+    linear_kwargs = {}
+    if Linear != torch.nn.Linear:
+      linear_kwargs = {"quant_config": env.quant_config}
+
     self.wq = Linear(
         hidden_size,
         num_heads * self.head_dim,
         bias=False,
         device=device,
+        **linear_kwargs,
     )
     self.wk = Linear(
         hidden_size,
         self.num_kv_heads * self.head_dim,
         bias=False,
         device=device,
+        **linear_kwargs,
     )
     self.wv = Linear(
         hidden_size,
         self.num_kv_heads * self.head_dim,
         bias=False,
         device=device,
+        **linear_kwargs,
     )
     self.o_proj = Linear(
         self.num_heads * self.head_dim,
         self.hidden_size,
         bias=False,
         device=device,
+        **linear_kwargs,
     )
 
     Kernel = (
@@ -227,14 +235,18 @@ class GemmaMLP(nn.Module):
         if env.quant_config.enable_weight_quantization
         else torch.nn.Linear
     )
+    linear_kwargs = {}
+    if Linear != torch.nn.Linear:
+      linear_kwargs = {"quant_config": env.quant_config}
+
     self.gate_proj = Linear(
-        hidden_size, intermediate_size, bias=False, device=device
+        hidden_size, intermediate_size, bias=False, device=device, **linear_kwargs,
     )
     self.up_proj = Linear(
-        hidden_size, intermediate_size, bias=False, device=device
+        hidden_size, intermediate_size, bias=False, device=device, **linear_kwargs,
     )
     self.down_proj = Linear(
-        intermediate_size, hidden_size, bias=False, device=device
+        intermediate_size, hidden_size, bias=False, device=device, **linear_kwargs,
     )
 
   def forward(self, x):
