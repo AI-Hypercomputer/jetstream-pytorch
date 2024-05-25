@@ -14,8 +14,9 @@
 
 from typing import Tuple, Union
 
-import torch
+import jax
 import jax.numpy as jnp
+import torch
 
 EPS = 1e-5
 
@@ -116,9 +117,7 @@ def blockwise_jax_kernel(inputs, weight, weight_scaler, zero_point):
   return out
 
 
-def blockwise_jax_kernel_dot_general(
-    inputs, weight, weight_scaler, zero_point
-):
+def blockwise_jax_kernel_dot_general(inputs, weight, weight_scaler, zero_point):
   """Blockwise Matmul kernel impl in JAX using dot general"""
   inputs_shape = inputs.shape
   block_size = weight.shape[2]

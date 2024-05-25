@@ -102,10 +102,10 @@ class WeightOnlyPerChannelQuantizedLinear(torch.nn.Module):
 
     # Number of bits of weight tensor
     self.n_bit = quant_config.num_bits_weight
-    
+
     # Quantize activation
     self.quantize_activation = quant_config.enable_activation_quantization
-    
+
     # Flag to enable dequantize weight first, then do matmul. Useful for debugging.
     self.run_fake_quantize = False
 
@@ -136,8 +136,14 @@ class WeightOnlyPerChannelQuantizedLinear(torch.nn.Module):
       if not self.quantize_activation:
         result = F.linear(inputs, self.weight)
       else:
-        result = torchjax.call_jax(jax.lax.dot_general, inputs, self.weight,
-                        (((2,),(1)),((),())), None, torch.int32)
+        result = torchjax.call_jax(
+            jax.lax.dot_general,
+            inputs,
+            self.weight,
+            (((2,), (1)), ((), ())),
+            None,
+            torch.int32,
+        )
       result = result * self.weight_scaler
       if self.quantize_activation:
         result = result * act_s
@@ -182,15 +188,21 @@ class WeightOnlyBlockwiseQuantizedLinear(torch.nn.Module):
     self.block_size = quant_config.block_size_weight
     n_blocks = in_features // self.block_size
 
-    assert not quant_config.enable_activation_quantization, "Activation quantization not supported for blockwise quantized matmul."
-    
+    assert (
+        not quant_config.enable_activation_quantization
+    ), "Activation quantization not supported for blockwise quantized matmul."
+
     if self.use_dot_general:
       weight = torch.ones(
-          (n_blocks, out_features, self.block_size), dtype=torch.int8, device=device
+          (n_blocks, out_features, self.block_size),
+          dtype=torch.int8,
+          device=device,
       )
     else:
       weight = torch.ones(
-          (n_blocks, self.block_size, out_features), dtype=torch.int8, device=device
+          (n_blocks, self.block_size, out_features),
+          dtype=torch.int8,
+          device=device,
       )
     self.register_buffer("weight", weight)
 
@@ -209,7 +221,7 @@ class WeightOnlyBlockwiseQuantizedLinear(torch.nn.Module):
       self.register_buffer("zero_point", None)
 
     self.n_bit = quant_config.num_bits_weight
-    
+
     # Quantize activation
     self.quantize_activation = quant_config.enable_activation_quantization
 
@@ -240,15 +252,23 @@ class WeightOnlyBlockwiseQuantizedLinear(torch.nn.Module):
   def forward(self, inputs):
     if not self.run_fake_quantize:
       if self.use_dot_general or self.flatten:
-        assert self.zero_point is None, "Blockwise quantized linear doesn't support zero_point in dot_general or einsum flattened implementation."
-      blockwise_matmul_kernel = blockwise_jax_kernel if not self.use_dot_general and not self.flatten else blockwise_jax_kernel_dot_general if self.use_dot_general else blockwise_jax_kernel_einsum_flatten
+        assert (
+            self.zero_point is None
+        ), "Blockwise quantized linear doesn't support zero_point in dot_general or einsum flattened implementation."
+      blockwise_matmul_kernel = (
+          blockwise_jax_kernel
+          if not self.use_dot_general and not self.flatten
+          else blockwise_jax_kernel_dot_general
+          if self.use_dot_general
+          else blockwise_jax_kernel_einsum_flatten
+      )
       result = torchjax.call_jax(
-                  blockwise_matmul_kernel,
-                  inputs,
-                  self.weight,
-                  self.weight_scaler,
-                  self.zero_point,
-                )
+          blockwise_matmul_kernel,
+          inputs,
+          self.weight,
+          self.weight_scaler,
+          self.zero_point,
+      )
       return result
     else:
       # Fake quantization, debugging purpose.

@@ -48,18 +48,18 @@ class QuantizationTest(unittest.TestCase):
     return (torch.dot(x, y) / (x.norm() * y.norm())).item()
 
   def _nn_linear_run_and_compare(
-        self,
-        nn_linear,
-        qlinear_layer,
-        arg,
-    ):
-      torch_result = nn_linear(arg)
-      qlinear_layer.quantize_weight_from_nn_linear(nn_linear.weight)
-      result = helpers.call_xla_model(
-          qlinear_layer, qlinear_layer.state_dict(), arg
-      )
-      diff = result - torch_result
-      return result, torch_result, diff
+      self,
+      nn_linear,
+      qlinear_layer,
+      arg,
+  ):
+    torch_result = nn_linear(arg)
+    qlinear_layer.quantize_weight_from_nn_linear(nn_linear.weight)
+    result = helpers.call_xla_model(
+        qlinear_layer, qlinear_layer.state_dict(), arg
+    )
+    diff = result - torch_result
+    return result, torch_result, diff
 
   def _print_diff(self, w, w_dq):
     print("Print diff:")
@@ -195,7 +195,9 @@ class QuantizationTest(unittest.TestCase):
     block_q_linear = WeightOnlyBlockwiseQuantizedLinear(
         in_features, out_features
     )
-    res, torch_res, block_diff = self._nn_linear_run_and_compare(nn_linear, block_q_linear, arg)
+    res, torch_res, block_diff = self._nn_linear_run_and_compare(
+        nn_linear, block_q_linear, arg
+    )
     # self.assertTrue(torch.allclose(res, torch_res, atol=1.5))
     # Block quant is more accurate than per_channel quant.
     self.assertLess(block_diff.norm(), per_channel_diff.norm())
@@ -210,7 +212,9 @@ class QuantizationTest(unittest.TestCase):
     )
     # self._print_diff(res, torch_res)
     self.assertTrue(torch.allclose(res, torch_res, atol=2))
-    quant_config = QuantizationConfig(is_symmetric_weight=False, is_blockwise_weight=True)
+    quant_config = QuantizationConfig(
+        is_symmetric_weight=False, is_blockwise_weight=True
+    )
     block_q_linear = WeightOnlyBlockwiseQuantizedLinear(
         in_features, out_features, quant_config=quant_config
     )
@@ -273,20 +277,20 @@ class QuantizationTest(unittest.TestCase):
       opt_hlo = shard_and_lower(f, layer, state_dict_jax, input, sharding)
       self.assertFalse("all-to-all" in opt_hlo)
       self.assertFalse("all-reduce-scatter" in opt_hlo)
-  
+
   def test_activation_quant_per_channel(self):
 
     out_features = 8
     in_features = 4
     block_size = 128
-    
+
     arg = torch.randn(2, 1, in_features).to(torch.bfloat16)
     nn_linear = torch.nn.Linear(
         in_features, out_features, bias=False, dtype=torch.bfloat16
     )
     quant_config = QuantizationConfig(
-      enable_weight_quantization=True,
-      enable_activation_quantization=True,
+        enable_weight_quantization=True,
+        enable_activation_quantization=True,
     )
     per_channel_q_linear = WeightOnlyPerChannelQuantizedLinear(
         in_features, out_features, quant_config=quant_config
@@ -294,7 +298,7 @@ class QuantizationTest(unittest.TestCase):
     res, torch_res, _ = self._nn_linear_run_and_compare(
         nn_linear, per_channel_q_linear, arg
     )
-    self.assertGreater(self._calc_cosine_dist(res, torch_res), 0.9999)    
+    self.assertGreater(self._calc_cosine_dist(res, torch_res), 0.9999)
 
 
 if __name__ == "__main__":

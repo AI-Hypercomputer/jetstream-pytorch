@@ -240,13 +240,25 @@ class GemmaMLP(nn.Module):
       linear_kwargs = {"quant_config": env.quant_config}
 
     self.gate_proj = Linear(
-        hidden_size, intermediate_size, bias=False, device=device, **linear_kwargs,
+        hidden_size,
+        intermediate_size,
+        bias=False,
+        device=device,
+        **linear_kwargs,
     )
     self.up_proj = Linear(
-        hidden_size, intermediate_size, bias=False, device=device, **linear_kwargs,
+        hidden_size,
+        intermediate_size,
+        bias=False,
+        device=device,
+        **linear_kwargs,
     )
     self.down_proj = Linear(
-        intermediate_size, hidden_size, bias=False, device=device, **linear_kwargs,
+        intermediate_size,
+        hidden_size,
+        bias=False,
+        device=device,
+        **linear_kwargs,
     )
 
   def forward(self, x):
