@@ -19,9 +19,17 @@ pip show libtpu-nightly && pip uninstall -y libtpu-nightly
 pip show tensorflow && pip uninstall -y tensorflow
 pip show ray && pip uninstall -y ray
 pip show flax && pip uninstall -y flax
+pip show keras && pip uninstall -y keras
+pip show tensorboard && pip uninstall -y tensorboard
+pip show tensorflow-text && pip uninstall -y tensorflow-text
+pip show torch_xla2 && pip uninstall -y torch_xla2
 
 pip install flax==0.8.3
 pip install jax[tpu]==0.4.28 -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+pip install tensorflow-text
+pip install tensorflow
+pip install flax==0.8.3
+
 pip install ray[default]==2.22.0
 # torch cpu
 pip install torch==2.2.1+cpu --index-url https://download.pytorch.org/whl/cpu

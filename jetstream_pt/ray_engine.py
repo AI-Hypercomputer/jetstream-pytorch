@@ -1,4 +1,5 @@
-from typing import Any, Iterable, Optional, Union
+from collections import defaultdict
+from typing import Any, Iterable, Optional, Union, Tuple
 
 import numpy as np
 import jax
@@ -11,6 +12,7 @@ from jetstream_pt.ray_worker import PyTorchRayWorker
 Params = Any
 Prefix = Any
 DecodeState = Any
+NpPrefix = Any
 
 
 class PyTorchRayEngine(engine_api.Engine):
@@ -28,11 +30,15 @@ class PyTorchRayEngine(engine_api.Engine):
       tokenizer_path: str,
       context_length: int,
       batch_size: int,
+      is_disaggregated: bool = False,
+      pod_slice_name: str = None,
   ):
     self.engine_workers = engine_workers
     self.tokenizer_path = tokenizer_path
     self.context_length = context_length
     self.batch_size = batch_size
+    self.is_disaggregated = is_disaggregated
+    self.pod_slice_name = pod_slice_name
 
   # pylint: disable-next=all
   def load_params(self) -> Params:
@@ -54,7 +60,7 @@ class PyTorchRayEngine(engine_api.Engine):
     _ = ray.get(all_outputs)
     return None
 
-  def prefill(
+  def interleave_prefill(
       self,
       *,
       params: Any,  # Weights
@@ -76,6 +82,63 @@ class PyTorchRayEngine(engine_api.Engine):
     # the worker itself manages and maintains the prefill states.
     return None
 
+  def disaggregated_prefill(
+      self,
+      *,
+      params: Any,  # Weights
+      existing_prefix: Optional[Prefix] = None,
+      padded_tokens: np.ndarray,  # PrefillInputs[np.ndarray],
+      true_length: int,
+  ) -> Prefix:
+    all_outputs = []
+    for worker in self.engine_workers:
+      output = worker.prefill_ray_disaggregation.remote(
+          params=params,
+          existing_prefix=existing_prefix,
+          padded_tokens=padded_tokens,
+          true_length=true_length,
+      )
+      all_outputs.append(output)
+    results = ray.get(all_outputs)
+    return results[0]  
+
+  def prefill(
+      self,
+      *,
+      params: Any,  # Weights
+      existing_prefix: Optional[Prefix] = None,
+      padded_tokens: np.ndarray,  # PrefillInputs[np.ndarray],
+      true_length: int,
+  ) -> Prefix:
+    result = None
+    if self.is_disaggregated:
+      result = self.disaggregated_prefill(
+      params=params,
+      existing_prefix=existing_prefix,
+      padded_tokens=padded_tokens,
+      true_length=true_length,
+      ) 
+    else:
+      result= self.interleave_prefill(
+      params=params,
+      existing_prefix=existing_prefix,
+      padded_tokens=padded_tokens,
+      true_length=true_length,
+      )
+
+    return result
+  
+  
+  def transfer(self, np_prefix: NpPrefix) -> Any:
+    all_outputs = []
+    np_prefix_ref = ray.put(np_prefix)
+    for worker in self.engine_workers:
+      output = worker.transfer.remote(np_prefix_ref)
+      all_outputs.append(output)
+    results = ray.get(all_outputs)
+
+    return results[0]  
+    
   def insert(
       self,
       prefix: Prefix,
@@ -126,7 +189,8 @@ class PyTorchRayEngine(engine_api.Engine):
 
   @property
   def colocated_cpus(self) -> Union[list[engine_api.CpuDevices], None]:
-    return jax.devices("cpu")[0]
+    # return jax.devices("cpu")[0]
+    return None
 
   def get_prefix_destination_sharding(self) -> Prefix:
     "No implementation"
@@ -153,7 +217,10 @@ def create_pytorch_ray_engine(
     quantize_kv=False,
     max_cache_length=1024,
     sharding_config=None,
-) -> PyTorchRayEngine:
+    is_disaggregated: bool = False,
+    num_hosts: int = 0,
+    decode_pod_slice_name: str = None,
+) -> Any:
 
   supported_models = ["llama-2", "llama-3", "gemma"]
   if model_name not in supported_models:
@@ -162,7 +229,7 @@ def create_pytorch_ray_engine(
     )
   ray.init(ignore_reinit_error=True)
   pod_name = tpu.get_current_pod_name()
-  num_hosts = tpu.get_current_pod_worker_count()
+  num_hosts = num_hosts if is_disaggregated else tpu.get_current_pod_worker_count()
   print(f"pod_name:{pod_name}, number of host: {num_hosts}")
   assert (
       pod_name is not None
@@ -192,10 +259,34 @@ def create_pytorch_ray_engine(
         sharding_config=sharding_config,
     )
     engine_workers.append(engine_worker)
-  engine_master = PyTorchRayEngine(
+
+  if not is_disaggregated:
+    return PyTorchRayEngine(
       engine_workers=engine_workers,
       tokenizer_path=tokenizer_path,
       context_length=context_length,
       batch_size=batch_size,
+      )
+
+  workers_dict = defaultdict(list)  
+  for worker in engine_workers:
+    pod_slice_name = ray.get(worker.pod_slice_name.remote())
+    workers_dict[pod_slice_name].append(worker)  
+
+  prefill_engine = PyTorchRayEngine(
+      engine_workers=workers_dict[pod_name],
+      tokenizer_path=tokenizer_path,
+      context_length=context_length,
+      batch_size=batch_size,
+      is_disaggregated=is_disaggregated,
+      pod_slice_name=pod_name,
   )
-  return engine_master
+  decode_engine = PyTorchRayEngine(
+      engine_workers=workers_dict[decode_pod_slice_name],
+      tokenizer_path=tokenizer_path,
+      context_length=context_length,
+      batch_size=batch_size,
+      is_disaggregated=is_disaggregated,
+      pod_slice_name=decode_pod_slice_name,
+  )
+  return (prefill_engine, decode_engine)
