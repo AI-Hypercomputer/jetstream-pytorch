@@ -166,7 +166,6 @@ class PyTorchRayWorker:
         bf16_enable=bf16_enable,
         sharding_config_path=sharding_config,
     )
-    env = JetEngineEnvironment(env_data)
 
     if model_name.startswith("llama"):
 
@@ -353,7 +352,7 @@ class PyTorchRayWorker:
     args = (tokens, input_pos, caches_obj, mask)
     paramst, argst = torchjax.to_torch((weights, args))
     with self._lock:
-      with torchjax.jax_mode():
+      with torch_xla2.default_env():
         res = torch.func.functional_call(self.pt_model, paramst, argst)
       updated_caches = [c.state() for c in caches_obj]
     scales = []
@@ -396,7 +395,7 @@ class PyTorchRayWorker:
 
     paramst, argst = torchjax.to_torch((weights, args))
     with self._lock:
-      with torchjax.jax_mode:
+      with torch_xla2.default_env():
         res = torch.func.functional_call(self.pt_model, paramst, argst)[0]
     caches_res = [c.state() for c in caches]
     return torchjax.from_torch((res, caches_res))

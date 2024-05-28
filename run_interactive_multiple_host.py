@@ -43,8 +43,6 @@ def create_engine():
       quantize_kv=FLAGS.quantize_kv_cache,
       max_cache_length=FLAGS.max_cache_length,
       sharding_config=FLAGS.sharding_config,
-      shard_on_batch=FLAGS.shard_on_batch,
-      ragged_mha=FLAGS.ragged_mha,
   )
 
   print("Initialize engine", time.perf_counter() - start)
@@ -54,7 +52,7 @@ def create_engine():
 # pylint: disable-next=all
 def main(argv):
 
-  engine = create_engine_from_config_flags()
+  engine = create_engine()
 
   start = time.perf_counter()
   engine.load_params()
@@ -99,6 +97,7 @@ def main(argv):
     while True:
       # pylint: disable-next=all
       decode_state, result_tokens = engine.generate(None, decode_state)
+      result_tokens = result_tokens.convert_to_numpy()
 
       slot_data = result_tokens.get_result_at_slot(slot)
       slot_tokens = slot_data.tokens
