@@ -28,7 +28,6 @@ pip install flax==0.8.3
 pip install jax[tpu]==0.4.28 -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
 pip install tensorflow-text
 pip install tensorflow
-pip install flax==0.8.3
 
 pip install ray[default]==2.22.0
 # torch cpu
