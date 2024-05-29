@@ -70,17 +70,22 @@ class PyTorchRayEngine(engine_api.Engine):
   ) -> Prefix:
     all_outputs = []
     for worker in self.engine_workers:
-      output = worker.prefill_ray.remote(
+      prefill_func = (
+        worker.prefill_ray
+        if self.is_disaggregated
+        else worker.prefill_ray_disaggregation
+      )
+      output = prefill_func.remote(
           params=params,
           existing_prefix=existing_prefix,
           padded_tokens=padded_tokens,
           true_length=true_length,
       )
       all_outputs.append(output)
-    _ = ray.get(all_outputs)
+    results = ray.get(all_outputs)
     # The prefill function does not return any values;
     # the worker itself manages and maintains the prefill states.
-    return None
+    return results[0]
 
   # pylint: disable-next=all
   def disaggregated_prefill(
@@ -111,19 +116,24 @@ class PyTorchRayEngine(engine_api.Engine):
       padded_tokens: np.ndarray,  # PrefillInputs[np.ndarray],
       true_length: int,
   ) -> Prefix:
-    call_prefill = (
-        self.disaggregated_prefill
+    all_outputs = []
+    for worker in self.engine_workers:
+      prefill_func = (
+        worker.prefill_ray
         if self.is_disaggregated
-        else self.interleave_prefill
-    )
-    # pylint: disable-next=all
-    result = call_prefill(
-        params=params,
-        existing_prefix=existing_prefix,
-        padded_tokens=padded_tokens,
-        true_length=true_length,
-    )
-    return result
+        else worker.prefill_ray_disaggregation
+      )
+      output = prefill_func.remote(
+          params=params,
+          existing_prefix=existing_prefix,
+          padded_tokens=padded_tokens,
+          true_length=true_length,
+      )
+      all_outputs.append(output)
+    results = ray.get(all_outputs)
+    # The prefill function does not return any values;
+    # the worker itself manages and maintains the prefill states.
+    return results[0]
 
   def transfer(self, np_prefix: NpPrefix) -> Any:
     """Store prefill result into object store, then transfer to decode engine workers."""
