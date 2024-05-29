@@ -59,55 +59,6 @@ class PyTorchRayEngine(engine_api.Engine):
     _ = ray.get(all_outputs)
     return None
 
-  # pylint: disable-next=all
-  def interleave_prefill(
-      self,
-      *,
-      params: Any,  # Weights
-      existing_prefix: Optional[Prefix] = None,
-      padded_tokens: np.ndarray,  # PrefillInputs[np.ndarray],
-      true_length: int,
-  ) -> Prefix:
-    all_outputs = []
-    for worker in self.engine_workers:
-      prefill_func = (
-        worker.prefill_ray
-        if self.is_disaggregated
-        else worker.prefill_ray_disaggregation
-      )
-      output = prefill_func.remote(
-          params=params,
-          existing_prefix=existing_prefix,
-          padded_tokens=padded_tokens,
-          true_length=true_length,
-      )
-      all_outputs.append(output)
-    results = ray.get(all_outputs)
-    # The prefill function does not return any values;
-    # the worker itself manages and maintains the prefill states.
-    return results[0]
-
-  # pylint: disable-next=all
-  def disaggregated_prefill(
-      self,
-      *,
-      params: Any,  # Weights
-      existing_prefix: Optional[Prefix] = None,
-      padded_tokens: np.ndarray,  # PrefillInputs[np.ndarray],
-      true_length: int,
-  ) -> Prefix:
-    all_outputs = []
-    for worker in self.engine_workers:
-      output = worker.prefill_ray_disaggregation.remote(
-          params=params,
-          existing_prefix=existing_prefix,
-          padded_tokens=padded_tokens,
-          true_length=true_length,
-      )
-      all_outputs.append(output)
-    results = ray.get(all_outputs)
-    return results[0]
-
   def prefill(
       self,
       *,
@@ -119,9 +70,9 @@ class PyTorchRayEngine(engine_api.Engine):
     all_outputs = []
     for worker in self.engine_workers:
       prefill_func = (
-        worker.prefill_ray_disaggregation
-        if self.is_disaggregated
-        else worker.prefill_ray
+          worker.prefill_ray_disaggregation
+          if self.is_disaggregated
+          else worker.prefill_ray
       )
       output = prefill_func.remote(
           params=params,
