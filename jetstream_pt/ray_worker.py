@@ -23,6 +23,7 @@ import humanize
 import jax
 import numpy as np
 import ray
+from ray.util.accelerators import tpu
 import safetensors
 import torch
 import torch_xla2
@@ -52,6 +53,14 @@ PrefillInputs = np.ndarray
 @struct.dataclass
 # pylint: disable-next=all
 class Prefix:
+  token: jax.Array  # [1, seqlen]
+  caches: List[Tuple[jax.Array, jax.Array]]
+  seq_len: int  # true seqlen front pad
+
+
+@struct.dataclass
+# pylint: disable-next=all
+class NpPrefix:
   token: jax.Array  # [1, seqlen]
   caches: List[Tuple[jax.Array, jax.Array]]
   seq_len: int  # true seqlen front pad
@@ -460,6 +469,50 @@ class PyTorchRayWorker:
     self.prefix_queue.put(prefix, block=False)
 
     return token
+
+  def _convert_to_np_caches(
+      self, caches: List[Tuple[jax.Array, jax.Array]]
+  ) -> List[Tuple[np.ndarray, np.ndarray]]:
+    return [(np.asarray(tup[0]), np.asarray(tup[1])) for tup in caches]
+
+  def _convert_to_jax_caches(
+      self, np_caches: List[Tuple[np.ndarray, np.ndarray]]
+  ) -> List[Tuple[jax.Array, jax.Array]]:
+    return [(jnp.asarray(tup[0]), jnp.asarray(tup[1])) for tup in np_caches]
+
+  def prefill_ray_disaggregation(
+      self,
+      *,
+      params: Any,  # Weights
+      existing_prefix: Optional[Prefix] = None,
+      padded_tokens: PrefillInputs,  # PrefillInputs[np.ndarray],
+      true_length: int,
+  ) -> Any:
+    """Do prefill in ray worker"""
+    logits, updated_caches = self.prefill(
+        params=params,
+        existing_prefix=existing_prefix,
+        padded_tokens=padded_tokens,
+        true_length=true_length,
+    )
+    if len(logits.shape) == 3:  # b, seqlen, num words
+      logits = logits[0]
+
+    token = np.argmax(logits[true_length - 1])
+    updated_caches = multihost_utils.process_allgather(
+        updated_caches, tiled=True
+    )
+    np_update_caches = self._convert_to_np_caches(updated_caches)
+    np_prefix = NpPrefix(token, np_update_caches, true_length)
+
+    return np_prefix
+
+  def transfer(self, np_prefix: NpPrefix) -> Any:
+    """Transfer prefill result from object store to HBM"""
+    updated_caches = self._convert_to_jax_caches(np_prefix.caches)
+    prefix = Prefix(np_prefix.token, updated_caches, np_prefix.seq_len)
+    self.prefix_queue.put(prefix, block=False)
+    return True
 
   def shrink_prefix(
       self,
@@ -884,3 +937,7 @@ class PyTorchRayWorker:
   def mesh(self):
     """return mesh"""
     return None
+
+  def pod_slice_name(self):
+    """pod slice name"""
+    return tpu.get_current_pod_name()
