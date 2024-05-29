@@ -111,23 +111,18 @@ class PyTorchRayEngine(engine_api.Engine):
       padded_tokens: np.ndarray,  # PrefillInputs[np.ndarray],
       true_length: int,
   ) -> Prefix:
-    result = None
-    if self.is_disaggregated:
-      result = self.disaggregated_prefill(
-          params=params,
-          existing_prefix=existing_prefix,
-          padded_tokens=padded_tokens,
-          true_length=true_length,
-      )
-    else:
-      self.interleave_prefill(
-          params=params,
-          existing_prefix=existing_prefix,
-          padded_tokens=padded_tokens,
-          true_length=true_length,
-      )
-
-    # Return None if interleave
+    call_prefill = (
+        self.disaggregated_prefill
+        if self.is_disaggregated
+        else self.interleave_prefill
+    )
+    # pylint: disable-next=all
+    result = call_prefill(
+        params=params,
+        existing_prefix=existing_prefix,
+        padded_tokens=padded_tokens,
+        true_length=true_length,
+    )
     return result
 
   def transfer(self, np_prefix: NpPrefix) -> Any:
