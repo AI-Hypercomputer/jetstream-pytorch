@@ -57,12 +57,14 @@ class Prefix:
   caches: List[Tuple[jax.Array, jax.Array]]
   seq_len: int  # true seqlen front pad
 
+
 @struct.dataclass
 # pylint: disable-next=all
 class NpPrefix:
   token: jax.Array  # [1, seqlen]
   caches: List[Tuple[jax.Array, jax.Array]]
   seq_len: int  # true seqlen front pad
+
 
 @struct.dataclass
 # pylint: disable-next=all
@@ -467,12 +469,16 @@ class PyTorchRayWorker:
     self.prefix_queue.put(prefix, block=False)
 
     return token
-  
-  def _convert_to_np_caches(self, caches: List[Tuple[jax.Array, jax.Array]]) -> List[Tuple[np.ndarray, np.ndarray]]:
+
+  def _convert_to_np_caches(
+      self, caches: List[Tuple[jax.Array, jax.Array]]
+  ) -> List[Tuple[np.ndarray, np.ndarray]]:
     return [(np.asarray(tup[0]), np.asarray(tup[1])) for tup in caches]
 
-  def _convert_to_jax_caches(self, np_caches: List[Tuple[np.ndarray, np.ndarray]]) -> List[Tuple[jax.Array, jax.Array]]:
-    return [(jnp.asarray(tup[0]), jnp.asarray(tup[1])) for tup in np_caches]  
+  def _convert_to_jax_caches(
+      self, np_caches: List[Tuple[np.ndarray, np.ndarray]]
+  ) -> List[Tuple[jax.Array, jax.Array]]:
+    return [(jnp.asarray(tup[0]), jnp.asarray(tup[1])) for tup in np_caches]
 
   def prefill_ray_disaggregation(
       self,
@@ -493,14 +499,16 @@ class PyTorchRayWorker:
       logits = logits[0]
 
     token = np.argmax(logits[true_length - 1])
-    updated_caches = multihost_utils.process_allgather(updated_caches, tiled=True)
+    updated_caches = multihost_utils.process_allgather(
+        updated_caches, tiled=True
+    )
     np_update_caches = self._convert_to_np_caches(updated_caches)
     np_prefix = NpPrefix(token, np_update_caches, true_length)
 
-    return np_prefix  
-
+    return np_prefix
 
   def transfer(self, np_prefix: NpPrefix) -> Any:
+    """Transfer prefill result from object store to HBM"""
     updated_caches = self._convert_to_jax_caches(np_prefix.caches)
     prefix = Prefix(np_prefix.token, updated_caches, np_prefix.seq_len)
     self.prefix_queue.put(prefix, block=False)
@@ -929,6 +937,7 @@ class PyTorchRayWorker:
   def mesh(self):
     """return mesh"""
     return None
- 
+
   def pod_slice_name(self):
-    return tpu.get_current_pod_name()    
+    """pod slice name"""
+    return tpu.get_current_pod_name()

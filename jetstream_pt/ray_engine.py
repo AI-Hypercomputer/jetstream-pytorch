@@ -1,8 +1,7 @@
 from collections import defaultdict
-from typing import Any, Iterable, Optional, Union, Tuple
+from typing import Any, Iterable, Optional, Union
 
 import numpy as np
-import jax
 import ray
 from ray.util.accelerators import tpu
 
@@ -60,6 +59,7 @@ class PyTorchRayEngine(engine_api.Engine):
     _ = ray.get(all_outputs)
     return None
 
+  # pylint: disable-next=all
   def interleave_prefill(
       self,
       *,
@@ -82,6 +82,7 @@ class PyTorchRayEngine(engine_api.Engine):
     # the worker itself manages and maintains the prefill states.
     return None
 
+  # pylint: disable-next=all
   def disaggregated_prefill(
       self,
       *,
@@ -100,7 +101,7 @@ class PyTorchRayEngine(engine_api.Engine):
       )
       all_outputs.append(output)
     results = ray.get(all_outputs)
-    return results[0]  
+    return results[0]
 
   def prefill(
       self,
@@ -113,23 +114,24 @@ class PyTorchRayEngine(engine_api.Engine):
     result = None
     if self.is_disaggregated:
       result = self.disaggregated_prefill(
-      params=params,
-      existing_prefix=existing_prefix,
-      padded_tokens=padded_tokens,
-      true_length=true_length,
-      ) 
+          params=params,
+          existing_prefix=existing_prefix,
+          padded_tokens=padded_tokens,
+          true_length=true_length,
+      )
     else:
-      result= self.interleave_prefill(
-      params=params,
-      existing_prefix=existing_prefix,
-      padded_tokens=padded_tokens,
-      true_length=true_length,
+      self.interleave_prefill(
+          params=params,
+          existing_prefix=existing_prefix,
+          padded_tokens=padded_tokens,
+          true_length=true_length,
       )
 
+    # Return None if interleave
     return result
-  
-  
+
   def transfer(self, np_prefix: NpPrefix) -> Any:
+    """Store prefill result into object store, then transfer to decode engine workers."""
     all_outputs = []
     np_prefix_ref = ray.put(np_prefix)
     for worker in self.engine_workers:
@@ -137,8 +139,8 @@ class PyTorchRayEngine(engine_api.Engine):
       all_outputs.append(output)
     results = ray.get(all_outputs)
 
-    return results[0]  
-    
+    return results[0]
+
   def insert(
       self,
       prefix: Prefix,
@@ -229,7 +231,9 @@ def create_pytorch_ray_engine(
     )
   ray.init(ignore_reinit_error=True)
   pod_name = tpu.get_current_pod_name()
-  num_hosts = num_hosts if is_disaggregated else tpu.get_current_pod_worker_count()
+  num_hosts = (
+      num_hosts if is_disaggregated else tpu.get_current_pod_worker_count()
+  )
   print(f"pod_name:{pod_name}, number of host: {num_hosts}")
   assert (
       pod_name is not None
@@ -262,16 +266,16 @@ def create_pytorch_ray_engine(
 
   if not is_disaggregated:
     return PyTorchRayEngine(
-      engine_workers=engine_workers,
-      tokenizer_path=tokenizer_path,
-      context_length=context_length,
-      batch_size=batch_size,
-      )
+        engine_workers=engine_workers,
+        tokenizer_path=tokenizer_path,
+        context_length=context_length,
+        batch_size=batch_size,
+    )
 
-  workers_dict = defaultdict(list)  
+  workers_dict = defaultdict(list)
   for worker in engine_workers:
     pod_slice_name = ray.get(worker.pod_slice_name.remote())
-    workers_dict[pod_slice_name].append(worker)  
+    workers_dict[pod_slice_name].append(worker)
 
   prefill_engine = PyTorchRayEngine(
       engine_workers=workers_dict[pod_name],
