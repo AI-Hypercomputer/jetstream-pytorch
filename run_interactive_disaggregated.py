@@ -118,7 +118,7 @@ def create_disaggregated_engines():
 # pylint: disable-next=all
 def main(argv):
 
-  print("start the test")  
+  print("start the test")
   prefill_engine, decode_engine = create_disaggregated_engines()
 
   start = time.perf_counter()
@@ -156,14 +156,20 @@ def main(argv):
     print(f"---- Encoded tokens are: {tokens}")
 
     # pylint: disable-next=all
-    print(f"---- Do prefill in prefill engine pod_slice_name: {prefill_engine.pod_slice_name}")
+    print(
+        f"---- Do prefill in prefill engine pod_slice_name: {prefill_engine.pod_slice_name}"
+    )
     prefill_result = prefill_engine.prefill(
         params=None, padded_tokens=tokens, true_length=true_length
     )
-    print(f"---- Transfer prefill result to decode engine pod_slice_name: {decode_engine.pod_slice_name}")
+    print(
+        f"---- Transfer prefill result to decode engine pod_slice_name: {decode_engine.pod_slice_name}"
+    )
     decode_engine.transfer(prefill_result)
     # pylint: disable-next=all
-    print(f"---- Do insert in decode engine pod_slice_name: {decode_engine.pod_slice_name}")
+    print(
+        f"---- Do insert in decode engine pod_slice_name: {decode_engine.pod_slice_name}"
+    )
     decode_state = decode_engine.insert(prefill_result, None, slot=slot)
     sampled_tokens_list = []
     while True:
