@@ -189,7 +189,8 @@ class PyTorchRayEngine(engine_api.Engine):
 
   @property
   def colocated_cpus(self) -> Union[list[engine_api.CpuDevices], None]:
-    return jax.devices("cpu")[0]
+    # ray head doesn't load any parameters
+    return None
 
   def get_prefix_destination_sharding(self) -> Prefix:
     "No implementation"
