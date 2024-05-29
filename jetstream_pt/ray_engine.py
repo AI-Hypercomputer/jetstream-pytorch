@@ -119,9 +119,9 @@ class PyTorchRayEngine(engine_api.Engine):
     all_outputs = []
     for worker in self.engine_workers:
       prefill_func = (
-        worker.prefill_ray
+        worker.prefill_ray_disaggregation
         if self.is_disaggregated
-        else worker.prefill_ray_disaggregation
+        else worker.prefill_ray
       )
       output = prefill_func.remote(
           params=params,
