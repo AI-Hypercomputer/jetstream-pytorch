@@ -82,7 +82,7 @@ def main(argv: Sequence[str]):
       port=FLAGS.port,
       config=server_config,
       devices=devices,
-      jax_padding=False, # Jax_padding must be set as False
+      jax_padding=False,  # Jax_padding must be set as False
   )
   print("Started jetstream_server....")
   jetstream_server.wait_for_termination()
