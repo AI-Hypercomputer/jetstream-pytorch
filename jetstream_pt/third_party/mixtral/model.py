@@ -98,9 +98,47 @@ class Transformer(nn.Module):
             logits = self.output(x)
         return logits
 
-    @classmethod
-    def from_name(cls, name: str):
-        return cls(ModelArgs.from_name(name))
+
+    @staticmethod
+    def get_quantized_linear_weight_to_scaler_map():
+        return {
+            "attention.wq.weight": "attention.wq.weight_scaler",
+            "attention.wk.weight": "attention.wk.weight_scaler",
+            "attention.wv.weight": "attention.wv.weight_scaler",
+            "attention.wo.weight": "attention.wo.weight_scaler",
+            "feed_forward.w1.weight": "feed_forward.w1.weight_scaler",
+            "feed_forward.w2.weight": "feed_forward.w2.weight_scaler",
+            "feed_forward.w3.weight": "feed_forward.w3.weight_scaler",
+            "output.weight": "output.weight_scaler",
+        }
+
+    @staticmethod
+    def get_quantized_embedding_weight_to_scaler_map():
+        return {
+            "tok_embeddings.weight": "tok_embeddings.weight_scaler",
+        }
+
+    @staticmethod
+    def get_weight_sharding_type():
+        # ParallelEmbedding is col partitioned across the shards.
+        # ColumnParallelLinear is row partitioned across shards due to transpose.
+        # RowParallelLinear is col partitioned across shards due to transpose.
+        # None is no partitioning and tensor should be identical across shards
+        return {
+            "tok_embeddings.weight": "ParallelEmbedding",
+            "rope.freqs": None,
+            "attention.wq.weight": "ColumnParallelLinear",
+            "attention.wk.weight": "ColumnParallelLinear",
+            "attention.wv.weight": "ColumnParallelLinear",
+            "attention.wo.weight": "RowParallelLinear",
+            "feed_forward.w1.weight": "ColumnParallelLinear",
+            "feed_forward.w2.weight": "RowParallelLinear",
+            "feed_forward.w3.weight": "ColumnParallelLinear",
+            "attention_norm.weight": None,
+            "ffn_norm.weight": None,
+            "norm.weight": None,
+            "output.weight": "ColumnParallelLinear",
+        }
 
 
 class TransformerBlock(nn.Module):

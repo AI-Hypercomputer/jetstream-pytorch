@@ -37,8 +37,10 @@ from jetstream_pt import quantize
 from jetstream_pt.config import FLAGS
 from jetstream_pt.third_party.gemma import model as gemma_model
 from jetstream_pt.third_party.llama import model_exportable as llama_model
+from jetstream_pt.third_party.mixtral import model as mistral_model
+
 from safetensors import safe_open
-from safetensors.torch import save_file
+from safetensors.torch import load_file, save_file
 
 _INPUT_CHECKPOINT_DIR = epath.DEFINE_path(
     "input_checkpoint_dir",
@@ -162,7 +164,7 @@ def _tensors_have_same_shape(tensors):
 
 
 # pylint: disable-next=all
-def _merge_llama_weights(
+def _merge_weights(
     checkpoints, minimize_memory_footprint, enable_float32
 ):
   print("Starting to merge weights.")
@@ -237,7 +239,7 @@ def _merge_llama_weights(
   return state_dict
 
 
-def _load_from_gcs(input_ckpt_dir: epath.Path):
+def _load_from_gcs(input_ckpt_dir: epath.Path, param_file_name:str):
   checkpoints = []
   input_ckpt_dir_str = str(input_ckpt_dir)
   # pylint: disable-next=all
@@ -246,7 +248,7 @@ def _load_from_gcs(input_ckpt_dir: epath.Path):
   storage_client = storage.Client()
   input_blobs = storage_client.list_blobs(bucket_name, prefix=blob_name)
   for blob in input_blobs:
-    if "params.json" in blob.name:
+    if param_file_name in blob.name:
       with blob.open("r") as f:
         print(f"Loading parameter files from {blob.name}")
         params = f.read()
@@ -262,7 +264,7 @@ def _load_from_gcs(input_ckpt_dir: epath.Path):
 
 def _load_orig_llama_weight(input_ckpt_dir: epath.Path):
   checkpoints = []
-  params = json.loads((input_ckpt_dir / "params.json").read_text())
+  params = json.loads((input_ckpt_dir / param_file_name).read_text())
 
   print(f"Loading checkpoint files from {input_ckpt_dir}.")
   paths = input_ckpt_dir.glob("*.pth")
@@ -401,15 +403,15 @@ def _get_llama_state_dict(input_ckpt_dir):
         """WARNING: Loading data from gcs bucket takes a lont time. 
         Suggest to download the data to local first!"""
     )
-    checkpoints, params = _load_from_gcs(input_ckpt_dir)
+    checkpoints, params = _load_from_gcs(input_ckpt_dir, "params.json")
   else:
-    checkpoints, params = _load_from_local(input_ckpt_dir)
+    checkpoints, params = _load_from_local(input_ckpt_dir, "params.json")
   end = time.perf_counter()
   print(f"Loading checkpoints takes {end - start} seconds")
 
   start = time.perf_counter()
   if len(checkpoints) > 1:
-    state_dict = _merge_llama_weights(
+    state_dict = _merge_weights(
         checkpoints, _MINIMIZE_MEMORY_FOOTPRINT.value, _ENABLE_FLOAT32.value
     )
   else:
@@ -462,6 +464,64 @@ def _get_gemma_state_dict(input_ckpt_dir):
   return state_dict, model_config
 
 
+def _get_mistral_state_dict(input_ckpt_dir):
+  ckpt_files = list(input_ckpt_dir.glob("*.safetensors"))
+  assert len(ckpt_files) == 2, "only expect 2 ckpt file for Mistral model."
+
+  start = time.perf_counter()
+  checkpoints = [load_file(ckpt_file) for ckpt_file in ckpt_files]
+  end = time.perf_counter()
+  print(f"Loading checkpoints takes {end - start} seconds")
+
+  start = time.perf_counter()
+  if len(checkpoints) > 1:
+    state_dict = _merge_weights(
+        checkpoints, _MINIMIZE_MEMORY_FOOTPRINT.value, _ENABLE_FLOAT32.value
+    )
+  else:
+    state_dict = checkpoints[0]
+  end = time.perf_counter()
+  print(f"Merging weights takes {end - start} seconds")
+
+  print(f'Debugging state dict: {state_dict}')
+  state_dict = state_dict[
+      "model_state_dict"
+  ]
+  model_config = json.loads((input_ckpt_dir / "config.json").read_text())
+  for key in list(state_dict.keys()):
+    if state_dict[key].dtype.is_complex and _OUTPUT_SAFETENSORS.value:
+      assert (
+          key == "freqs_cis"
+      ), "Only expect key 'freqs_cis' in the state_dict has complex dtype."
+      # Remove "freqs_cis" since it has complex dtype, and safetensor doesn't support it.
+      # The "freqs_cis" will be reconstructed when it's loaded by inference engine.
+      state_dict.pop(key)
+      continue
+    prefix_to_remove = "model."
+    new_key = key
+    if key.startswith(prefix_to_remove):
+      new_key = new_key.removeprefix(prefix_to_remove)
+    if "qkv_proj" in key:
+      q_dim = model_config["num_attention_heads"] * model_config["head_dim"]
+      kv_dim = model_config["num_key_value_heads"] * model_config["head_dim"]
+      qkv = state_dict.pop(key)
+      q, k, v = qkv.split(
+          [
+              q_dim,
+              kv_dim,
+              kv_dim,
+          ],
+          dim=0,
+      )
+      state_dict[new_key.replace("qkv_proj", "wq")] = q
+      state_dict[new_key.replace("qkv_proj", "wk")] = k
+      state_dict[new_key.replace("qkv_proj", "wv")] = v
+      continue
+
+    if new_key != key:
+      state_dict[new_key] = state_dict.pop(key)
+  return state_dict, model_config
+
 def main(argv) -> None:
   """merge weights"""
 
@@ -473,6 +533,14 @@ def main(argv) -> None:
     quantize_embedding_weight_map = (
         gemma_model.GemmaModel.get_quantized_embedding_weight_to_scaler_map()
     )
+  elif FLAGS.model_name == "mistral":
+    state_dict, params = _get_mistral_state_dict(_INPUT_CHECKPOINT_DIR.value)
+    # quantize_linear_weight_map = (
+    #     mistral_model.Transformer.get_quantized_linear_weight_to_scaler_map()
+    # )
+    # quantize_embedding_weight_map = (
+    #     mistral_model.Transformer.get_quantized_embedding_weight_to_scaler_map()
+    # )
   else:
     state_dict, params = _get_llama_state_dict(_INPUT_CHECKPOINT_DIR.value)
     quantize_linear_weight_map = (
