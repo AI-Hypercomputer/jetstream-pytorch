@@ -29,7 +29,7 @@ Follow the steps in
 ## Get the jetstream-pytorch code
 ```bash
 git clone https://github.com/google/jetstream-pytorch.git
-git checkout v0.2.2
+git checkout jetstream-v0.2.2
 ```
 
 (optional) Create a virtual env using `venv` or `conda` and activate it.
