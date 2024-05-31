@@ -15,59 +15,127 @@
 import os
 import random
 import time
-from typing import List
 
-import jax
-from absl import app, flags
+from typing import List
+from absl import app
+from absl import flags
 from colorama import Fore, Style
+
+import numpy as np
+import jax
+
 from jetstream.engine import token_utils
 from jetstream_pt import ray_engine
-from jetstream_pt.config import FLAGS
+
+FLAGS = flags.FLAGS
+
+_TOKENIZER_PATH = flags.DEFINE_string(
+    "tokenizer_path",
+    "tokenizer.model",
+    "The tokenizer model path",
+    required=False,
+)
+_CKPT_PATH = flags.DEFINE_string(
+    "checkpoint_path", None, "Directory for .pth checkpoints", required=False
+)
+_BF16_ENABLE = flags.DEFINE_bool(
+    "bf16_enable", False, "Whether to enable bf16", required=False
+)
+_CONTEXT_LENGTH = flags.DEFINE_integer(
+    "context_length", 1024, "The context length", required=False
+)
+_BATCH_SIZE = flags.DEFINE_integer(
+    "batch_size", 32, "The batch size", required=False
+)
+_PROFILING_OUTPUT = flags.DEFINE_string(
+    "profiling_output",
+    "",
+    "The profiling output",
+    required=False,
+)
+
+_SIZE = flags.DEFINE_string("size", "tiny", "size of model")
+
+_QUANTIZE_WEIGHTS = flags.DEFINE_bool(
+    "quantize_weights", False, "weight quantization"
+)
+_QUANTIZE_KV_CACHE = flags.DEFINE_bool(
+    "quantize_kv_cache", False, "kv_cache_quantize"
+)
+_MAX_CACHE_LENGTH = flags.DEFINE_integer(
+    "max_cache_length", 1024, "kv_cache_quantize"
+)
+
+_MODEL_NAME = flags.DEFINE_string(
+    "model_name", None, "model type", required=False
+)
+
+_SHARDING_CONFIG = flags.DEFINE_string(
+    "sharding_config", "", "config file for sharding"
+)
 
 
-def create_engine():
+_IS_DISAGGREGATED = flags.DEFINE_bool(
+    "is_disaggregated", False, "Disaggregated serving if it's True"
+)
+
+_NUM_HOSTS = flags.DEFINE_integer(
+    "num_hosts", 4, "Number of TPU host", required=False
+)
+
+_DECODE_POD_SLICE_NAME = flags.DEFINE_string(
+    "decode_pod_slice_name", "", "Decode pod slice name"
+)
+
+
+def create_disaggregated_engines():
   """create a pytorch engine"""
-  jax.config.update("jax_default_prng_impl", "unsafe_rbg")
+  # jax.config.update("jax_default_prng_impl", "unsafe_rbg")
   os.environ["TF_CPP_MIN_LOG_LEVEL"] = "0"
 
   start = time.perf_counter()
-  engine = ray_engine.create_pytorch_ray_engine(
-      model_name=FLAGS.model_name,
-      tokenizer_path=FLAGS.tokenizer_path,
-      ckpt_path=FLAGS.checkpoint_path,
-      bf16_enable=FLAGS.bf16_enable,
-      param_size=FLAGS.size,
-      context_length=FLAGS.context_length,
-      batch_size=FLAGS.batch_size,
-      quantize_weights=FLAGS.quantize_weights,
-      quantize_kv=FLAGS.quantize_kv_cache,
-      max_cache_length=FLAGS.max_cache_length,
-      sharding_config=FLAGS.sharding_config,
+  prefill_engine, decode_engine = ray_engine.create_pytorch_ray_engine(
+      model_name=_MODEL_NAME.value,
+      tokenizer_path=_TOKENIZER_PATH.value,
+      ckpt_path=_CKPT_PATH.value,
+      bf16_enable=True,
+      param_size=_SIZE.value,
+      context_length=_CONTEXT_LENGTH.value,
+      batch_size=_BATCH_SIZE.value,
+      quantize_weights=_QUANTIZE_WEIGHTS.value,
+      quantize_kv=_QUANTIZE_KV_CACHE.value,
+      max_cache_length=_MAX_CACHE_LENGTH.value,
+      sharding_config=_SHARDING_CONFIG.value,
+      is_disaggregated=_IS_DISAGGREGATED.value,
+      num_hosts=_NUM_HOSTS.value,
+      decode_pod_slice_name=_DECODE_POD_SLICE_NAME.value,
   )
 
   print("Initialize engine", time.perf_counter() - start)
-  return engine
+  return (prefill_engine, decode_engine)
 
 
 # pylint: disable-next=all
 def main(argv):
 
-  engine = create_engine()
+  print("start the test")
+  prefill_engine, decode_engine = create_disaggregated_engines()
 
   start = time.perf_counter()
-  engine.load_params()
+  prefill_engine.load_params()
+  decode_engine.load_params()
   print("Load params ", time.perf_counter() - start)
 
-  metadata = engine.get_tokenizer()
+  metadata = prefill_engine.get_tokenizer()
+  tokenizer = prefill_engine.build_tokenizer(metadata)
   vocab = token_utils.load_vocab(metadata.path, metadata.extra_ids)
   stop_tokens = [vocab.eos_id, vocab.pad_id]
   max_output_length = 1024
 
-  profiling_output = FLAGS.profiling_output
-  if profiling_output:
-    jax.profiler.start_trace(profiling_output)
+  if _PROFILING_OUTPUT.value:
+    jax.profiler.start_trace(_PROFILING_OUTPUT.value)
 
-  engine.init_decode_state()
+  decode_engine.init_decode_state()
   prompts: List[str] = [
       "I believe the meaning of life is",
       # pylint: disable-next=all
@@ -80,7 +148,7 @@ def main(argv):
       "<s>[INST] <<SYS>>\nYou are an AI assistant. You will be given a task. You must generate a detailed and long answer.\n<</SYS>>\n\nContinue the following story.\n\nKay didn't have shoes that fit her feet properly. She only wore sneakers, because the \nChoose from: [I] shoes  fitted badly. [II] sneakers  fitted badly. [/INST]",
   ]
   for prompt in prompts:
-    slot = random.randint(0, FLAGS.batch_size - 1)
+    slot = random.randint(0, _BATCH_SIZE.value - 1)
     tokens, true_length = token_utils.tokenize_and_pad(
         prompt, vocab, is_bos=True, jax_padding=False
     )
@@ -88,15 +156,25 @@ def main(argv):
     print(f"---- Encoded tokens are: {tokens}")
 
     # pylint: disable-next=all
-    prefill_result = engine.prefill(
+    print(
+        f"---- Do prefill in prefill engine pod_slice_name: {prefill_engine.pod_slice_name}"
+    )
+    prefill_result = prefill_engine.prefill(
         params=None, padded_tokens=tokens, true_length=true_length
     )
+    print(
+        f"---- Transfer prefill result to decode engine pod_slice_name: {decode_engine.pod_slice_name}"
+    )
+    decode_engine.transfer(prefill_result)
     # pylint: disable-next=all
-    decode_state = engine.insert(prefill_result, None, slot=slot)
+    print(
+        f"---- Do insert in decode engine pod_slice_name: {decode_engine.pod_slice_name}"
+    )
+    decode_state = decode_engine.insert(prefill_result, None, slot=slot)
     sampled_tokens_list = []
     while True:
       # pylint: disable-next=all
-      decode_state, result_tokens = engine.generate(None, decode_state)
+      decode_state, result_tokens = decode_engine.generate(None, decode_state)
       result_tokens = result_tokens.convert_to_numpy()
 
       slot_data = result_tokens.get_result_at_slot(slot)
@@ -114,7 +192,7 @@ def main(argv):
     print("---- All output text.")
     print(vocab.tokenizer.decode(sampled_tokens_list))
 
-  if profiling_output:
+  if _PROFILING_OUTPUT.value:
     jax.profiler.stop_trace()
 
 
