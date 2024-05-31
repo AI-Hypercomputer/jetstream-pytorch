@@ -37,7 +37,7 @@ from jetstream_pt import quantize
 from jetstream_pt.config import FLAGS
 from jetstream_pt.third_party.gemma import model as gemma_model
 from jetstream_pt.third_party.llama import model_exportable as llama_model
-from jetstream_pt.third_party.mixtral import model as mistral_model
+from jetstream_pt.third_party.mistral import model as mistral_model
 
 from safetensors import safe_open
 from safetensors.torch import load_file, save_file
