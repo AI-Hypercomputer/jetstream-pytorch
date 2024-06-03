@@ -37,7 +37,7 @@ from jetstream_pt import torchjax
 from jetstream_pt.environment import JetEngineEnvironment, JetEngineEnvironmentData, QuantizationConfig
 from jetstream_pt.third_party.llama import model_exportable as llama_model, model_args
 from jetstream_pt.third_party.gemma import config as gemma_config, model as gemma_model
-from jetstream_pt.third_party.mistral import config as mistral_config
+from jetstream_pt.third_party.mistral import config as mistral_config, model as mistral_model
 
 
 Mesh = jax.sharding.Mesh
@@ -644,7 +644,15 @@ class PyTorchEngine(engine_api.Engine):
     weights = {}
     for key, model_weights in self.pt_model.state_dict().items():
       assert key in state_dict, f"key: {key} not found"
-      weights[key] = torchjax.from_torch(state_dict[key])
+      print(f"Loaded keys: {key}, weights: {model_weights.shape} and {model_weights.dtype}")
+      weights[key] = torchjax.from_torch(model_weights)
+      assert tuple(model_weights.shape) == tuple(
+          weights[key].shape
+      ), f"key: {key} error: {model_weights.shape} != {weights[key].shape}"
+
+
+
+      print(f"Converted weights: {weights[key].dtype} type: {type(weights[key])})")
       assert tuple(model_weights.shape) == tuple(
           weights[key].shape
       ), f"key: {key} error: {model_weights.shape} != {weights[key].shape}"
@@ -661,6 +669,7 @@ class PyTorchEngine(engine_api.Engine):
           jax_weights = self._load_from_state_dict(self.env.checkpoint_path)
       else:
         jax_weights = self._make_state_dict_jax(self.pt_model.state_dict())
+      print(f"Loaded weights: {jax_weights.keys()}")
 
       if self.env.quant_config.num_bits_weight == 4:
         assert (
@@ -859,18 +868,18 @@ def create_pytorch_engine(
     print(f"Enviroment variables: {vars(env)}")
     pt_model = gemma_model.GemmaModel(args, env)
   elif model_name == "mistral":
-    args = mistral_config.from_name("Mixtral-8x7B-v0.1")
+    args = mistral_config.ModelArgs.from_name("Mixtral-8x7B-v0.1")
     args.device = "meta"
     env_data.cache_shape = (
         batch_size,
-        args.n_kv_heads,
+        args.n_head,
         max_cache_length,
-        args.dim // args.n_heads,
+        args.dim // args.n_head,
     )
-    env_data.num_layers = args.n_layers
+    env_data.num_layers = args.n_layer
     env_data.qkv_fusion = True  # Mixtral by default enables qkv weights fusion
     env = JetEngineEnvironment(env_data)
-    pt_model = llama_model.Transformer(args, env)
+    pt_model = mistral_model.Transformer(args, env)
   else:
     raise RuntimeError(f"Model with name {model_name} not found")
 

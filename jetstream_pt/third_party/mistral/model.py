@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from dataclasses import dataclass
-from typing import Optional, List
+from typing import Optional, List, Any
 
 import torch
 import torch.nn as nn
@@ -43,17 +43,17 @@ class KVCache(nn.Module):
         return k_out, v_out
 
 class Transformer(nn.Module):
-    def __init__(self, config: ModelArgs, env=None) -> None:
+    def __init__(self, config: ModelArgs, env) -> None:
         super().__init__()
         self.config = config
         self.env = env
 
         Embedding = get_quantized_enbedding_layer(env.quant_config)
-        self.tok_embeddings = Embedding(config.vocab_size, config.dim, device=env.device)
-        self.layers = nn.ModuleList(TransformerBlock(config) for _ in range(config.n_layer))
+        self.tok_embeddings = Embedding(config.vocab_size, config.dim, device=config.device)
+        self.layers = nn.ModuleList(TransformerBlock(config, env) for _ in range(config.n_layer))
         self.norm = RMSNorm(config.dim, eps=config.norm_eps)
         LinearLayer = get_quantized_linear_layer(env.quant_config)
-        self.output = LinearLayer(config.dim, config.vocab_size, bias=False, device=env.device)
+        self.output = LinearLayer(config.dim, config.vocab_size, bias=False, device=config.device)
 
         self.freqs_cis: Optional[Tensor] = None
         self.mask_cache: Optional[Tensor] = None
@@ -142,10 +142,10 @@ class Transformer(nn.Module):
 
 
 class TransformerBlock(nn.Module):
-    def __init__(self, config: ModelArgs, env=None) -> None:
+    def __init__(self, config: ModelArgs, env) -> None:
         super().__init__()
-        self.attention = Attention(config.n_head, config.n_local_heads, config.head_dim, config.dim, env, device=config.device)
-        self.block_sparse_moe = MOEFeedForward(config)
+        self.attention = Attention(config.n_head, config.n_local_heads, config.head_dim, config.dim, env=env, device=config.device)
+        self.block_sparse_moe = MOEFeedForward(config, config.device, env)
         self.ffn_norm = RMSNorm(config.dim, config.norm_eps)
         self.attention_norm = RMSNorm(config.dim, config.norm_eps)
 
@@ -181,7 +181,7 @@ class ConditionalFeedForward(nn.Module):
 
 
 class MOEFeedForward(nn.Module):
-    def __init__(self, config, device='meta', env=None) -> None:
+    def __init__(self, config, device, env) -> None:
         super().__init__()
         LinearLayer = get_quantized_linear_layer(env.quant_config)
         self.gate = LinearLayer(config.dim, config.num_experts, bias=False)

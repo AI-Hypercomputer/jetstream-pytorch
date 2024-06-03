@@ -465,28 +465,16 @@ def _get_gemma_state_dict(input_ckpt_dir):
 
 
 def _get_mistral_state_dict(input_ckpt_dir):
-  ckpt_files = list(input_ckpt_dir.glob("*.safetensors"))
-  assert len(ckpt_files) == 2, "only expect 2 ckpt file for Mistral model."
+  ckpt_files = list(input_ckpt_dir.glob("*.pth"))
+  assert len(ckpt_files) == 1, "only expect 1 ckpt file for Mistral model."
 
   start = time.perf_counter()
   checkpoints = [load_file(ckpt_file) for ckpt_file in ckpt_files]
   end = time.perf_counter()
   print(f"Loading checkpoints takes {end - start} seconds")
+  print(f"Loaded checkpoints: {checkpoints[0].keys()} \n\n\n the next one: {checkpoints[1].keys()}")
 
-  start = time.perf_counter()
-  if len(checkpoints) > 1:
-    state_dict = _merge_weights(
-        checkpoints, _MINIMIZE_MEMORY_FOOTPRINT.value, _ENABLE_FLOAT32.value
-    )
-  else:
-    state_dict = checkpoints[0]
-  end = time.perf_counter()
-  print(f"Merging weights takes {end - start} seconds")
-
-  print(f'Debugging state dict: {state_dict}')
-  state_dict = state_dict[
-      "model_state_dict"
-  ]
+  state_dict = {**checkpoints[0], **checkpoints[1]}
   model_config = json.loads((input_ckpt_dir / "config.json").read_text())
   for key in list(state_dict.keys()):
     if state_dict[key].dtype.is_complex and _OUTPUT_SAFETENSORS.value:
@@ -517,7 +505,13 @@ def _get_mistral_state_dict(input_ckpt_dir):
       state_dict[new_key.replace("qkv_proj", "wk")] = k
       state_dict[new_key.replace("qkv_proj", "wv")] = v
       continue
-
+    if "q_proj" in key:
+        new_key = "wq"
+    if "k_proj" in key:
+        new_key = "wk"
+    if "v_proj" in key:
+        new_key = "wv"
+    
     if new_key != key:
       state_dict[new_key] = state_dict.pop(key)
   return state_dict, model_config
@@ -535,12 +529,12 @@ def main(argv) -> None:
     )
   elif FLAGS.model_name == "mistral":
     state_dict, params = _get_mistral_state_dict(_INPUT_CHECKPOINT_DIR.value)
-    # quantize_linear_weight_map = (
-    #     mistral_model.Transformer.get_quantized_linear_weight_to_scaler_map()
-    # )
-    # quantize_embedding_weight_map = (
-    #     mistral_model.Transformer.get_quantized_embedding_weight_to_scaler_map()
-    # )
+    quantize_linear_weight_map = (
+        mistral_model.Transformer.get_quantized_linear_weight_to_scaler_map()
+    )
+    quantize_embedding_weight_map = (
+        mistral_model.Transformer.get_quantized_embedding_weight_to_scaler_map()
+    )
   else:
     state_dict, params = _get_llama_state_dict(_INPUT_CHECKPOINT_DIR.value)
     quantize_linear_weight_map = (

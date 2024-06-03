@@ -15,16 +15,16 @@ layers.*.attention.wk.weight : 0 #  torch.int8 (4096, 4096)
 layers.*.attention.wk.weight_scaler : 0 #  torch.bfloat16 (4096,)
 layers.*.attention.wv.weight : 0 #  torch.int8 (4096, 4096)
 layers.*.attention.wv.weight_scaler : 0 #  torch.bfloat16 (4096,)
-layers.*.conditional_feed_forward.w1.weight : 3 #  torch.float32 (11008, 4096)
-layers.*.conditional_feed_forward.w1.weight_scaler : 0  # torch.bfloat16 (4096,)
-layers.*.conditional_feed_forward.w2.weight : 2 #  torch.float32 (4096, 11008)
-layers.*.conditional_feed_forward.w2.weight_scaler : 0 # torch.bfloat16 (11008,)
-layers.*.conditional_feed_forward.w3.weight : 3 #  torch.float32 (11008, 4096)
-layers.*.conditional_feed_forward.w3.weight_scaler : 0 # torch.bfloat16 (4096,)
-layers.*.moe_feed_forward.gate.weight : 1
-layers.*.moe_feed_forward.gate.weight_scaler : 0 # torch.bfloat16 (4096,)
-layers.*.attention_norm.weight : -1 #  torch.float32 (4096,)
+layers.*.block_sparse_moe.gate.weight: 1
+layers.*.block_sparse_moe.gate.weight_scaler: 0
+layers.*.block_sparse_moe.cond_ffn.w1: 2
+layers.*.block_sparse_moe.cond_ffn.w1_scaler: 0
+layers.*.block_sparse_moe.cond_ffn.w2: 1 
+layers.*.block_sparse_moe.cond_ffn.w2_scaler: 0
+layers.*.block_sparse_moe.cond_ffn.w3: 2
+layers.*.block_sparse_moe.cond_ffn.w3_scaler: 0
 layers.*.ffn_norm.weight : -1 #  torch.float32 (4096,)
+layers.*.attention_norm.weight : -1 #  torch.float32 (4096,)
 norm.weight : -1 #  torch.float32 (4096,)
 output.weight : 0 #  torch.float32 (vocab_size, 4096)
-output.weight_scaler : 0 #  torch.float32 (4096,)
+#output.weight_scaler : 0 #  torch.float32 (4096,)
