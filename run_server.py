@@ -20,7 +20,7 @@ import jax
 import jetstream_pt
 from absl import app, flags
 from jetstream.core import server_lib
-from jetstream.core.config_lib import ServerConfig
+from jetstream.core.config_lib import ServerConfig, MetricsServerConfig
 from jetstream_pt.config import FLAGS, create_engine_from_config_flags
 
 flags.DEFINE_integer("port", 9000, "port to listen on")
@@ -49,9 +49,9 @@ def main(argv: Sequence[str]):
   )
   print(f"server_config: {server_config}")
 
-  metrics_server_config: server_lib.MetricsServerConfig | None = None
+  metrics_server_config: MetricsServerConfig | None = None
   if FLAGS.prometheus_port != 0:
-    metrics_server_config = server_lib.MetricsServerConfig(
+    metrics_server_config = MetricsServerConfig(
         port=FLAGS.prometheus_port
     )
 
