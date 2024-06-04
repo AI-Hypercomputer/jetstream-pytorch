@@ -114,6 +114,8 @@ class PyTorchRayWorker:
       quantize_kv=False,
       max_cache_length=1024,
       sharding_config=None,
+      enable_jax_profiler: bool = False,
+      jax_profiler_port: int = 9999,
   ):
 
     jax.config.update("jax_default_prng_impl", "unsafe_rbg")
@@ -129,6 +131,10 @@ class PyTorchRayWorker:
     print(
         f"---Jax device_count:{device_count}, local_device_count{local_device_count} "
     )
+
+    if enable_jax_profiler:
+      jax.profiler.start_server(jax_profiler_port)
+      print(f"Started JAX profiler server on port {jax_profiler_port}")
 
     checkpoint_format = ""
     checkpoint_path = ""

@@ -178,6 +178,8 @@ def create_pytorch_ray_engine(
     is_disaggregated: bool = False,
     num_hosts: int = 0,
     decode_pod_slice_name: str = None,
+    enable_jax_profiler: bool = False,
+    jax_profiler_port: int = 9999,
 ) -> Any:
 
   # Return tuple as reponse: issues/107
@@ -218,6 +220,8 @@ def create_pytorch_ray_engine(
         quantize_kv=quantize_kv,
         max_cache_length=max_cache_length,
         sharding_config=sharding_config,
+        enable_jax_profiler=enable_jax_profiler,
+        jax_profiler_port=jax_profiler_port,
     )
     engine_workers.append(engine_worker)
 
