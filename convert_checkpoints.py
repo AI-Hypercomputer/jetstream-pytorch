@@ -179,7 +179,7 @@ def _merge_llama_weights(
         f"{len(tensors)} shards (shape = {tensors[0].shape}) for {key})"
     )
     state_dict_for_key = {}
-    for pattern, kind in llama_model.get_weight_sharding_type.items():
+    for pattern, kind in llama_model.Transformer.get_weight_sharding_type().items():
       if not key.endswith(pattern):
         continue
       with torch.no_grad():
