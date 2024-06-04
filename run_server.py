@@ -51,9 +51,7 @@ def main(argv: Sequence[str]):
 
   metrics_server_config: MetricsServerConfig | None = None
   if FLAGS.prometheus_port != 0:
-    metrics_server_config = MetricsServerConfig(
-        port=FLAGS.prometheus_port
-    )
+    metrics_server_config = MetricsServerConfig(port=FLAGS.prometheus_port)
 
   # We separate credential from run so that we can unit test it with local credentials.
   # We would like to add grpc credentials for OSS.
