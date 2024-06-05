@@ -94,7 +94,7 @@ def create_disaggregated_engines():
   os.environ["TF_CPP_MIN_LOG_LEVEL"] = "0"
 
   start = time.perf_counter()
-  prefill_engine, decode_engine = ray_engine.create_pytorch_ray_engine(
+  prefill_engine_list, decode_engine_list = ray_engine.create_pytorch_ray_engine(
       model_name=_MODEL_NAME.value,
       tokenizer_path=_TOKENIZER_PATH.value,
       ckpt_path=_CKPT_PATH.value,
@@ -112,7 +112,7 @@ def create_disaggregated_engines():
   )
 
   print("Initialize engine", time.perf_counter() - start)
-  return (prefill_engine, decode_engine)
+  return (prefill_engine_list[0], decode_engine_list[0])
 
 
 # pylint: disable-next=all

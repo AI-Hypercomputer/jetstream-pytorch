@@ -37,6 +37,18 @@ flags.DEFINE_integer("tpu_chips", 16, "device tpu_chips")
 flags.DEFINE_bool("enable_jax_profiler", False, "enable jax profiler")
 flags.DEFINE_integer("jax_profiler_port", 9999, "port of JAX profiler server")
 
+flags.DEFINE_bool(
+    "is_disaggregated", False, "Disaggregated serving if it's True"
+)
+
+flags.DEFINE_integer(
+    "num_hosts", 4, "Number of TPU host", required=False
+)
+
+flags.DEFINE_string(
+    "decode_pod_slice_name", "", "Decode pod slice name"
+)
+
 
 def create_engine():
   """create a pytorch engine"""
@@ -63,6 +75,34 @@ def create_engine():
   print("Initialize engine", time.perf_counter() - start)
   return engine
 
+def create_disaggregated_engine():
+  """create a pytorch engine"""
+  jax.config.update("jax_default_prng_impl", "unsafe_rbg")
+  os.environ["TF_CPP_MIN_LOG_LEVEL"] = "0"
+
+  start = time.perf_counter()
+  prefill_engine_list, decode_engine_list  = ray_engine.create_pytorch_ray_engine(
+      model_name=FLAGS.model_name,
+      tokenizer_path=FLAGS.tokenizer_path,
+      ckpt_path=FLAGS.checkpoint_path,
+      bf16_enable=FLAGS.bf16_enable,
+      param_size=FLAGS.size,
+      context_length=FLAGS.context_length,
+      batch_size=FLAGS.batch_size,
+      quantize_weights=FLAGS.quantize_weights,
+      quantize_kv=FLAGS.quantize_kv_cache,
+      max_cache_length=FLAGS.max_cache_length,
+      sharding_config=FLAGS.sharding_config,
+      enable_jax_profiler=FLAGS.enable_jax_profiler,
+      jax_profiler_port=FLAGS.jax_profiler_port,
+      is_disaggregated=FLAGS.is_disaggregated,
+      num_hosts=FLAGS.num_hosts,
+      decode_pod_slice_name=FLAGS.decode_pod_slice_name,
+  )
+
+  print("Initialize engine", time.perf_counter() - start)
+  return (prefill_engine_list, decode_engine_list)
+
 
 # pylint: disable-next=all
 def main(argv: Sequence[str]):
@@ -74,12 +114,23 @@ def main(argv: Sequence[str]):
 
   print(f"devices: {devices}")
 
-  engine = create_engine()
 
-  server_config = ServerConfig(
+  if FLAGS.is_disaggregated:
+    prefill_engine_list, decode_engine_list = create_disaggregated_engine()
+    server_config = ServerConfig(
+      prefill_slices=(f"tpu={len(devices)}",),
+      prefill_engine_create_fns=(lambda a: prefill_engine_list[0],),
+      generate_slices=(f"tpu={len(devices)}",),
+      generate_engine_create_fns=(lambda a: decode_engine_list[0],),
+    )
+    
+  else:
+    engine = create_engine()
+    server_config = ServerConfig(
       interleaved_slices=(f"tpu={len(devices)}",),
       interleaved_engine_create_fns=(lambda a: engine,),
-  )
+    )
+
   print(f"server_config: {server_config}")
 
   jetstream_server = server_lib.run(
