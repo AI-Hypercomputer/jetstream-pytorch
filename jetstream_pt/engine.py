@@ -103,11 +103,11 @@ class PyTorchEngine(engine_api.Engine):
         donate_argnums=(0, 1),
         out_shardings=self.get_decode_state_sharding(),
     )
-    #self.generate = jax.jit(
-    #    self.generate,
-    #    donate_argnums=(1,),
-    #    out_shardings=(self.get_decode_state_sharding(), None),
-    #)
+    self.generate = jax.jit(
+        self.generate,
+        donate_argnums=(1,),
+        out_shardings=(self.get_decode_state_sharding(), None),
+    )
     #self._insert_wrap = jax.jit(self._insert_wrap, donate_argnums=(0, 1),
     #                              out_shardings=self.get_decode_state_sharding())
 
@@ -645,17 +645,15 @@ class PyTorchEngine(engine_api.Engine):
     return weights
 
   def _load_from_state_dict(self, path):
-    torch.set_default_device("cpu")
     state_dict = torch.load(path, map_location=torch.device("cpu"))
     weights = {}
-    print(f"keys are : {state_dict.keys()}")
-    #torch.set_default_device("cpu")
+    print(f"Loaded keys are : {state_dict.keys()}")
     import pdb;
     for key, model_weights in self.pt_model.state_dict().items():
       if key == "freqs_cis":
         continue
       assert key in state_dict, f"key: {key} not found"
-      print(f"Loaded keys: {key}, weights: {model_weights.shape} and {model_weights.dtype} and {state_dict[key].device}")
+      print(f"Model keys: {key}, weights: {model_weights.shape} and {model_weights.dtype} and {state_dict[key].device}")
       #pdb.trace()
       #weights[key] = torchjax.from_torch(model_weights)
       weights[key] = torch_xla2.tensor.t2j(state_dict[key])
@@ -663,12 +661,7 @@ class PyTorchEngine(engine_api.Engine):
           weights[key].shape
       ), f"key: {key} error: {model_weights.shape} != {weights[key].shape}"
 
-
-
-      print(f"Converted weights: {weights[key].dtype} type: {type(weights[key])})")
-      assert tuple(model_weights.shape) == tuple(
-          weights[key].shape
-      ), f"key: {key} error: {model_weights.shape} != {weights[key].shape}"
+    weights["freqs_cis"] = torch_xla2.tensor.t2j(self.pt_model.freqs_cis)
     return weights
 
   # pylint: disable-next=all
@@ -795,7 +788,7 @@ def create_pytorch_engine(
   jax.config.update("jax_traceback_filtering", "off")
   torch_dtype = torch.bfloat16 if bf16_enable else torch.float32
   torch.set_default_dtype(torch_dtype)
-
+  torch.set_default_device('cpu')
   checkpoint_format = ""
   checkpoint_path = ""
 

@@ -26,6 +26,7 @@ import gc
 import hashlib
 import json
 import os
+import re
 import time
 
 import torch
@@ -37,7 +38,7 @@ from jetstream_pt import quantize
 from jetstream_pt.config import FLAGS
 from jetstream_pt.third_party.gemma import model as gemma_model
 from jetstream_pt.third_party.llama import model_exportable as llama_model
-from jetstream_pt.third_party.mistral import model as mistral_model
+from jetstream_pt.third_party.mistral import model as mistral_model, config as mistral_config
 
 from safetensors import safe_open
 from safetensors.torch import load_file, save_file
@@ -465,17 +466,38 @@ def _get_gemma_state_dict(input_ckpt_dir):
 
 
 def _get_mistral_state_dict(input_ckpt_dir):
-  ckpt_files = list(input_ckpt_dir.glob("*.pth"))
-  assert len(ckpt_files) == 1, "only expect 1 ckpt file for Mistral model."
+  ckpt_files = list(input_ckpt_dir.glob("*.pt"))
+  assert len(ckpt_files) == 8, "only expect 8 ckpt file for Mistral model."
 
   start = time.perf_counter()
-  checkpoints = [load_file(ckpt_file) for ckpt_file in ckpt_files]
+  state_dict = {}
+  for file in sorted(ckpt_files):
+      ckpt = torch.load(str(file), map_location="cpu", mmap=True, weights_only=True)
+      state_dict.update(ckpt)
   end = time.perf_counter()
   print(f"Loading checkpoints takes {end - start} seconds")
-  print(f"Loaded checkpoints: {checkpoints[0].keys()} \n\n\n the next one: {checkpoints[1].keys()}")
 
-  state_dict = {**checkpoints[0], **checkpoints[1]}
-  model_config = json.loads((input_ckpt_dir / "config.json").read_text())
+  for k, v in state_dict.items():
+      print(f"The loaded key: {k} and value: {v.shape}")
+
+  config = json.loads((input_ckpt_dir / "config.json").read_text())
+  print(f"Loaded config: {config}")
+  #config = mistral_config.ModelArgs.from_name("Mixtral-8x7B-v0.1")
+  weight_map = {
+        "tok_embeddings.weight": "tok_embeddings.weight",
+        "layers.{}.attention.wq.weight": "layers.{}.attention.wq.weight",
+        "layers.{}.attention.wk.weight": "layers.{}.attention.wk.weight",
+        "layers.{}.attention.wv.weight": "layers.{}.attention.wv.weight",
+        "layers.{}.attention.wo.weight": "layers.{}.attention.wo.weight",
+        "layers.{}.block_sparse_moe.w1": "layers.{}.block_sparse_moe.cond_ffn.w1",
+        "layers.{}.block_sparse_moe.w2": "layers.{}.block_sparse_moe.cond_ffn.w2",
+        "layers.{}.block_sparse_moe.w3": "layers.{}.block_sparse_moe.cond_ffn.w3",
+        "layers.{}.block_sparse_moe.gate.weight": "layers.{}.block_sparse_moe.gate.weight",
+        "layers.{}.attention_norm.weight": "layers.{}.attention_norm.weight",
+        "layers.{}.ffn_norm.weight": "layers.{}.ffn_norm.weight",
+        "norm.weight": "norm.weight",
+        "output.weight": "output.weight",
+  }
   for key in list(state_dict.keys()):
     if state_dict[key].dtype.is_complex and _OUTPUT_SAFETENSORS.value:
       assert (
@@ -489,32 +511,29 @@ def _get_mistral_state_dict(input_ckpt_dir):
     new_key = key
     if key.startswith(prefix_to_remove):
       new_key = new_key.removeprefix(prefix_to_remove)
-    if "qkv_proj" in key:
-      q_dim = model_config["num_attention_heads"] * model_config["head_dim"]
-      kv_dim = model_config["num_key_value_heads"] * model_config["head_dim"]
-      qkv = state_dict.pop(key)
-      q, k, v = qkv.split(
-          [
-              q_dim,
-              kv_dim,
-              kv_dim,
-          ],
-          dim=0,
-      )
-      state_dict[new_key.replace("qkv_proj", "wq")] = q
-      state_dict[new_key.replace("qkv_proj", "wk")] = k
-      state_dict[new_key.replace("qkv_proj", "wv")] = v
-      continue
-    if "q_proj" in key:
-        new_key = "wq"
-    if "k_proj" in key:
-        new_key = "wk"
-    if "v_proj" in key:
-        new_key = "wv"
     
-    if new_key != key:
-      state_dict[new_key] = state_dict.pop(key)
-  return state_dict, model_config
+    if "layers" in key:
+        abstract_key = re.sub(r'.(\d+).', '.{}.', key)
+        layer_num = re.search(r'\d+', key).group(0)
+        new_key = weight_map[abstract_key]
+        new_key = new_key.format(layer_num)
+        if new_key is None:
+            continue
+    
+    if new_key == key:
+        continue
+
+    if "w1" in key or "w3" in key:
+        state_dict[new_key] = state_dict.pop(key).reshape(config["num_local_experts"], config["intermediate_size"], config["hidden_size"]).contiguous()
+    elif "w2" in key:
+        state_dict[new_key] = state_dict.pop(key).reshape(config["num_local_experts"], config["intermediate_size"], config["hidden_size"]).permute(0, 2, 1).contiguous()
+    elif "gate" in key:
+        state_dict[new_key] = state_dict.pop(key).contiguous()
+    else:
+        state_dict[new_key] = state_dict.pop(key)
+  for k, v in state_dict.items():
+      print(f"The converted key: {k} and value: {v.shape}")
+  return state_dict, config
 
 def main(argv) -> None:
   """merge weights"""

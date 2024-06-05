@@ -78,6 +78,7 @@ class Transformer(nn.Module):
     #     self.freqs_cis = precompute_freqs_cis(self.config.block_size, self.config.dim // self.config.n_head, self.config.rope_base)
     #     self.causal_mask = torch.tril(torch.ones(self.max_seq_length, self.max_seq_length, dtype=torch.bool))
 
+    @torch.no_grad()
     def forward(self, idx: Tensor, caches: List[Any], mask, start: Optional[Tensor] = None, input_pos: Optional[Tensor]=None, ragged_batch_index=None, ragged_block_index=None) -> Tensor:
         assert self.freqs_cis is not None, "Caches must be initialized first"
         end = None if start is None else (start + input_pos) % self.env.cache_len       
@@ -85,7 +86,7 @@ class Transformer(nn.Module):
         with jax.named_scope("transformer_tok"):
             x = self.tok_embeddings(idx)
         with jax.named_scope("transformer_freq"):
-            pdb.set_trace()
+            #pdb.set_trace()
             bsz, seqlen = idx.shape
             freqs_cis = self.freqs_cis[input_pos]
             freqs_cis = freqs_cis.reshape(bsz, seqlen, -1) 
@@ -229,7 +230,7 @@ def precompute_freqs_cis(
     seq_len: int, n_elem: int, base: int = 10000
 ) -> Tensor:
     freqs = 1.0 / (base ** (torch.arange(0, n_elem, 2)[: (n_elem // 2)].float() / n_elem))
-    t = torch.arange(seq_len, device=freqs.device)
+    t = torch.arange(seq_len)
     freqs = torch.outer(t, freqs)
     freqs_cis = torch.polar(torch.ones_like(freqs), freqs)
     #cache = torch.stack([freqs_cis.real, freqs_cis.imag], dim=-1)
