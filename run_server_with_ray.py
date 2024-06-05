@@ -117,11 +117,13 @@ def main(argv: Sequence[str]):
 
   if FLAGS.is_disaggregated:
     prefill_engine_list, decode_engine_list = create_disaggregated_engine()
+    chips = int(len(devices)/2)
     server_config = ServerConfig(
-      prefill_slices=(f"tpu={len(devices)}",),
+      prefill_slices=(f"tpu={chips}",),
       prefill_engine_create_fns=(lambda a: prefill_engine_list[0],),
-      generate_slices=(f"tpu={len(devices)}",),
+      generate_slices=(f"tpu={chips}",),
       generate_engine_create_fns=(lambda a: decode_engine_list[0],),
+      is_ray_backend=True
     )
     
   else:
