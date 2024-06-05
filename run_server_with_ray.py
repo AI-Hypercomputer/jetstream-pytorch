@@ -41,13 +41,9 @@ flags.DEFINE_bool(
     "is_disaggregated", False, "Disaggregated serving if it's True"
 )
 
-flags.DEFINE_integer(
-    "num_hosts", 4, "Number of TPU host", required=False
-)
+flags.DEFINE_integer("num_hosts", 4, "Number of TPU host", required=False)
 
-flags.DEFINE_string(
-    "decode_pod_slice_name", "", "Decode pod slice name"
-)
+flags.DEFINE_string("decode_pod_slice_name", "", "Decode pod slice name")
 
 
 def create_engine():
@@ -75,29 +71,32 @@ def create_engine():
   print("Initialize engine", time.perf_counter() - start)
   return engine
 
+
 def create_disaggregated_engine():
   """create a pytorch engine"""
   jax.config.update("jax_default_prng_impl", "unsafe_rbg")
   os.environ["TF_CPP_MIN_LOG_LEVEL"] = "0"
 
   start = time.perf_counter()
-  prefill_engine_list, decode_engine_list  = ray_engine.create_pytorch_ray_engine(
-      model_name=FLAGS.model_name,
-      tokenizer_path=FLAGS.tokenizer_path,
-      ckpt_path=FLAGS.checkpoint_path,
-      bf16_enable=FLAGS.bf16_enable,
-      param_size=FLAGS.size,
-      context_length=FLAGS.context_length,
-      batch_size=FLAGS.batch_size,
-      quantize_weights=FLAGS.quantize_weights,
-      quantize_kv=FLAGS.quantize_kv_cache,
-      max_cache_length=FLAGS.max_cache_length,
-      sharding_config=FLAGS.sharding_config,
-      enable_jax_profiler=FLAGS.enable_jax_profiler,
-      jax_profiler_port=FLAGS.jax_profiler_port,
-      is_disaggregated=FLAGS.is_disaggregated,
-      num_hosts=FLAGS.num_hosts,
-      decode_pod_slice_name=FLAGS.decode_pod_slice_name,
+  prefill_engine_list, decode_engine_list = (
+      ray_engine.create_pytorch_ray_engine(
+          model_name=FLAGS.model_name,
+          tokenizer_path=FLAGS.tokenizer_path,
+          ckpt_path=FLAGS.checkpoint_path,
+          bf16_enable=FLAGS.bf16_enable,
+          param_size=FLAGS.size,
+          context_length=FLAGS.context_length,
+          batch_size=FLAGS.batch_size,
+          quantize_weights=FLAGS.quantize_weights,
+          quantize_kv=FLAGS.quantize_kv_cache,
+          max_cache_length=FLAGS.max_cache_length,
+          sharding_config=FLAGS.sharding_config,
+          enable_jax_profiler=FLAGS.enable_jax_profiler,
+          jax_profiler_port=FLAGS.jax_profiler_port,
+          is_disaggregated=FLAGS.is_disaggregated,
+          num_hosts=FLAGS.num_hosts,
+          decode_pod_slice_name=FLAGS.decode_pod_slice_name,
+      )
   )
 
   print("Initialize engine", time.perf_counter() - start)
@@ -114,23 +113,22 @@ def main(argv: Sequence[str]):
 
   print(f"devices: {devices}")
 
-
   if FLAGS.is_disaggregated:
     prefill_engine_list, decode_engine_list = create_disaggregated_engine()
-    chips = int(len(devices)/2)
+    chips = int(len(devices) / 2)
     server_config = ServerConfig(
-      prefill_slices=(f"tpu={chips}",),
-      prefill_engine_create_fns=(lambda a: prefill_engine_list[0],),
-      generate_slices=(f"tpu={chips}",),
-      generate_engine_create_fns=(lambda a: decode_engine_list[0],),
-      is_ray_backend=True
+        prefill_slices=(f"tpu={chips}",),
+        prefill_engine_create_fns=(lambda a: prefill_engine_list[0],),
+        generate_slices=(f"tpu={chips}",),
+        generate_engine_create_fns=(lambda a: decode_engine_list[0],),
+        is_ray_backend=True,
     )
-    
+
   else:
     engine = create_engine()
     server_config = ServerConfig(
-      interleaved_slices=(f"tpu={len(devices)}",),
-      interleaved_engine_create_fns=(lambda a: engine,),
+        interleaved_slices=(f"tpu={len(devices)}",),
+        interleaved_engine_create_fns=(lambda a: engine,),
     )
 
   print(f"server_config: {server_config}")

@@ -180,7 +180,9 @@ def create_pytorch_ray_engine(
     decode_pod_slice_name: str = None,
     enable_jax_profiler: bool = False,
     jax_profiler_port: int = 9999,
-) -> Union[PyTorchRayEngine, Tuple[List[PyTorchRayEngine], List[PyTorchRayEngine]]]:
+) -> Union[
+    PyTorchRayEngine, Tuple[List[PyTorchRayEngine], List[PyTorchRayEngine]]
+]:
 
   # Return tuple as reponse: issues/107
   supported_models = ["llama-2", "llama-3", "gemma"]
