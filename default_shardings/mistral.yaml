@@ -15,6 +15,8 @@ layers.*.attention.wk.weight : 0 #  torch.int8 (4096, 4096)
 layers.*.attention.wk.weight_scaler : 0 #  torch.bfloat16 (4096,)
 layers.*.attention.wv.weight : 0 #  torch.int8 (4096, 4096)
 layers.*.attention.wv.weight_scaler : 0 #  torch.bfloat16 (4096,)
+layers.*.attention.wqkv.weight : 0 #  torch.int8 (4096, 4096)
+layers.*.attention.wqkv.weight_scaler : 0 #  torch.bfloat16 (4096,)
 layers.*.block_sparse_moe.gate.weight: 1
 layers.*.block_sparse_moe.gate.weight_scaler: 0
 layers.*.block_sparse_moe.cond_ffn.w1: 2

@@ -85,7 +85,7 @@ class Transformer(nn.Module):
         with jax.named_scope("transformer_tok"):
             x = self.tok_embeddings(idx)
         with jax.named_scope("transformer_freq"):
-            #pdb.set_trace()
+            pdb.set_trace()
             bsz, seqlen = idx.shape
             freqs_cis = self.freqs_cis[input_pos]
             freqs_cis = freqs_cis.reshape(bsz, seqlen, -1) 

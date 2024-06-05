@@ -648,16 +648,17 @@ class PyTorchEngine(engine_api.Engine):
     torch.set_default_device("cpu")
     state_dict = torch.load(path, map_location=torch.device("cpu"))
     weights = {}
+    print(f"keys are : {state_dict.keys()}")
     #torch.set_default_device("cpu")
     import pdb;
     for key, model_weights in self.pt_model.state_dict().items():
       if key == "freqs_cis":
         continue
       assert key in state_dict, f"key: {key} not found"
-      print(f"Loaded keys: {key}, weights: {model_weights.shape} and {model_weights.dtype} and {model_weights.device}")
+      print(f"Loaded keys: {key}, weights: {model_weights.shape} and {model_weights.dtype} and {state_dict[key].device}")
       #pdb.trace()
       #weights[key] = torchjax.from_torch(model_weights)
-      weights[key] = torch_xla2.tensor.t2j(model_weights)
+      weights[key] = torch_xla2.tensor.t2j(state_dict[key])
       assert tuple(model_weights.shape) == tuple(
           weights[key].shape
       ), f"key: {key} error: {model_weights.shape} != {weights[key].shape}"
@@ -889,7 +890,7 @@ def create_pytorch_engine(
         args.dim // args.n_head,
     )
     env_data.num_layers = args.n_layer
-    #env_data.qkv_fusion = True  # Mixtral by default enables qkv weights fusion
+    env_data.qkv_fusion = True  # Mixtral by default enables qkv weights fusion
     env = JetEngineEnvironment(env_data)
     pt_model = mistral_model.Transformer(args, env)
   else:
