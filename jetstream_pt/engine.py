@@ -39,6 +39,7 @@ from jetstream_pt.third_party.llama import model_exportable as llama_model, mode
 from jetstream_pt.third_party.gemma import config as gemma_config, model as gemma_model
 from jetstream_pt.third_party.mistral import config as mistral_config, model as mistral_model
 
+import pdb
 
 Mesh = jax.sharding.Mesh
 P = jax.sharding.PartitionSpec
@@ -102,15 +103,15 @@ class PyTorchEngine(engine_api.Engine):
         donate_argnums=(0, 1),
         out_shardings=self.get_decode_state_sharding(),
     )
-    self.generate = jax.jit(
-        self.generate,
-        donate_argnums=(1,),
-        out_shardings=(self.get_decode_state_sharding(), None),
-    )
-    # self._insert_wrap = jax.jit(self._insert_wrap, donate_argnums=(0, 1),
+    #self.generate = jax.jit(
+    #    self.generate,
+    #    donate_argnums=(1,),
+    #    out_shardings=(self.get_decode_state_sharding(), None),
+    #)
+    #self._insert_wrap = jax.jit(self._insert_wrap, donate_argnums=(0, 1),
     #                              out_shardings=self.get_decode_state_sharding())
 
-    # self._insert_no_wrap = jax.jit(
+    #self._insert_no_wrap = jax.jit(
     #      self._insert_no_wrap,
     #      donate_argnums=(0, 1),
     #      out_shardings=self.get_decode_state_sharding())
@@ -277,6 +278,7 @@ class PyTorchEngine(engine_api.Engine):
       decode_state: DecodeState,
       slot: int,
   ):
+    print(f"_insert_no_wrap slot is {slot} and current position is {decode_state.current_position}")
     scales = []
     caches = []
     pos = decode_state.current_position - prefix.seq_len
@@ -360,7 +362,7 @@ class PyTorchEngine(engine_api.Engine):
 
     start_insert = decode_state.current_position - prefix.seq_len
     tokens = decode_state.tokens.at[slot].set(prefix.token)
-
+    print(f"_insert_wrap: start_insert is {start_insert} and slot is {slot} and padded seq len is {prefix.caches[0][0].shape[2]}")
     start_insert = start_insert % self.env.cache_sequence_length
     # pos < 0
     update_indexes = (
@@ -398,6 +400,7 @@ class PyTorchEngine(engine_api.Engine):
       @functools.partial(jax.jit, donate_argnums=(0, 1), inline=True)
       def insert(cache, new_entry):
         new_entry = jnp.transpose(new_entry.squeeze(0), (1, 0, 2))
+        print(f"original cache is {cache.shape} cache is {cache[slot, :, update_indexes, :].shape} and update_indexes is {update_indexes.shape} new entry is {new_entry.shape}")
         res = cache.at[slot, :, update_indexes, :].set(new_entry)
         res = jax.lax.with_sharding_constraint(res, self.cache_sharding)
         return res
@@ -529,6 +532,8 @@ class PyTorchEngine(engine_api.Engine):
       self, params: Any, decode_state: DecodeState
   ) -> tuple[DecodeState, engine_api.ResultTokens]:
     # seq_len = padded_tokens.shape[0]
+    #import pdb; pdb.set_trace()
+    jax.debug.print(f"Decoding with {decode_state.tokens}")
     pos = decode_state.current_position
     input_indexes = jnp.full((1,), pos)
 
@@ -640,12 +645,19 @@ class PyTorchEngine(engine_api.Engine):
     return weights
 
   def _load_from_state_dict(self, path):
+    torch.set_default_device("cpu")
     state_dict = torch.load(path, map_location=torch.device("cpu"))
     weights = {}
+    #torch.set_default_device("cpu")
+    import pdb;
     for key, model_weights in self.pt_model.state_dict().items():
+      if key == "freqs_cis":
+        continue
       assert key in state_dict, f"key: {key} not found"
-      print(f"Loaded keys: {key}, weights: {model_weights.shape} and {model_weights.dtype}")
-      weights[key] = torchjax.from_torch(model_weights)
+      print(f"Loaded keys: {key}, weights: {model_weights.shape} and {model_weights.dtype} and {model_weights.device}")
+      #pdb.trace()
+      #weights[key] = torchjax.from_torch(model_weights)
+      weights[key] = torch_xla2.tensor.t2j(model_weights)
       assert tuple(model_weights.shape) == tuple(
           weights[key].shape
       ), f"key: {key} error: {model_weights.shape} != {weights[key].shape}"
@@ -872,12 +884,12 @@ def create_pytorch_engine(
     args.device = "meta"
     env_data.cache_shape = (
         batch_size,
-        args.n_head,
+        args.n_local_heads,
         max_cache_length,
         args.dim // args.n_head,
     )
     env_data.num_layers = args.n_layer
-    env_data.qkv_fusion = True  # Mixtral by default enables qkv weights fusion
+    #env_data.qkv_fusion = True  # Mixtral by default enables qkv weights fusion
     env = JetEngineEnvironment(env_data)
     pt_model = mistral_model.Transformer(args, env)
   else:

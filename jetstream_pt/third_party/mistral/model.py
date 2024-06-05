@@ -24,6 +24,8 @@ from jetstream_pt.layers import Attention, get_quantized_linear_layer, get_quant
 
 import jax
 
+import pdb
+
 class KVCache(nn.Module):
     def __init__(self, max_batch_size, max_seq_length, n_heads, head_dim, dtype=torch.bfloat16):
         super().__init__()
@@ -55,14 +57,14 @@ class Transformer(nn.Module):
         LinearLayer = get_quantized_linear_layer(env.quant_config)
         self.output = LinearLayer(config.dim, config.vocab_size, bias=False, device=config.device)
 
-        self.freqs_cis: Optional[Tensor] = None
-        self.mask_cache: Optional[Tensor] = None
+        #self.freqs_cis: Optional[Tensor] = None
+        #self.mask_cache: Optional[Tensor] = None
         self.max_batch_size = -1
         self.max_seq_length = -1
 
         # TODO(Consider refactor with other models)
-        self.freqs_cis = precompute_freqs_cis(self.config.block_size, self.config.dim // self.config.n_head, self.config.rope_base)
-
+        freqs_cis = precompute_freqs_cis(self.config.block_size, self.config.dim // self.config.n_head, self.config.rope_base)
+        self.register_buffer("freqs_cis", freqs_cis)
     # def setup_caches(self, max_batch_size, max_seq_length):
     #     if self.max_seq_length >= max_seq_length and self.max_batch_size >= max_batch_size:
     #         return
@@ -76,22 +78,25 @@ class Transformer(nn.Module):
     #     self.freqs_cis = precompute_freqs_cis(self.config.block_size, self.config.dim // self.config.n_head, self.config.rope_base)
     #     self.causal_mask = torch.tril(torch.ones(self.max_seq_length, self.max_seq_length, dtype=torch.bool))
 
-    def forward(self, idx: Tensor, input_pos: Optional[Tensor], caches: List[Any], mask, start: Optional[Tensor] = None, ragged_batch_index=None, ragged_block_index=None) -> Tensor:
+    def forward(self, idx: Tensor, caches: List[Any], mask, start: Optional[Tensor] = None, input_pos: Optional[Tensor]=None, ragged_batch_index=None, ragged_block_index=None) -> Tensor:
         assert self.freqs_cis is not None, "Caches must be initialized first"
         end = None if start is None else (start + input_pos) % self.env.cache_len       
         # mask = self.causal_mask[None, None, input_pos]
         with jax.named_scope("transformer_tok"):
             x = self.tok_embeddings(idx)
         with jax.named_scope("transformer_freq"):
+            #pdb.set_trace()
+            bsz, seqlen = idx.shape
             freqs_cis = self.freqs_cis[input_pos]
-        
+            freqs_cis = freqs_cis.reshape(bsz, seqlen, -1) 
         assert len(caches) == len(
             self.layers
         ), f"Number of caches ({len(caches)}) and layers ({len(self.layers)}) dont match"
-
-        for i, layer in enumerate(self.layers):
+        #import pdb; pdb.set_trace()
+        for layer, cache in zip(self.layers, caches):
+        #for i, layer in enumerate(self.layers):
             with jax.named_scope("TransformerBlock"):
-                x = layer(x, input_pos, freqs_cis, mask, caches, start, end, ragged_batch_index, ragged_block_index)
+                x = layer(x, freqs_cis, mask, cache, start, end, ragged_batch_index, ragged_block_index)
         
         with jax.named_scope("transformer_norm"):
             x = self.norm(x)
@@ -151,12 +156,15 @@ class TransformerBlock(nn.Module):
 
     def forward(self, x: Tensor, freqs_cis: Tensor, mask: Tensor, caches: List[Tensor], start=None, end=None, ragged_batch_index=None, ragged_block_index=None) -> Tensor:
         with jax.named_scope("Attention"):
+            #import pdb; pdb.set_trace()
             attn = self.attention(self.attention_norm(x), freqs_cis, mask, caches, start, end, ragged_batch_index, ragged_block_index)
         with jax.named_scope("ffn_norm"):
             h = x + attn
             ffns = self.ffn_norm(h)
         with jax.named_scope("ffn"):
-            out = h + self.block_sparse_moe(ffns)
+            moe = self.block_sparse_moe(ffns)
+            #moe = torch.unsqueeze(moe, 1)
+            out = h + moe
         return out
 
 
@@ -167,13 +175,14 @@ class ConditionalFeedForward(nn.Module):
         self.w1 = nn.Parameter(torch.empty(config.num_experts, config.intermediate_size, config.dim))
         self.w2 = nn.Parameter(torch.empty(config.num_experts, config.dim, config.intermediate_size))
         self.w3 = nn.Parameter(torch.empty(config.num_experts, config.intermediate_size, config.dim))
-
+        #pdb.set_trace()
     def forward(self, x: Tensor, expert_indices: Tensor) -> Tensor:
+        #pdb.set_trace()
         with jax.named_scope("conditional_ff"):
             w1_weights = self.w1[expert_indices] # [T, A, D, D]
             w3_weights = self.w3[expert_indices] # [T, A, D, D]
             w2_weights = self.w2[expert_indices]  # [T, A, D, D]
-            print("conditional ff: w1_weights.shape: %s x.shape: %s" % (w1_weights.shape, x.shape))
+            #print("conditional ff: w1_weights.shape: %s x.shape: %s" % (w1_weights.shape, x.shape))
             x1 = F.silu(torch.einsum('ti,taoi -> tao', x, w1_weights))
             x3 = torch.einsum('ti, taoi -> tao', x, w3_weights)
             expert_outs =  torch.einsum('tao, taio -> tai', (x1 * x3), w2_weights)
@@ -189,6 +198,7 @@ class MOEFeedForward(nn.Module):
         self.dim = config.dim
         self.num_activated_experts = config.num_activated_experts
     def forward(self, x: Tensor) -> Tensor:
+        bsz, seq, hidden = x.shape
         x = x.view(-1, self.dim)
         # T = num_tokens, E = num_experts, D = hidden dim, A = activated experts
         # x: [T, D]
@@ -197,8 +207,9 @@ class MOEFeedForward(nn.Module):
         expert_weights, expert_indices = torch.topk(expert_weights, self.num_activated_experts, dim=-1) # [T, A], [T, A]
         expert_weights /= expert_weights.sum(dim=-1, keepdim=True) # [T, A]
         expert_outs = self.cond_ffn(x, expert_indices)
-        return torch.einsum('tai,ta -> ti', expert_outs, expert_weights)
-
+        expert_outs = torch.einsum('tai,ta -> ti', expert_outs, expert_weights)
+        expert_outs = expert_outs.reshape(bsz, seq, hidden)
+        return expert_outs
 
 class RMSNorm(nn.Module):
     def __init__(self, dim: int, eps: float = 1e-5):
@@ -221,20 +232,6 @@ def precompute_freqs_cis(
     t = torch.arange(seq_len, device=freqs.device)
     freqs = torch.outer(t, freqs)
     freqs_cis = torch.polar(torch.ones_like(freqs), freqs)
-    cache = torch.stack([freqs_cis.real, freqs_cis.imag], dim=-1)
-    return cache.to(dtype=torch.bfloat16)
-
-
-def apply_rotary_emb(x: Tensor, freqs_cis: Tensor) -> Tensor:
-    xshaped = x.float().reshape(*x.shape[:-1], -1, 2)
-    freqs_cis = freqs_cis.view(1, xshaped.size(1), 1, xshaped.size(3), 2)
-    x_out2 = torch.stack(
-        [
-            xshaped[..., 0] * freqs_cis[..., 0] - xshaped[..., 1] * freqs_cis[..., 1],
-            xshaped[..., 1] * freqs_cis[..., 0] + xshaped[..., 0] * freqs_cis[..., 1],
-        ],
-        -1,
-    )
-
-    x_out2 = x_out2.flatten(3)
-    return x_out2.type_as(x)
+    #cache = torch.stack([freqs_cis.real, freqs_cis.imag], dim=-1)
+    #return cache.to(dtype=torch.bfloat16)
+    return freqs_cis
