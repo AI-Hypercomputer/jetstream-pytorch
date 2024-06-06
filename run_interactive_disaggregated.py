@@ -94,25 +94,27 @@ def create_disaggregated_engines():
   os.environ["TF_CPP_MIN_LOG_LEVEL"] = "0"
 
   start = time.perf_counter()
-  prefill_engine, decode_engine = ray_engine.create_pytorch_ray_engine(
-      model_name=_MODEL_NAME.value,
-      tokenizer_path=_TOKENIZER_PATH.value,
-      ckpt_path=_CKPT_PATH.value,
-      bf16_enable=True,
-      param_size=_SIZE.value,
-      context_length=_CONTEXT_LENGTH.value,
-      batch_size=_BATCH_SIZE.value,
-      quantize_weights=_QUANTIZE_WEIGHTS.value,
-      quantize_kv=_QUANTIZE_KV_CACHE.value,
-      max_cache_length=_MAX_CACHE_LENGTH.value,
-      sharding_config=_SHARDING_CONFIG.value,
-      is_disaggregated=_IS_DISAGGREGATED.value,
-      num_hosts=_NUM_HOSTS.value,
-      decode_pod_slice_name=_DECODE_POD_SLICE_NAME.value,
+  prefill_engine_list, decode_engine_list = (
+      ray_engine.create_pytorch_ray_engine(
+          model_name=_MODEL_NAME.value,
+          tokenizer_path=_TOKENIZER_PATH.value,
+          ckpt_path=_CKPT_PATH.value,
+          bf16_enable=True,
+          param_size=_SIZE.value,
+          context_length=_CONTEXT_LENGTH.value,
+          batch_size=_BATCH_SIZE.value,
+          quantize_weights=_QUANTIZE_WEIGHTS.value,
+          quantize_kv=_QUANTIZE_KV_CACHE.value,
+          max_cache_length=_MAX_CACHE_LENGTH.value,
+          sharding_config=_SHARDING_CONFIG.value,
+          is_disaggregated=_IS_DISAGGREGATED.value,
+          num_hosts=_NUM_HOSTS.value,
+          decode_pod_slice_name=_DECODE_POD_SLICE_NAME.value,
+      )
   )
 
   print("Initialize engine", time.perf_counter() - start)
-  return (prefill_engine, decode_engine)
+  return (prefill_engine_list[0], decode_engine_list[0])
 
 
 # pylint: disable-next=all

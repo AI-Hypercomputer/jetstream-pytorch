@@ -1,5 +1,5 @@
 from collections import defaultdict
-from typing import Any, Iterable, Optional, Union
+from typing import Any, Iterable, Optional, Union, Tuple, List
 
 import numpy as np
 import ray
@@ -180,7 +180,9 @@ def create_pytorch_ray_engine(
     decode_pod_slice_name: str = None,
     enable_jax_profiler: bool = False,
     jax_profiler_port: int = 9999,
-) -> Any:
+) -> Union[
+    PyTorchRayEngine, Tuple[List[PyTorchRayEngine], List[PyTorchRayEngine]]
+]:
 
   # Return tuple as reponse: issues/107
   supported_models = ["llama-2", "llama-3", "gemma"]
@@ -254,4 +256,4 @@ def create_pytorch_ray_engine(
       is_disaggregated=is_disaggregated,
       pod_slice_name=decode_pod_slice_name,
   )
-  return (prefill_engine, decode_engine)
+  return ([prefill_engine], [decode_engine])
