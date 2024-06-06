@@ -26,25 +26,9 @@ import jax
 
 import pdb
 
-class KVCache(nn.Module):
-    def __init__(self, max_batch_size, max_seq_length, n_heads, head_dim, dtype=torch.bfloat16):
-        super().__init__()
-        cache_shape = (max_batch_size, n_heads, max_seq_length, head_dim)
-        self.register_buffer('k_cache', torch.zeros(cache_shape, dtype=dtype))
-        self.register_buffer('v_cache', torch.zeros(cache_shape, dtype=dtype))
-
-    def update(self, input_pos, k_val, v_val):
-        # input_pos: [S], k_val: [B, H, S, D]
-        assert input_pos.shape[0] == k_val.shape[2]
-
-        k_out = self.k_cache
-        v_out = self.v_cache
-        k_out[:, :, input_pos] = k_val
-        v_out[:, :, input_pos] = v_val
-
-        return k_out, v_out
 
 class Transformer(nn.Module):
+
     def __init__(self, config: ModelArgs, env) -> None:
         super().__init__()
         self.config = config
@@ -65,18 +49,6 @@ class Transformer(nn.Module):
         # TODO(Consider refactor with other models)
         freqs_cis = precompute_freqs_cis(self.config.block_size, self.config.dim // self.config.n_head, self.config.rope_base)
         self.register_buffer("freqs_cis", freqs_cis)
-    # def setup_caches(self, max_batch_size, max_seq_length):
-    #     if self.max_seq_length >= max_seq_length and self.max_batch_size >= max_batch_size:
-    #         return
-    #     head_dim = self.config.dim // self.config.n_head
-    #     max_seq_length = find_multiple(max_seq_length, 8)
-    #     self.max_seq_length = max_seq_length
-    #     self.max_batch_size = max_batch_size
-    #     for b in self.layers:
-    #         b.attention.kv_cache = KVCache(max_batch_size, max_seq_length, self.config.n_local_heads, head_dim)
-
-    #     self.freqs_cis = precompute_freqs_cis(self.config.block_size, self.config.dim // self.config.n_head, self.config.rope_base)
-    #     self.causal_mask = torch.tril(torch.ones(self.max_seq_length, self.max_seq_length, dtype=torch.bool))
 
     @torch.no_grad()
     def forward(self, idx: Tensor, caches: List[Any], mask, start: Optional[Tensor] = None, input_pos: Optional[Tensor]=None, ragged_batch_index=None, ragged_block_index=None) -> Tensor:
@@ -112,10 +84,11 @@ class Transformer(nn.Module):
             "attention.wk.weight": "attention.wk.weight_scaler",
             "attention.wv.weight": "attention.wv.weight_scaler",
             "attention.wo.weight": "attention.wo.weight_scaler",
-            "feed_forward.w1.weight": "feed_forward.w1.weight_scaler",
-            "feed_forward.w2.weight": "feed_forward.w2.weight_scaler",
-            "feed_forward.w3.weight": "feed_forward.w3.weight_scaler",
             "output.weight": "output.weight_scaler",
+            "block_sparse_moe.gate.weight": "block_sparse_moe.gate.weight_scaler", 
+            "block_sparse_moe.cond_ffn.w1": "block_sparse_moe.cond_ffn.w1_scaler",
+            "block_sparse_moe.cond_ffn.w2": "block_sparse_moe.cond_ffn.w2_scaler",
+            "block_sparse_moe.cond_ffn.w3": "block_sparse_moe.cond_ffn.w3_scaler",
         }
 
     @staticmethod
@@ -169,7 +142,67 @@ class TransformerBlock(nn.Module):
         return out
 
 
+class Int8ConditionalFeedForward(nn.Module):
+
+    def __init__(self, config):
+        super().__init__()
+        w1 = torch.empty(config.num_experts, config.intermediate_size, config.dim, dtype=torch.int8)
+        w2 = torch.empty(config.num_experts, config.dim, config.intermediate_size, dtype=torch.int8)
+        w3 = torch.empty(config.num_experts, config.intermediate_size, config.dim, dtype=torch.int8)
+        self.register_buffer('w1', w1)
+        self.register_buffer('w2', w2)
+        self.register_buffer('w3', w3)
+
+        w1_scaler = torch.empty(config.num_experts, config.intermediate_size)
+        w2_scaler = torch.empty(config.num_experts, config.dim)
+        w3_scaler = torch.empty(config.num_experts, config.intermediate_size)
+        self.register_buffer('w1_scaler', w1_scaler)
+        self.register_buffer('w2_scaler', w2_scaler)
+        self.register_buffer('w3_scaler', w3_scaler)
+
+        #pdb.set_trace()
+    def forward(self, x: Tensor, expert_indices: Tensor) -> Tensor:
+        seq_len = x.shape[0]
+        if seq_len >= 4:
+            return self.forward_for_long_seq_len(x, expert_indices)
+        else:
+            return self.forward_for_short_seq_len(x, expert_indices)
+
+    def forward_for_short_seq_len(self, x: Tensor, expert_indices: Tensor) -> Tensor:
+        #pdb.set_trace()
+        with jax.named_scope("conditional_ff"):
+            w1_weights = self.w1[expert_indices] # [T, A, D, D]
+            w3_weights = self.w3[expert_indices] # [T, A, D, D]
+            w2_weights = self.w2[expert_indices]  # [T, A, D, D]
+            w1_scaler = self.w1_scaler[expert_indices]
+            w2_scaler = self.w2_scaler[expert_indices]
+            w3_scaler = self.w3_scaler[expert_indices]
+            #print("conditional ff: w1_weights.shape: %s x.shape: %s" % (w1_weights.shape, x.shape))
+            x1 = F.silu(torch.einsum('ti,taoi -> tao', x, w1_weights) * w1_scaler)
+            x3 = torch.einsum('ti, taoi -> tao', x, w3_weights) * w3_scaler
+            expert_outs =  torch.einsum('tao, taio -> tai', (x1 * x3), w2_weights) * w2_scaler
+        return expert_outs
+
+    def forward_for_long_seq_len(self, x, expert_indices):
+        seqlen = x.shape[0]
+        num_experts = self.w1.shape[0]
+
+        # e = total num of exp = 8
+        # t = seqlen
+        # o = config.imtermediate size
+        # i = config.dim
+        with jax.named_scope("conditional_ff"):
+            x1 = F.silu(torch.einsum('ti,eoi -> teo', x, self.w1) * self.w1_scaler)
+            x3 = torch.einsum('ti, eoi-> teo', x, self.w3) * self.w3_scaler
+            expert_outs =  torch.einsum('teo, eio -> tei', (x1 * x3), self.w2) * self.w2_scaler
+            # e = 8; need to reduce to 2
+            seq_indexes = torch.arange(seqlen).unsqueeze(1)
+            return expert_outs[seq_indexes, expert_indices]
+
+
+
 class ConditionalFeedForward(nn.Module):
+
     def __init__(self, config):
         super().__init__()
         # TODO(How to enable quantization?)
@@ -178,6 +211,13 @@ class ConditionalFeedForward(nn.Module):
         self.w3 = nn.Parameter(torch.empty(config.num_experts, config.intermediate_size, config.dim))
         #pdb.set_trace()
     def forward(self, x: Tensor, expert_indices: Tensor) -> Tensor:
+        seq_len = x.shape[0]
+        if seq_len >= 4:
+            return self.forward_for_long_seq_len(x, expert_indices)
+        else:
+            return self.forward_for_short_seq_len(x, expert_indices)
+
+    def forward_for_short_seq_len(self, x: Tensor, expert_indices: Tensor) -> Tensor:
         #pdb.set_trace()
         with jax.named_scope("conditional_ff"):
             w1_weights = self.w1[expert_indices] # [T, A, D, D]
@@ -189,15 +229,34 @@ class ConditionalFeedForward(nn.Module):
             expert_outs =  torch.einsum('tao, taio -> tai', (x1 * x3), w2_weights)
         return expert_outs
 
+    def forward_for_long_seq_len(self, x, expert_indices):
+        seqlen = x.shape[0]
+        num_experts = self.w1.shape[0]
+
+        # e = total num of exp = 8
+        # t = seqlen
+        # o = config.imtermediate size
+        # i = config.dim
+        with jax.named_scope("conditional_ff"):
+            x1 = F.silu(torch.einsum('ti,eoi -> teo', x, self.w1))
+            x3 = torch.einsum('ti, eoi-> teo', x, self.w3)
+            expert_outs =  torch.einsum('teo, eio -> tei', (x1 * x3), self.w2)
+            # e = 8; need to reduce to 2
+            seq_indexes = torch.arange(seqlen).unsqueeze(1)
+            return expert_outs[seq_indexes, expert_indices]
+
 
 class MOEFeedForward(nn.Module):
+
     def __init__(self, config, device, env) -> None:
         super().__init__()
         LinearLayer = get_quantized_linear_layer(env.quant_config)
         self.gate = LinearLayer(config.dim, config.num_experts, bias=False)
-        self.cond_ffn = ConditionalFeedForward(config)
+        CondLayer = Int8ConditionalFeedForward if env.quant_config.enable_weight_quantization else ConditionalFeedForward
+        self.cond_ffn = CondLayer(config)
         self.dim = config.dim
         self.num_activated_experts = config.num_activated_experts
+
     def forward(self, x: Tensor) -> Tensor:
         bsz, seq, hidden = x.shape
         x = x.view(-1, self.dim)

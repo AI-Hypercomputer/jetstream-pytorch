@@ -533,7 +533,7 @@ class PyTorchEngine(engine_api.Engine):
   ) -> tuple[DecodeState, engine_api.ResultTokens]:
     # seq_len = padded_tokens.shape[0]
     #import pdb; pdb.set_trace()
-    jax.debug.print(f"Decoding with {decode_state.tokens}")
+    #jax.debug.print(f"Decoding with {decode_state.tokens}")
     pos = decode_state.current_position
     input_indexes = jnp.full((1,), pos)
 
@@ -883,7 +883,7 @@ def create_pytorch_engine(
         args.dim // args.n_head,
     )
     env_data.num_layers = args.n_layer
-    env_data.qkv_fusion = True  # Mixtral by default enables qkv weights fusion
+    env_data.qkv_fusion = True # Mixtral by default enables qkv weights fusion
     env = JetEngineEnvironment(env_data)
     pt_model = mistral_model.Transformer(args, env)
   else:
