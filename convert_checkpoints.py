@@ -126,6 +126,10 @@ def _quantize_state_dict(
         block_size = orig_block_size
         n_bit = orig_n_bit
   state_dict.update(updated_weights)
+  for k, v in state_dict.items():
+      if "layers" in k and "layers.0" not in k:
+          continue
+      print(f"After quantization the converted key: {k} and value: {v.shape} {v.dtype}")
   return state_dict
 
 
@@ -478,7 +482,9 @@ def _get_mistral_state_dict(input_ckpt_dir):
   print(f"Loading checkpoints takes {end - start} seconds")
 
   for k, v in state_dict.items():
-      print(f"The loaded key: {k} and value: {v.shape}")
+      if "layers" in k and "layers.0" not in k:
+          continue
+      print(f"The loaded key: {k} and value: {v.shape} {v.dtype}")
 
   config = json.loads((input_ckpt_dir / "config.json").read_text())
   print(f"Loaded config: {config}")
@@ -532,7 +538,9 @@ def _get_mistral_state_dict(input_ckpt_dir):
     else:
         state_dict[new_key] = state_dict.pop(key)
   for k, v in state_dict.items():
-      print(f"The converted key: {k} and value: {v.shape}")
+      if "layers" in k and "layers.0" not in k:
+          continue
+      print(f"The converted key: {k} and value: {v.shape} {v.dtype}")
   return state_dict, config
 
 def main(argv) -> None:
