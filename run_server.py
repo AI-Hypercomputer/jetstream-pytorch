@@ -20,7 +20,7 @@ import jax
 import jetstream_pt
 from absl import app, flags
 from jetstream.core import server_lib
-from jetstream.core.config_lib import ServerConfig
+from jetstream.core.config_lib import ServerConfig, MetricsServerConfig
 from jetstream_pt.config import FLAGS, create_engine_from_config_flags
 
 flags.DEFINE_integer("port", 9000, "port to listen on")
@@ -30,6 +30,7 @@ flags.DEFINE_string(
     "InterleavedCPUTestServer",
     "available servers",
 )
+flags.DEFINE_integer("prometheus_port", 0, "")
 
 
 # pylint: disable-next=all
@@ -48,6 +49,10 @@ def main(argv: Sequence[str]):
   )
   print(f"server_config: {server_config}")
 
+  metrics_server_config: MetricsServerConfig | None = None
+  if FLAGS.prometheus_port != 0:
+    metrics_server_config = MetricsServerConfig(port=FLAGS.prometheus_port)
+
   # We separate credential from run so that we can unit test it with local credentials.
   # We would like to add grpc credentials for OSS.
   jetstream_server = server_lib.run(
@@ -55,6 +60,7 @@ def main(argv: Sequence[str]):
       port=FLAGS.port,
       config=server_config,
       devices=devices,
+      metrics_server_config=metrics_server_config,
   )
   print("Started jetstream_server....")
   jetstream_server.wait_for_termination()

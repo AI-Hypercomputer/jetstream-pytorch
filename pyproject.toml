@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-version = "0.2.1"
+version = "0.2.2"
 name = "jetstream_pt"
 dependencies = [
     "absl-py",

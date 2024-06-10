@@ -37,6 +37,7 @@ from jetstream_pt import quantize
 from jetstream_pt.config import FLAGS
 from jetstream_pt.third_party.gemma import model as gemma_model
 from jetstream_pt.third_party.llama import model_exportable as llama_model
+from safetensors import safe_open
 from safetensors.torch import save_file
 
 _INPUT_CHECKPOINT_DIR = epath.DEFINE_path(
@@ -67,6 +68,12 @@ _OUTPUT_SAFETENSORS = flags.DEFINE_bool(
     "output_safetensors",
     True,
     "When set to true, save to HugginFace SafeTensors format",
+)
+
+_FROM_HF = flags.DEFINE_bool(
+    "from_hf",
+    False,
+    "Set to True if the input is a HuggingFace checkpoint.",
 )
 
 
@@ -179,9 +186,13 @@ def _merge_llama_weights(
         f"{len(tensors)} shards (shape = {tensors[0].shape}) for {key})"
     )
     state_dict_for_key = {}
-    for pattern, kind in llama_model.Transformer.get_weight_sharding_type(
-        model_name=FLAGS.model_name
-    ).items():
+
+    weight_sharding_type = (
+        llama_model.Transformer.get_weight_sharding_type(
+          model_name=FLAGS.model_name
+        ).items()
+    )
+    for pattern, kind in weight_sharding_type:
       if not key.endswith(pattern):
         continue
       with torch.no_grad():
@@ -251,7 +262,7 @@ def _load_from_gcs(input_ckpt_dir: epath.Path):
   return checkpoints, params
 
 
-def _load_from_local(input_ckpt_dir: epath.Path):
+def _load_orig_llama_weight(input_ckpt_dir: epath.Path):
   checkpoints = []
   params = json.loads((input_ckpt_dir / "params.json").read_text())
 
@@ -267,6 +278,84 @@ def _load_from_local(input_ckpt_dir: epath.Path):
   return checkpoints, params
 
 
+def _load_hf_llama_weight(input_ckpt_dir: epath.Path):
+  print(f"Loading checkpoint files from {input_ckpt_dir}.")
+  safetensors_files = input_ckpt_dir.glob("*.safetensors")
+  if len(list(safetensors_files)) == 0:
+    raise ValueError(
+        f"No *.safetensors found in the input dir {input_ckpt_dir}"
+    )
+  checkpoint = {}
+  for st_f in safetensors_files:
+    with safe_open(st_f, framework="pt", device="cpu") as f:
+      for key in f.keys():
+        if "inv_freq" in key:
+          # Don't include 'rotary_emb.inv_freq' in the converted
+          # checkpoint, because in JetStream implementation we
+          # precompute it during weight loading.
+          continue
+        new_key = key
+        # Remove 'model.' prefix for all weights.
+        prefix_to_remove = "model."
+        if key.startswith(prefix_to_remove):
+          new_key = new_key.removeprefix(prefix_to_remove)
+
+        # Weight name substring mapping between hf and jetstream.
+        _load_hf_llama_weight.hf_to_jetstream_keys_mapping = {
+            "lm_head": "output",
+            "embed_tokens": "tok_embeddings",
+            "input_layernorm": "attention_norm",
+            "post_attention_layernorm": "ffn_norm",
+            "self_attn.q_proj": "attention.wq",
+            "self_attn.k_proj": "attention.wk",
+            "self_attn.v_proj": "attention.wv",
+            "self_attn.o_proj": "attention.wo",
+            "mlp.gate_proj": "feed_forward.w1",
+            "mlp.down_proj": "feed_forward.w2",
+            "mlp.up_proj": "feed_forward.w3",
+            "model.norm.weight": "norm.weight",
+        }
+        found_substute = False
+        for (
+            hf_weight_key
+        ) in _load_hf_llama_weight.hf_to_jetstream_keys_mapping.keys():
+          if hf_weight_key in key:
+            jet_stream_key = _load_hf_llama_weight.hf_to_jetstream_keys_mapping[
+                hf_weight_key
+            ]
+            new_key = new_key.replace(hf_weight_key, jet_stream_key)
+            found_substute = True
+            break
+        assert found_substute, f"No substitute name found for {key}."
+        print(f"convert weight name {key} to {new_key}.")
+        weight_tensor = f.get_tensor(key)
+        if weight_tensor.dtype == torch.float16:
+          # JetStream expects bf16 weight, since activation is in bf16
+          # float16 x bf16 will hit mix precision assertion.
+          weight_tensor = weight_tensor.to(torch.bfloat16)
+          print(f"convert weight name {new_key} from float16 to bfloat16.")
+        if "wq" in new_key or "wk" in new_key:
+          # In HF weight, wq and wk are interleaved differently
+          weight_shape = weight_tensor.shape
+          weight_tensor = (
+              weight_tensor.reshape(-1, 2, 64, weight_shape[1])
+              .transpose(1, 2)
+              .reshape(weight_shape)
+          )
+        checkpoint[new_key] = weight_tensor
+  return [checkpoint], None
+
+
+def _load_from_local(input_ckpt_dir: epath.Path):
+  if not _FROM_HF.value:
+    return _load_orig_llama_weight(input_ckpt_dir)
+  else:
+    assert (
+        not FLAGS.quantize_weights
+    ), "Quantization not supported for HF checkpoint."
+    return _load_hf_llama_weight(input_ckpt_dir)
+
+
 def _export_to_gcs(output_ckpt_dir: epath.Path, params, state_dict):
   # pylint: disable-next=all
   bucket_name, output_ckpt = str(output_ckpt_dir).split("//")[-1].split("/", 1)
@@ -275,11 +364,12 @@ def _export_to_gcs(output_ckpt_dir: epath.Path, params, state_dict):
   bucket = storage_client.bucket(bucket_name)
 
   ckpt_blob = bucket.blob(os.path.join(output_ckpt, "consolidated.00.pth"))
-  param_blob = bucket.blob(os.path.join(output_ckpt, "params.json"))
   checklist_blob = bucket.blob(os.path.join(output_ckpt, "checklist.chk"))
-  with param_blob.open("w") as f:
-    f.write(json.dumps(params))
-    f.close()
+  if params is not None:
+    param_blob = bucket.blob(os.path.join(output_ckpt, "params.json"))
+    with param_blob.open("w") as f:
+      f.write(json.dumps(params))
+      f.close()
   with ckpt_blob.open("w") as f:
     torch.save(state_dict, f)
     f.close()
@@ -290,7 +380,8 @@ def _export_to_gcs(output_ckpt_dir: epath.Path, params, state_dict):
 
 def _export_to_local(output_ckpt_dir: epath.Path, params, state_dict):
   output_ckpt_dir.mkdir(parents=True, exist_ok=True)
-  (output_ckpt_dir / "params.json").write_text(json.dumps(params))
+  if params is not None:
+    (output_ckpt_dir / "params.json").write_text(json.dumps(params))
   if _OUTPUT_SAFETENSORS.value:
     # safetensors.torch.save_file expects tensor to be contiguous.
     state_dict = pytree.tree_map_only(
@@ -393,7 +484,7 @@ def main(argv) -> None:
         llama_model.Transformer.get_quantized_embedding_weight_to_scaler_map()
     )
 
-  if FLAGS.quantize_type:
+  if FLAGS.quantize_weights:
     quantize_num_bits = 8 if "int8" in FLAGS.quantize_type else 4
     is_blockwise = "blockwise" in FLAGS.quantize_type
     weight_axis = lambda x: 0 if x in quantize_embedding_weight_map else 1
