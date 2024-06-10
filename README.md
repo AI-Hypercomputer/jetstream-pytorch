@@ -64,12 +64,21 @@ huggingface-cli download google/gemma-7b-pytorch --local-dir $input_ckpt_dir
 
 Need to manually modify the `config.json` in the checkpoint folder to make it a valid JSON file. (Replace `'` with `"`, remove the excessive `,` after the last item in the JSON object)
 
+## Mixtral
+### Get Mixtral Checkpoint from HuggingFace
+
+Please sign agreement on Huggingface website to access Mixtral checkpoints. Download Mixtral PyTorch checkpoint using huggingface-cli. Mixtral Tokenizer is included in the checkpoint.
+
+```bash
+huggingface-cli download mistralai/Mixtral-8x7B-v0.1 --local-dir $input_ckpt_dir
+```
+
 ## Run weight safetensor convert
 
 ```bash
 export input_ckpt_dir=Original llama weights directory
 export output_ckpt_dir=The output directory
-export model_name="llama-3" # or "llama-2", "gemma"
+export model_name="llama-3" # or "llama-2", "gemma", "mistral"
 export quantize_weights=True # Whether to quantize weights
 export quantize_type="int8_per_channel" # "quantize_weights" needs to be turned on. Availabe quantize type: {"int8", "int4"} x {"per_channel", "blockwise"}, "int8_per_channel" is the default option if not specified.
 python -m convert_checkpoints --model_name=$model_name --input_checkpoint_dir=$input_ckpt_dir --output_checkpoint_dir=$output_ckpt_dir --quantize_type=$quantize_type
@@ -106,6 +115,11 @@ python run_interactive.py --size=70b --model_name=$model_name --batch_size=8 --m
 ## Gemma 7b
 ```bash
 python run_interactive.py --model_name=$model_name --size=7b --batch_size=64 --max_cache_length=2048 --quantize_weights=$quantize --quantize_type=$quantize_type --quantize_kv_cache=$quantize --checkpoint_path=$output_ckpt_dir --tokenizer_path=$tokenizer_path --sharding_config=default_shardings/$model_name.yaml
+```
+
+## Mixtral 8x7b
+```bash
+python run_interactive.py --model_name=$model_name --batch_size=128 --max_cache_length=2048 --quantize_weights=$quantize --quantize_type=$quantize_type --quantize_kv_cache=$quantize --checkpoint_path=$output_ckpt_dir --tokenizer_path=$tokenizer_path --sharding_config=default_shardings/$model_name.yaml
 ```
 
 
