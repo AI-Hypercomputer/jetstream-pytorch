@@ -127,9 +127,11 @@ def _quantize_state_dict(
         n_bit = orig_n_bit
   state_dict.update(updated_weights)
   for k, v in state_dict.items():
-      if "layers" in k and "layers.0" not in k:
-          continue
-      print(f"After quantization the converted key: {k} and value: {v.shape} {v.dtype}")
+    if "layers" in k and "layers.0" not in k:
+      continue
+    print(
+        f"After quantization the converted key: {k} and value: {v.shape} {v.dtype}"
+    )
   return state_dict
 
 
@@ -476,32 +478,34 @@ def _get_mixtral_state_dict(input_ckpt_dir):
   start = time.perf_counter()
   state_dict = {}
   for file in sorted(ckpt_files):
-      ckpt = torch.load(str(file), map_location="cpu", mmap=True, weights_only=True)
-      state_dict.update(ckpt)
+    ckpt = torch.load(
+        str(file), map_location="cpu", mmap=True, weights_only=True
+    )
+    state_dict.update(ckpt)
   end = time.perf_counter()
   print(f"Loading checkpoints takes {end - start} seconds")
 
   for k, v in state_dict.items():
-      if "layers" in k and "layers.0" not in k:
-          continue
-      print(f"The loaded key: {k} and value: {v.shape} {v.dtype}")
+    if "layers" in k and "layers.0" not in k:
+      continue
+    print(f"The loaded key: {k} and value: {v.shape} {v.dtype}")
 
   config = json.loads((input_ckpt_dir / "config.json").read_text())
   print(f"Loaded config: {config}")
   weight_map = {
-        "tok_embeddings.weight": "tok_embeddings.weight",
-        "layers.{}.attention.wq.weight": "layers.{}.attention.wq.weight",
-        "layers.{}.attention.wk.weight": "layers.{}.attention.wk.weight",
-        "layers.{}.attention.wv.weight": "layers.{}.attention.wv.weight",
-        "layers.{}.attention.wo.weight": "layers.{}.attention.wo.weight",
-        "layers.{}.block_sparse_moe.w1": "layers.{}.block_sparse_moe.cond_ffn.w1",
-        "layers.{}.block_sparse_moe.w2": "layers.{}.block_sparse_moe.cond_ffn.w2",
-        "layers.{}.block_sparse_moe.w3": "layers.{}.block_sparse_moe.cond_ffn.w3",
-        "layers.{}.block_sparse_moe.gate.weight": "layers.{}.block_sparse_moe.gate.weight",
-        "layers.{}.attention_norm.weight": "layers.{}.attention_norm.weight",
-        "layers.{}.ffn_norm.weight": "layers.{}.ffn_norm.weight",
-        "norm.weight": "norm.weight",
-        "output.weight": "output.weight",
+      "tok_embeddings.weight": "tok_embeddings.weight",
+      "layers.{}.attention.wq.weight": "layers.{}.attention.wq.weight",
+      "layers.{}.attention.wk.weight": "layers.{}.attention.wk.weight",
+      "layers.{}.attention.wv.weight": "layers.{}.attention.wv.weight",
+      "layers.{}.attention.wo.weight": "layers.{}.attention.wo.weight",
+      "layers.{}.block_sparse_moe.w1": "layers.{}.block_sparse_moe.cond_ffn.w1",
+      "layers.{}.block_sparse_moe.w2": "layers.{}.block_sparse_moe.cond_ffn.w2",
+      "layers.{}.block_sparse_moe.w3": "layers.{}.block_sparse_moe.cond_ffn.w3",
+      "layers.{}.block_sparse_moe.gate.weight": "layers.{}.block_sparse_moe.gate.weight",
+      "layers.{}.attention_norm.weight": "layers.{}.attention_norm.weight",
+      "layers.{}.ffn_norm.weight": "layers.{}.ffn_norm.weight",
+      "norm.weight": "norm.weight",
+      "output.weight": "output.weight",
   }
   for key in list(state_dict.keys()):
     if state_dict[key].dtype.is_complex and _OUTPUT_SAFETENSORS.value:
@@ -516,31 +520,49 @@ def _get_mixtral_state_dict(input_ckpt_dir):
     new_key = key
     if key.startswith(prefix_to_remove):
       new_key = new_key.removeprefix(prefix_to_remove)
-    
+
     if "layers" in key:
-        abstract_key = re.sub(r'.(\d+).', '.{}.', key)
-        layer_num = re.search(r'\d+', key).group(0)
-        new_key = weight_map[abstract_key]
-        new_key = new_key.format(layer_num)
-        if new_key is None:
-            continue
-    
-    if new_key == key:
+      abstract_key = re.sub(r".(\d+).", ".{}.", key)
+      layer_num = re.search(r"\d+", key).group(0)
+      new_key = weight_map[abstract_key]
+      new_key = new_key.format(layer_num)
+      if new_key is None:
         continue
 
+    if new_key == key:
+      continue
+
     if "w1" in key or "w3" in key:
-        state_dict[new_key] = state_dict.pop(key).reshape(config["num_local_experts"], config["intermediate_size"], config["hidden_size"]).contiguous()
+      state_dict[new_key] = (
+          state_dict.pop(key)
+          .reshape(
+              config["num_local_experts"],
+              config["intermediate_size"],
+              config["hidden_size"],
+          )
+          .contiguous()
+      )
     elif "w2" in key:
-        state_dict[new_key] = state_dict.pop(key).reshape(config["num_local_experts"], config["intermediate_size"], config["hidden_size"]).permute(0, 2, 1).contiguous()
+      state_dict[new_key] = (
+          state_dict.pop(key)
+          .reshape(
+              config["num_local_experts"],
+              config["intermediate_size"],
+              config["hidden_size"],
+          )
+          .permute(0, 2, 1)
+          .contiguous()
+      )
     elif "gate" in key:
-        state_dict[new_key] = state_dict.pop(key).contiguous()
+      state_dict[new_key] = state_dict.pop(key).contiguous()
     else:
-        state_dict[new_key] = state_dict.pop(key)
+      state_dict[new_key] = state_dict.pop(key)
   for k, v in state_dict.items():
-      if "layers" in k and "layers.0" not in k:
-          continue
-      print(f"The converted key: {k} and value: {v.shape} {v.dtype}")
+    if "layers" in k and "layers.0" not in k:
+      continue
+    print(f"The converted key: {k} and value: {v.shape} {v.dtype}")
   return state_dict, config
+
 
 def main(argv) -> None:
   """merge weights"""
