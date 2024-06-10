@@ -269,7 +269,7 @@ def _load_from_gcs(input_ckpt_dir: epath.Path):
 
 def _load_orig_llama_weight(input_ckpt_dir: epath.Path):
   checkpoints = []
-  params = json.loads((input_ckpt_dir / param_file_name).read_text())
+  params = json.loads((input_ckpt_dir / "params.json").read_text())
 
   print(f"Loading checkpoint files from {input_ckpt_dir}.")
   paths = input_ckpt_dir.glob("*.pth")

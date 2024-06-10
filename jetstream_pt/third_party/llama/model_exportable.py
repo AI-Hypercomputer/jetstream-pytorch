@@ -184,6 +184,7 @@ class Transformer(nn.Module):
         self.params.max_seq_len * 2,
         theta=self.params.rope_theta,
     )
+
     self.register_buffer("freqs_cis", freqs_cis)
 
   @torch.no_grad()

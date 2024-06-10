@@ -635,6 +635,7 @@ class Attention(nn.Module):
       self.env.apply_sharding(xq, axis=shard_axis)
       self.env.apply_sharding(xk, axis=shard_axis)
       self.env.apply_sharding(xv, axis=shard_axis)
+
     with jax.named_scope("attn_rope"):
       xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
 
