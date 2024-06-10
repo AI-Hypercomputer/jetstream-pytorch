@@ -78,7 +78,7 @@ huggingface-cli download mistralai/Mixtral-8x7B-v0.1 --local-dir $input_ckpt_dir
 ```bash
 export input_ckpt_dir=Original llama weights directory
 export output_ckpt_dir=The output directory
-export model_name="llama-3" # or "llama-2", "gemma", "mistral"
+export model_name="llama-3" # or "llama-2", "gemma", "mixtral"
 export quantize_weights=True # Whether to quantize weights
 export quantize_type="int8_per_channel" # "quantize_weights" needs to be turned on. Availabe quantize type: {"int8", "int4"} x {"per_channel", "blockwise"}, "int8_per_channel" is the default option if not specified.
 python -m convert_checkpoints --model_name=$model_name --input_checkpoint_dir=$input_ckpt_dir --output_checkpoint_dir=$output_ckpt_dir --quantize_type=$quantize_type

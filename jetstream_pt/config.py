@@ -112,8 +112,8 @@ def create_engine_from_config_flags():
         if FLAGS.model_name.startswith("llama")
         else "gemma"
         if FLAGS.model_name.startswith("gemma")
-        else "mistral"
-        if FLAGS.model_name.startswith("mistral")
+        else "mixtral"
+        if FLAGS.model_name.startswith("mixtral")
         else None
     )
     if (

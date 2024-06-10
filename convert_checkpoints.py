@@ -38,7 +38,7 @@ from jetstream_pt import quantize
 from jetstream_pt.config import FLAGS
 from jetstream_pt.third_party.gemma import model as gemma_model
 from jetstream_pt.third_party.llama import model_exportable as llama_model
-from jetstream_pt.third_party.mistral import model as mistral_model, config as mistral_config
+from jetstream_pt.third_party.mixtral import model as mixtral_model
 
 from safetensors import safe_open
 from safetensors.torch import save_file
@@ -469,7 +469,7 @@ def _get_gemma_state_dict(input_ckpt_dir):
   return state_dict, model_config
 
 
-def _get_mistral_state_dict(input_ckpt_dir):
+def _get_mixtral_state_dict(input_ckpt_dir):
   ckpt_files = list(input_ckpt_dir.glob("*.pt"))
   assert len(ckpt_files) == 8, "only expect 8 ckpt file for Mistral model."
 
@@ -488,7 +488,6 @@ def _get_mistral_state_dict(input_ckpt_dir):
 
   config = json.loads((input_ckpt_dir / "config.json").read_text())
   print(f"Loaded config: {config}")
-  #config = mistral_config.ModelArgs.from_name("Mixtral-8x7B-v0.1")
   weight_map = {
         "tok_embeddings.weight": "tok_embeddings.weight",
         "layers.{}.attention.wq.weight": "layers.{}.attention.wq.weight",
@@ -554,13 +553,13 @@ def main(argv) -> None:
     quantize_embedding_weight_map = (
         gemma_model.GemmaModel.get_quantized_embedding_weight_to_scaler_map()
     )
-  elif FLAGS.model_name == "mistral":
-    state_dict, params = _get_mistral_state_dict(_INPUT_CHECKPOINT_DIR.value)
+  elif FLAGS.model_name == "mixtral":
+    state_dict, params = _get_mixtral_state_dict(_INPUT_CHECKPOINT_DIR.value)
     quantize_linear_weight_map = (
-        mistral_model.Transformer.get_quantized_linear_weight_to_scaler_map()
+        mixtral_model.Transformer.get_quantized_linear_weight_to_scaler_map()
     )
     quantize_embedding_weight_map = (
-        mistral_model.Transformer.get_quantized_embedding_weight_to_scaler_map()
+        mixtral_model.Transformer.get_quantized_embedding_weight_to_scaler_map()
     )
   else:
     state_dict, params = _get_llama_state_dict(_INPUT_CHECKPOINT_DIR.value)

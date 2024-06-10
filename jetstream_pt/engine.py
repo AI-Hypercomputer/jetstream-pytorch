@@ -37,7 +37,7 @@ from jetstream_pt import torchjax
 from jetstream_pt.environment import JetEngineEnvironment, JetEngineEnvironmentData, QuantizationConfig
 from jetstream_pt.third_party.llama import model_exportable as llama_model, model_args
 from jetstream_pt.third_party.gemma import config as gemma_config, model as gemma_model
-from jetstream_pt.third_party.mistral import config as mistral_config, model as mistral_model
+from jetstream_pt.third_party.mixtral import config as mixtral_config, model as mixtral_model
 
 
 Mesh = jax.sharding.Mesh
@@ -765,7 +765,7 @@ def create_pytorch_engine(
 ) -> PyTorchEngine:
   """Returns: The pytorch engine."""
 
-  supported_models = ["llama-2", "llama-3", "gemma", "mistral"]
+  supported_models = ["llama-2", "llama-3", "gemma", "mixtral"]
   if model_name not in supported_models:
     raise NotImplementedError(
         f"Model name should be one of{','.join(supported_models)}"
@@ -807,8 +807,8 @@ def create_pytorch_engine(
       sharding_file_name = "llama"
     elif model_name.startswith("gemma"):
       sharding_file_name = "gemma"
-    elif model_name.startswith("mistral"):
-      sharding_file_name = "mistral"
+    elif model_name.startswith("mixtral"):
+      sharding_file_name = "mixtral"
     sharding_config = os.path.join(
         "default_shardings", sharding_file_name + ".yaml"
     )
@@ -861,8 +861,8 @@ def create_pytorch_engine(
     env = JetEngineEnvironment(env_data)
     print(f"Enviroment variables: {vars(env)}")
     pt_model = gemma_model.GemmaModel(args, env)
-  elif model_name == "mistral":
-    args = mistral_config.ModelArgs.from_name("Mixtral-8x7B-v0.1")
+  elif model_name == "mixtral":
+    args = mixtral_config.ModelArgs.from_name("Mixtral-8x7B-v0.1")
     args.device = "meta"
     env_data.cache_shape = (
         batch_size,
@@ -872,7 +872,7 @@ def create_pytorch_engine(
     )
     env_data.num_layers = args.n_layer
     env = JetEngineEnvironment(env_data)
-    pt_model = mistral_model.Transformer(args, env)
+    pt_model = mixtral_model.Transformer(args, env)
   else:
     raise RuntimeError(f"Model with name {model_name} not found")
 
