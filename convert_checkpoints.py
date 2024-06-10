@@ -187,11 +187,9 @@ def _merge_llama_weights(
     )
     state_dict_for_key = {}
 
-    weight_sharding_type = (
-        llama_model.Transformer.get_weight_sharding_type(
-          model_name=FLAGS.model_name
-        ).items()
-    )
+    weight_sharding_type = llama_model.Transformer.get_weight_sharding_type(
+        model_name=FLAGS.model_name
+    ).items()
     for pattern, kind in weight_sharding_type:
       if not key.endswith(pattern):
         continue
