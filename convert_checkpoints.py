@@ -41,7 +41,7 @@ from jetstream_pt.third_party.llama import model_exportable as llama_model
 from jetstream_pt.third_party.mistral import model as mistral_model, config as mistral_config
 
 from safetensors import safe_open
-from safetensors.torch import load_file, save_file
+from safetensors.torch import save_file
 
 _INPUT_CHECKPOINT_DIR = epath.DEFINE_path(
     "input_checkpoint_dir",
@@ -169,7 +169,7 @@ def _tensors_have_same_shape(tensors):
 
 
 # pylint: disable-next=all
-def _merge_weights(
+def _merge_llama_weights(
     checkpoints, minimize_memory_footprint, enable_float32
 ):
   print("Starting to merge weights.")
@@ -244,7 +244,7 @@ def _merge_weights(
   return state_dict
 
 
-def _load_from_gcs(input_ckpt_dir: epath.Path, param_file_name:str):
+def _load_from_gcs(input_ckpt_dir: epath.Path):
   checkpoints = []
   input_ckpt_dir_str = str(input_ckpt_dir)
   # pylint: disable-next=all
@@ -253,7 +253,7 @@ def _load_from_gcs(input_ckpt_dir: epath.Path, param_file_name:str):
   storage_client = storage.Client()
   input_blobs = storage_client.list_blobs(bucket_name, prefix=blob_name)
   for blob in input_blobs:
-    if param_file_name in blob.name:
+    if "params.json" in blob.name:
       with blob.open("r") as f:
         print(f"Loading parameter files from {blob.name}")
         params = f.read()
@@ -408,15 +408,15 @@ def _get_llama_state_dict(input_ckpt_dir):
         """WARNING: Loading data from gcs bucket takes a lont time. 
         Suggest to download the data to local first!"""
     )
-    checkpoints, params = _load_from_gcs(input_ckpt_dir, "params.json")
+    checkpoints, params = _load_from_gcs(input_ckpt_dir)
   else:
-    checkpoints, params = _load_from_local(input_ckpt_dir, "params.json")
+    checkpoints, params = _load_from_local(input_ckpt_dir)
   end = time.perf_counter()
   print(f"Loading checkpoints takes {end - start} seconds")
 
   start = time.perf_counter()
   if len(checkpoints) > 1:
-    state_dict = _merge_weights(
+    state_dict = _merge_llama_weights(
         checkpoints, _MINIMIZE_MEMORY_FOOTPRINT.value, _ENABLE_FLOAT32.value
     )
   else:

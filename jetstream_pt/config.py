@@ -108,7 +108,13 @@ def create_engine_from_config_flags():
   sharding_file_name = FLAGS.sharding_config
   if not sharding_file_name:
     sharding_file_name = (
-        "llama" if FLAGS.model_name.startswith("llama") else "gemma" if FLAGS.model_name.startswith("gemma") else "mistral" if FLAGS.model_name.startswith("mistral") else None
+        "llama"
+        if FLAGS.model_name.startswith("llama")
+        else "gemma"
+        if FLAGS.model_name.startswith("gemma")
+        else "mistral"
+        if FLAGS.model_name.startswith("mistral")
+        else None
     )
     if (
         quant_config.enable_weight_quantization

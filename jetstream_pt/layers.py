@@ -617,8 +617,6 @@ class Attention(nn.Module):
       ragged_batch_index=None,
       ragged_block_index=None,
   ):
-    #print(f"For Attention, x is {x.shape} and freqs_cis is {freqs_cis.shape}")
-    #jax.debug.print(f"For Attention, x is {x.shape} and freqs_cis is {freqs_cis.shape}")
     with jax.named_scope("attn_linear_before_cache"):
       bsz, seqlen = x.shape[0], x.shape[-2]
 
@@ -637,7 +635,6 @@ class Attention(nn.Module):
       self.env.apply_sharding(xq, axis=shard_axis)
       self.env.apply_sharding(xk, axis=shard_axis)
       self.env.apply_sharding(xv, axis=shard_axis)
-    #import pdb; pdb.set_trace()
     with jax.named_scope("attn_rope"):
       xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
 

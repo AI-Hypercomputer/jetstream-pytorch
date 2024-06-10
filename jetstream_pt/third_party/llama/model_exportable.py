@@ -184,15 +184,13 @@ class Transformer(nn.Module):
         self.params.max_seq_len * 2,
         theta=self.params.rope_theta,
     )
-    print(f"freq_cis device: {freqs_cis.device}")
     self.register_buffer("freqs_cis", freqs_cis)
-    print(f"freq_cis2 device: {freqs_cis.device}")
-    print(f"freq_cis4 device: {self.freqs_cis.device}")
 
   @torch.no_grad()
   def forward(
       self,
       tokens: torch.Tensor,
+      input_pos: torch.Tensor,
       caches: List[Any],
       mask,
       start=None,
@@ -201,10 +199,10 @@ class Transformer(nn.Module):
   ):
     """
     tokens: the input token for decoding
+    input_pos: the decoding position relative to the start, which is the length of the decoding results
     caches: kv caches
     mask: causal mask to filter the attention results
     start: the starting position for each slot
-    input_pos: the decoding position relative to the start, which is the length of the decoding results
     ragged_batch_index: precomputed batch index for ragged attention
     ragged_block_index: precomputed block index for ragged attention
     """
@@ -215,7 +213,6 @@ class Transformer(nn.Module):
 
     with jax.named_scope("transformer_freq"):
       bsz, seqlen = tokens.shape
-      import pdb; pdb.set_trace()
       freqs_cis = self.freqs_cis[input_pos]
       freqs_cis = freqs_cis.reshape(bsz, seqlen, -1)
 
