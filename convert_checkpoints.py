@@ -493,19 +493,9 @@ def _get_mixtral_state_dict(input_ckpt_dir):
   config = json.loads((input_ckpt_dir / "config.json").read_text())
   print(f"Loaded config: {config}")
   weight_map = {
-      "tok_embeddings.weight": "tok_embeddings.weight",
-      "layers.{}.attention.wq.weight": "layers.{}.attention.wq.weight",
-      "layers.{}.attention.wk.weight": "layers.{}.attention.wk.weight",
-      "layers.{}.attention.wv.weight": "layers.{}.attention.wv.weight",
-      "layers.{}.attention.wo.weight": "layers.{}.attention.wo.weight",
       "layers.{}.block_sparse_moe.w1": "layers.{}.block_sparse_moe.cond_ffn.w1",
       "layers.{}.block_sparse_moe.w2": "layers.{}.block_sparse_moe.cond_ffn.w2",
       "layers.{}.block_sparse_moe.w3": "layers.{}.block_sparse_moe.cond_ffn.w3",
-      "layers.{}.block_sparse_moe.gate.weight": "layers.{}.block_sparse_moe.gate.weight",
-      "layers.{}.attention_norm.weight": "layers.{}.attention_norm.weight",
-      "layers.{}.ffn_norm.weight": "layers.{}.ffn_norm.weight",
-      "norm.weight": "norm.weight",
-      "output.weight": "output.weight",
   }
   for key in list(state_dict.keys()):
     if state_dict[key].dtype.is_complex and _OUTPUT_SAFETENSORS.value:
