@@ -259,13 +259,17 @@ class Transformer(nn.Module):
     }
 
   @staticmethod
-  def get_weight_sharding_type():
+  def get_weight_sharding_type(model_name: str = ""):
     # ParallelEmbedding is col partitioned across the shards.
+    # VocalParallelEmbedding is row partitioned across the shards.
     # ColumnParallelLinear is row partitioned across shards due to transpose.
     # RowParallelLinear is col partitioned across shards due to transpose.
     # None is no partitioning and tensor should be identical across shards
-    return {
-        "tok_embeddings.weight": "ParallelEmbedding",
+    expected_model_names = ("llama-2", "llama-3")
+    assert (
+        model_name in expected_model_names
+    ), f"Expected model_name to one of {expected_model_names}"
+    sharding_dict = {
         "rope.freqs": None,
         "attention.wq.weight": "ColumnParallelLinear",
         "attention.wk.weight": "ColumnParallelLinear",
@@ -279,3 +283,8 @@ class Transformer(nn.Module):
         "norm.weight": None,
         "output.weight": "ColumnParallelLinear",
     }
+    if model_name == "llama-2":
+      sharding_dict["tok_embeddings.weight"] = "ParallelEmbedding"
+    elif model_name == "llama-3":
+      sharding_dict["tok_embeddings.weight"] = "VocabParallelEmbedding"
+    return sharding_dict
