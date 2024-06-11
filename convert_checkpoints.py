@@ -26,6 +26,7 @@ import gc
 import hashlib
 import json
 import os
+import re
 import time
 
 import torch
@@ -37,6 +38,8 @@ from jetstream_pt import quantize
 from jetstream_pt.config import FLAGS
 from jetstream_pt.third_party.gemma import model as gemma_model
 from jetstream_pt.third_party.llama import model_exportable as llama_model
+from jetstream_pt.third_party.mixtral import model as mixtral_model
+
 from safetensors import safe_open
 from safetensors.torch import save_file
 
@@ -123,6 +126,12 @@ def _quantize_state_dict(
         block_size = orig_block_size
         n_bit = orig_n_bit
   state_dict.update(updated_weights)
+  for k, v in state_dict.items():
+    if "layers" in k and "layers.0" not in k:
+      continue
+    print(
+        f"After quantization the converted key: {k} and value: {v.shape} {v.dtype}"
+    )
   return state_dict
 
 
@@ -470,6 +479,89 @@ def _get_gemma_state_dict(input_ckpt_dir):
   return state_dict, model_config
 
 
+def _get_mixtral_state_dict(input_ckpt_dir):
+  ckpt_files = list(input_ckpt_dir.glob("*.pt"))
+  assert len(ckpt_files) == 8, "only expect 8 ckpt file for Mistral model."
+
+  start = time.perf_counter()
+  state_dict = {}
+  for file in sorted(ckpt_files):
+    ckpt = torch.load(
+        str(file), map_location="cpu", mmap=True, weights_only=True
+    )
+    state_dict.update(ckpt)
+  end = time.perf_counter()
+  print(f"Loading checkpoints takes {end - start} seconds")
+
+  for k, v in state_dict.items():
+    if "layers" in k and "layers.0" not in k:
+      continue
+    print(f"The loaded key: {k} and value: {v.shape} {v.dtype}")
+
+  config = json.loads((input_ckpt_dir / "config.json").read_text())
+  print(f"Loaded config: {config}")
+  weight_map = {
+      "layers.{}.block_sparse_moe.w1": "layers.{}.block_sparse_moe.cond_ffn.w1",
+      "layers.{}.block_sparse_moe.w2": "layers.{}.block_sparse_moe.cond_ffn.w2",
+      "layers.{}.block_sparse_moe.w3": "layers.{}.block_sparse_moe.cond_ffn.w3",
+  }
+  for key in list(state_dict.keys()):
+    if state_dict[key].dtype.is_complex and _OUTPUT_SAFETENSORS.value:
+      assert (
+          key == "freqs_cis"
+      ), "Only expect key 'freqs_cis' in the state_dict has complex dtype."
+      # Remove "freqs_cis" since it has complex dtype, and safetensor doesn't support it.
+      # The "freqs_cis" will be reconstructed when it's loaded by inference engine.
+      state_dict.pop(key)
+      continue
+    prefix_to_remove = "model."
+    new_key = key
+    if key.startswith(prefix_to_remove):
+      new_key = new_key.removeprefix(prefix_to_remove)
+
+    if "layers" in key:
+      abstract_key = re.sub(r".(\d+).", ".{}.", key)
+      layer_num = re.search(r"\d+", key).group(0)
+      new_key = weight_map.get(abstract_key)
+      if new_key is None:
+        continue
+      new_key = new_key.format(layer_num)
+
+    if new_key == key:
+      continue
+
+    if "w1" in key or "w3" in key:
+      state_dict[new_key] = (
+          state_dict.pop(key)
+          .reshape(
+              config["num_local_experts"],
+              config["intermediate_size"],
+              config["hidden_size"],
+          )
+          .contiguous()
+      )
+    elif "w2" in key:
+      state_dict[new_key] = (
+          state_dict.pop(key)
+          .reshape(
+              config["num_local_experts"],
+              config["intermediate_size"],
+              config["hidden_size"],
+          )
+          .permute(0, 2, 1)
+          .contiguous()
+      )
+    elif "gate" in key:
+      state_dict[new_key] = state_dict.pop(key).contiguous()
+    else:
+      state_dict[new_key] = state_dict.pop(key)
+  for k, v in state_dict.items():
+    if "layers" in k and "layers.0" not in k:
+      continue
+    print(f"The converted key: {k} and value: {v.shape} {v.dtype}")
+  return state_dict, config
+
+
 def main(argv) -> None:
   """merge weights"""
 
@@ -480,6 +572,14 @@ def main(argv) -> None:
     )
     quantize_embedding_weight_map = (
         gemma_model.GemmaModel.get_quantized_embedding_weight_to_scaler_map()
+    )
+  elif FLAGS.model_name == "mixtral":
+    state_dict, params = _get_mixtral_state_dict(_INPUT_CHECKPOINT_DIR.value)
+    quantize_linear_weight_map = (
+        mixtral_model.Transformer.get_quantized_linear_weight_to_scaler_map()
+    )
+    quantize_embedding_weight_map = (
+        mixtral_model.Transformer.get_quantized_embedding_weight_to_scaler_map()
     )
   else:
     state_dict, params = _get_llama_state_dict(_INPUT_CHECKPOINT_DIR.value)

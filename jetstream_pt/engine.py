@@ -37,6 +37,7 @@ from jetstream_pt import torchjax
 from jetstream_pt.environment import JetEngineEnvironment, JetEngineEnvironmentData, QuantizationConfig
 from jetstream_pt.third_party.llama import model_exportable as llama_model, model_args
 from jetstream_pt.third_party.gemma import config as gemma_config, model as gemma_model
+from jetstream_pt.third_party.mixtral import config as mixtral_config, model as mixtral_model
 
 
 Mesh = jax.sharding.Mesh
@@ -359,7 +360,6 @@ class PyTorchEngine(engine_api.Engine):
 
     start_insert = decode_state.current_position - prefix.seq_len
     tokens = decode_state.tokens.at[slot].set(prefix.token)
-
     start_insert = start_insert % self.env.cache_sequence_length
     # pos < 0
     update_indexes = (
@@ -641,12 +641,17 @@ class PyTorchEngine(engine_api.Engine):
   def _load_from_state_dict(self, path):
     state_dict = torch.load(path, map_location=torch.device("cpu"))
     weights = {}
+    print(f"Loaded keys are : {state_dict.keys()}")
     for key, model_weights in self.pt_model.state_dict().items():
+      if key == "freqs_cis":
+        continue
       assert key in state_dict, f"key: {key} not found"
-      weights[key] = torchjax.from_torch(state_dict[key])
+      weights[key] = torch_xla2.tensor.t2j(state_dict[key])
       assert tuple(model_weights.shape) == tuple(
           weights[key].shape
       ), f"key: {key} error: {model_weights.shape} != {weights[key].shape}"
+
+    weights["freqs_cis"] = torch_xla2.tensor.t2j(self.pt_model.freqs_cis)
     return weights
 
   # pylint: disable-next=all
@@ -760,7 +765,7 @@ def create_pytorch_engine(
 ) -> PyTorchEngine:
   """Returns: The pytorch engine."""
 
-  supported_models = ["llama-2", "llama-3", "gemma"]
+  supported_models = ["llama-2", "llama-3", "gemma", "mixtral"]
   if model_name not in supported_models:
     raise NotImplementedError(
         f"Model name should be one of{','.join(supported_models)}"
@@ -772,7 +777,6 @@ def create_pytorch_engine(
   jax.config.update("jax_traceback_filtering", "off")
   torch_dtype = torch.bfloat16 if bf16_enable else torch.float32
   torch.set_default_dtype(torch_dtype)
-
   checkpoint_format = ""
   checkpoint_path = ""
 
@@ -797,8 +801,14 @@ def create_pytorch_engine(
 
   pt_model = None
 
+  sharding_file_name = ""
   if not sharding_config:
-    sharding_file_name = "llama" if model_name.startswith("llama") else "gemma"
+    if model_name.startswith("llama"):
+      sharding_file_name = "llama"
+    elif model_name.startswith("gemma"):
+      sharding_file_name = "gemma"
+    elif model_name.startswith("mixtral"):
+      sharding_file_name = "mixtral"
     sharding_config = os.path.join(
         "default_shardings", sharding_file_name + ".yaml"
     )
@@ -851,6 +861,18 @@ def create_pytorch_engine(
     env = JetEngineEnvironment(env_data)
     print(f"Enviroment variables: {vars(env)}")
     pt_model = gemma_model.GemmaModel(args, env)
+  elif model_name == "mixtral":
+    args = mixtral_config.ModelArgs.from_name("Mixtral-8x7B-v0.1")
+    args.device = "meta"
+    env_data.cache_shape = (
+        batch_size,
+        args.n_local_heads,
+        max_cache_length,
+        args.dim // args.n_head,
+    )
+    env_data.num_layers = args.n_layer
+    env = JetEngineEnvironment(env_data)
+    pt_model = mixtral_model.Transformer(args, env)
   else:
     raise RuntimeError(f"Model with name {model_name} not found")
 

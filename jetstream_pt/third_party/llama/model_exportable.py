@@ -200,10 +200,10 @@ class Transformer(nn.Module):
   ):
     """
     tokens: the input token for decoding
+    input_pos: the decoding position relative to the start, which is the length of the decoding results
     caches: kv caches
     mask: causal mask to filter the attention results
     start: the starting position for each slot
-    input_pos: the decoding position relative to the start, which is the length of the decoding results
     ragged_batch_index: precomputed batch index for ragged attention
     ragged_block_index: precomputed block index for ragged attention
     """
