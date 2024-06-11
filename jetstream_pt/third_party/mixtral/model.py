@@ -61,10 +61,10 @@ class Transformer(nn.Module):
   def forward(
       self,
       idx: Tensor,
+      input_pos: Optional[Tensor],
       caches: List[Any],
       mask,
       start: Optional[Tensor] = None,
-      input_pos: Optional[Tensor] = None,
       ragged_batch_index=None,
       ragged_block_index=None,
   ) -> Tensor:

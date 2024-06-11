@@ -514,10 +514,10 @@ def _get_mixtral_state_dict(input_ckpt_dir):
     if "layers" in key:
       abstract_key = re.sub(r".(\d+).", ".{}.", key)
       layer_num = re.search(r"\d+", key).group(0)
-      new_key = weight_map[abstract_key]
-      new_key = new_key.format(layer_num)
+      new_key = weight_map.get(abstract_key)
       if new_key is None:
         continue
+      new_key = new_key.format(layer_num)
 
     if new_key == key:
       continue
