@@ -93,8 +93,8 @@ class GemmaAttention(nn.Module):
     self.scaling = self.head_dim**-0.5
 
     Linear = (
-        layers.WeightOnlyInt8Linear
-        if env.enable_weight_quantization
+        layers.WeightOnlyPerChannelQuantizedLinear
+        if env.quant_config.enable_weight_quantization
         else torch.nn.Linear
     )
     self.wq = Linear(
@@ -124,7 +124,7 @@ class GemmaAttention(nn.Module):
 
     Kernel = (
         layers.Int8KVAttentionKernel
-        if env.enable_kv_quantization
+        if env.quant_config.enable_kv_quantization
         else layers.AttentionKernel
     )
     self.attention_kernel = Kernel(env)
@@ -135,6 +135,10 @@ class GemmaAttention(nn.Module):
       freqs_cis,
       mask,
       cache,
+      start=None,
+      end=None,
+      ragged_batch_index=None,
+      ragged_block_index=None,
   ) -> torch.Tensor:
     hidden_states_shape = hidden_states.shape
     assert len(hidden_states_shape) == 3
@@ -164,7 +168,17 @@ class GemmaAttention(nn.Module):
     xv = xv.transpose(1, 2)
     xq = xq.transpose(1, 2)
 
-    output = self.attention_kernel(xq, xk, xv, mask, cache)
+    output = self.attention_kernel(
+        xq,
+        xk,
+        xv,
+        mask,
+        cache,
+        start,
+        end,
+        ragged_batch_index,
+        ragged_block_index,
+    )
 
     # [batch_size, input_len, hidden_dim]
     output = output.transpose(1, 2).contiguous().view(batch_size, input_len, -1)
@@ -209,8 +223,8 @@ class GemmaMLP(nn.Module):
   ):
     super().__init__()
     Linear = (
-        layers.WeightOnlyInt8Linear
-        if env.enable_weight_quantization
+        layers.WeightOnlyPerChannelQuantizedLinear
+        if env.quant_config.enable_weight_quantization
         else torch.nn.Linear
     )
     self.gate_proj = Linear(
@@ -264,6 +278,10 @@ class GemmaDecoderLayer(nn.Module):
       freqs_cis: torch.Tensor,
       cache: Any,
       mask: torch.Tensor,
+      start: torch.Tensor | None = None,
+      end: torch.Tensor | None = None,
+      ragged_batch_index: torch.Tensor | None = None,
+      ragged_block_index: torch.Tensor | None = None,
   ) -> torch.Tensor:
     # Self Attention
     residual = hidden_states
@@ -273,6 +291,10 @@ class GemmaDecoderLayer(nn.Module):
         freqs_cis=freqs_cis,
         mask=mask,
         cache=cache,
+        start=start,
+        end=end,
+        ragged_batch_index=ragged_batch_index,
+        ragged_block_index=ragged_block_index,
     )
     hidden_states = residual + hidden_states
 
@@ -301,7 +323,7 @@ class GemmaModel(nn.Module):
     )
     Embedding = (
         layers.Int8Embedding
-        if env.enable_weight_quantization
+        if env.quant_config.enable_weight_quantization
         else torch.nn.Embedding
     )
 
@@ -321,7 +343,20 @@ class GemmaModel(nn.Module):
       input_pos: torch.Tensor,
       caches: List[Any],
       mask,
+      start=None,
+      ragged_batch_index=None,
+      ragged_block_index=None,
   ):
+    """
+    tokens: the input token for decoding
+    caches: kv caches
+    mask: causal mask to filter the attention results
+    start: the starting position for each slot
+    input_pos: the decoding position relative to the start, which is the length of the decoding results
+    ragged_batch_index: precomputed batch index for ragged attention
+    ragged_block_index: precomputed block index for ragged attention
+    """
+
     with jax.named_scope("transformer_freq"):
       bsz, seqlen = tokens.shape
       freqs_cis = self.freqs_cis[input_pos]
@@ -330,6 +365,8 @@ class GemmaModel(nn.Module):
     hidden_states = self.embedder(tokens)
     hidden_states = hidden_states * (self.config.hidden_size**0.5)
 
+    end = None if start is None else (start + input_pos) % self.env.cache_len
+
     for i in range(len(self.layers)):
       layer = self.layers[i]
       hidden_states = layer(
@@ -337,11 +374,33 @@ class GemmaModel(nn.Module):
           freqs_cis=freqs_cis,
           cache=caches[i],
           mask=mask,
+          start=start,
+          end=end,
+          ragged_batch_index=ragged_batch_index,
+          ragged_block_index=ragged_block_index,
       )
     hidden_states = self.norm(hidden_states)
 
     embedder_weight = self.embedder.weight
-    if self.env.enable_weight_quantization:
+    if self.env.quant_config.enable_weight_quantization:
       embedder_weight = embedder_weight * self.embedder.weight_scaler
     logits = torch.matmul(hidden_states, embedder_weight.t())
     return logits
+
+  @staticmethod
+  def get_quantized_linear_weight_to_scaler_map():
+    return {
+        "self_attn.o_proj.weight": "self_attn.o_proj.weight_scaler",
+        "self_attn.wq.weight": "self_attn.wq.weight_scaler",
+        "self_attn.wk.weight": "self_attn.wk.weight_scaler",
+        "self_attn.wv.weight": "self_attn.wv.weight_scaler",
+        "mlp.gate_proj.weight": "mlp.gate_proj.weight_scaler",
+        "mlp.up_proj.weight": "mlp.up_proj.weight_scaler",
+        "mlp.down_proj.weight": "mlp.down_proj.weight_scaler",
+    }
+
+  @staticmethod
+  def get_quantized_embedding_weight_to_scaler_map():
+    return {
+        "embedder.weight": "embedder.weight_scaler",
+    }

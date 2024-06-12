@@ -35,9 +35,10 @@ from jetstream_pt import cache_manager
 from jetstream_pt import quantize
 from jetstream_pt import torchjax
 from jetstream_pt import sampling_utils # TODO: import from jetstream.engine next release
-from jetstream_pt.environment import JetEngineEnvironment, JetEngineEnvironmentData
-from jetstream_pt.third_party.llama import model_exportable, model_args
+from jetstream_pt.environment import JetEngineEnvironment, JetEngineEnvironmentData, QuantizationConfig
+from jetstream_pt.third_party.llama import model_exportable as llama_model, model_args
 from jetstream_pt.third_party.gemma import config as gemma_config, model as gemma_model
+from jetstream_pt.third_party.mixtral import config as mixtral_config, model as mixtral_model
 
 
 Mesh = jax.sharding.Mesh
@@ -65,6 +66,7 @@ class DecodeState:
   ]  # only present in quantized kv
   current_position: int
   lens: jax.Array  # [batch_size, 1]
+  start: jax.Array  # [batch_size, 1], the starting pos for each slot
   input_pos: jax.Array  # [batch_size, 1] input pos for each slot
   mask: jax.Array  # [batch_size, seqlen] -inf for invalid; 0 for valid
 
@@ -116,21 +118,21 @@ class PyTorchEngine(engine_api.Engine):
     #      out_shardings=self.get_decode_state_sharding())
     self._lock = threading.RLock()
 
-  # pylint: disable-next=all
   def init_decode_state(
       self,
   ) -> DecodeState:
     caches_obj = self.env.make_caches_generate()
     caches = [c.state() for c in caches_obj]
     scalers = []
-    if self.env.enable_kv_quantization:
+    if self.env.quant_config.enable_kv_quantization:
       scalers = [c.scalers() for c in caches_obj]
     return DecodeState(
         jnp.zeros((self.env.batch_size, 1), dtype=jnp.int32),
         caches,
         scalers,
-        self.env.max_input_sequence_length,
-        jnp.zeros((self.env.batch_size, 1), dtype=jnp.int32),
+        self.env.starting_position,
+        jnp.zeros((self.env.batch_size, 1), dtype=jnp.int32),  # lens
+        jnp.zeros((self.env.batch_size,), dtype=jnp.int32),  # start pos
         jnp.zeros((self.env.batch_size,), dtype=jnp.int32),  # input pos
         jnp.full(
             (self.env.batch_size, self.env.cache_sequence_length),
@@ -148,9 +150,12 @@ class PyTorchEngine(engine_api.Engine):
       caches,
       cache_scales,
       mask,
+      start,
       input_pos,
+      ragged_batch_index,
+      ragged_block_index,
   ):
-    if self.env.enable_kv_quantization:
+    if self.env.quant_config.enable_kv_quantization:
       caches_obj = [
           cache_manager.Int8KVCacheGenerate(k, v, ks, vs, input_indexes)
           for (k, v), (ks, vs) in torchjax.to_torch(
@@ -166,16 +171,24 @@ class PyTorchEngine(engine_api.Engine):
       ]
     mask = jnp.expand_dims(mask, (1, 2))
 
-    args = (tokens, input_pos, caches_obj, mask)
+    args = (
+        tokens,
+        input_pos,
+        caches_obj,
+        mask,
+        start,
+        ragged_batch_index,
+        ragged_block_index,
+    )
     paramst, argst = torchjax.to_torch((weights, args))
     with self._lock:
-      with torchjax.jax_mode:
+      with torch_xla2.default_env():
         # The mode is needed so that tensors created inside of
         # the model (such as via torch.ones etc) also have the right type
         res = torch.func.functional_call(self.pt_model, paramst, argst)
     updated_caches = [c.state() for c in caches_obj]
     scales = []
-    if self.env.enable_kv_quantization:
+    if self.env.quant_config.enable_kv_quantization:
       scales = [c.scalers() for c in caches_obj]
     return torchjax.from_torch((res, updated_caches, scales))
 
@@ -185,7 +198,9 @@ class PyTorchEngine(engine_api.Engine):
   )
   def _call_model_prefill(self, weights, tokens, input_indexes):
     caches = [
-        cache_manager.KVCachePrefill(self.env.enable_kv_quantization)
+        cache_manager.KVCachePrefill(
+            self.env.quant_config.enable_kv_quantization
+        )
         for _ in self.pt_model.layers
     ]
     mask = jnp.full(
@@ -198,7 +213,7 @@ class PyTorchEngine(engine_api.Engine):
 
     paramst, argst = torchjax.to_torch((weights, args))
     with self._lock:
-      with torchjax.jax_mode:
+      with torch_xla2.default_env():
         res = torch.func.functional_call(self.pt_model, paramst, argst)[0]
     caches_res = [c.state() for c in caches]
     return torchjax.from_torch((res, caches_res))
@@ -283,8 +298,11 @@ class PyTorchEngine(engine_api.Engine):
     cond = jnp.logical_and(x <= decode_state.current_position, x >= pos)
     mask_insert = jnp.where(cond, 0, float("-inf"))
     mask = decode_state.mask.at[slot].set(mask_insert)
+    start = decode_state.start.at[slot].set(
+        pos % self.env.cache_sequence_length
+    )
     input_pos = decode_state.input_pos.at[slot].set(prefix.seq_len)
-    if not self.env.enable_kv_quantization:
+    if not self.env.quant_config.enable_kv_quantization:
 
       @functools.partial(jax.jit, donate_argnums=(0, 1), inline=True)
       def insert(cache, new_entry):
@@ -305,8 +323,8 @@ class PyTorchEngine(engine_api.Engine):
       @functools.partial(jax.jit, donate_argnums=(0, 1), inline=True)
       def insert(cache, scaler, new_entry):
         reduce_axis = (1, 3)
-        vals, scales = torch_xla2.interop.call_torch(
-            quantize.quantize_torch_int8, new_entry, reduce_axis
+        vals, scales, _ = torchjax.call_torch(
+            quantize.quantize_tensor, new_entry, reduce_axis
         )
         new_scaler = jax.lax.dynamic_update_slice(
             scaler,
@@ -339,6 +357,7 @@ class PyTorchEngine(engine_api.Engine):
         scales,
         decode_state.current_position,
         lens,
+        start,
         input_pos,
         mask,
     )
@@ -353,7 +372,6 @@ class PyTorchEngine(engine_api.Engine):
 
     start_insert = decode_state.current_position - prefix.seq_len
     tokens = decode_state.tokens.at[slot].set(prefix.token)
-
     start_insert = start_insert % self.env.cache_sequence_length
     # pos < 0
     update_indexes = (
@@ -377,6 +395,7 @@ class PyTorchEngine(engine_api.Engine):
 
     mask_insert = jnp.where(cond, 0, float("-inf"))
     mask = decode_state.mask.at[slot].set(mask_insert)
+    start = decode_state.start.at[slot].set(start_insert)
     input_pos = decode_state.input_pos.at[slot].set(prefix.seq_len)
 
     old_caches = decode_state.caches
@@ -385,7 +404,7 @@ class PyTorchEngine(engine_api.Engine):
 
     scales = []
     caches = []
-    if not self.env.enable_kv_quantization:
+    if not self.env.quant_config.enable_kv_quantization:
 
       @functools.partial(jax.jit, donate_argnums=(0, 1), inline=True)
       def insert(cache, new_entry):
@@ -404,8 +423,8 @@ class PyTorchEngine(engine_api.Engine):
       def insert(cache, scaler, new_entry):
         new_entry = jnp.transpose(new_entry.squeeze(0), (1, 0, 2))
         reduce_axis = (1, 2)
-        vals, scales = torch_xla2.interop.call_torch(
-            quantize.quantize_torch_int8, new_entry, reduce_axis
+        vals, scales, _ = torchjax.call_torch(
+            quantize.quantize_tensor, new_entry, reduce_axis
         )
         new_scaler = scaler.at[slot, :, update_indexes, :].set(scales)
         new_scaler = jax.lax.with_sharding_constraint(
@@ -431,6 +450,7 @@ class PyTorchEngine(engine_api.Engine):
         scales,
         decode_state.current_position,
         lens,
+        start,
         input_pos,
         mask,
     )
@@ -459,6 +479,63 @@ class PyTorchEngine(engine_api.Engine):
         slot,
     )
 
+  def precompute_ragged_block_indices(self, decode_state: DecodeState):
+    """Precompute the ragged attention block indices. Ragged attention iterates the grid
+    and relies on the computed grid index to skip the unnecessary blocks. The basic idea
+    is to use input_pos, which is the length of each slot to determine if we should
+    work on the next block of the slot or move to the next slot."""
+    start = decode_state.start
+    end = (start + decode_state.input_pos) % self.env.cache_len
+    batch_size = start.shape[0]
+    bk = self.env.block_size
+    # The batch index
+    b = jnp.arange(batch_size).reshape((batch_size, 1))
+    num_bk = self.env.cache_len // self.env.block_size
+    # The block index
+    i = jnp.arange(num_bk).reshape((1, num_bk))
+    i = jnp.broadcast_to(i, (batch_size, num_bk))
+
+    start = start.reshape((batch_size, 1))
+    end = end.reshape((batch_size, 1))
+
+    am_last_batch = b == batch_size - 1
+    last_good_block = jnp.where(
+        start < end,
+        jax.lax.div(end - 1, bk),
+        jax.lax.div(self.env.cache_len - 1, bk),
+    )
+
+    next_b = jnp.where(am_last_batch, b, b + 1)
+    next_i = jnp.where(am_last_batch, last_good_block, 0)
+
+    # start < end, continue work on the block is there is overlap with the [start, end)
+    def true_comp(b, i, bk, start, end, next_b, next_i):
+      b_next = jnp.where(i * bk >= end, next_b, b)
+      i_next = jnp.where(i * bk >= end, next_i, i)
+      i_next = jnp.where((i + 1) * bk <= start, jax.lax.div(start, bk), i_next)
+      return b_next, i_next
+
+    # start > end, continue work on the block is there is no overlap with [end, start)
+    def false_comp(b, i, bk, start, end):
+      b_next = b
+      i_next = jnp.where(
+          jnp.logical_and(i * bk >= end, (i + 1) * bk <= start),
+          jax.lax.div(start, bk),
+          i,
+      )
+      return b_next, i_next
+
+    true_comp_b, true_comp_i = true_comp(b, i, bk, start, end, next_b, next_i)
+    false_comp_b, false_comp_i = false_comp(b, i, bk, start, end)
+
+    b_next = jnp.where(
+        start < end, true_comp_b, jnp.where(start == end, next_b, false_comp_b)
+    )
+    i_next = jnp.where(
+        start < end, true_comp_i, jnp.where(start == end, next_i, false_comp_i)
+    )
+    return b_next, i_next
+
   def generate(
       self, params: Any, decode_state: DecodeState
   ) -> tuple[DecodeState, engine_api.ResultTokens]:
@@ -468,6 +545,13 @@ class PyTorchEngine(engine_api.Engine):
 
     # fill mask first
     mask = decode_state.mask.at[:, decode_state.current_position].set(0)
+    ragged_batch_index, ragged_block_index = (
+        self.precompute_ragged_block_indices(decode_state)
+    )
+    ragged_batch_index, ragged_block_index = ragged_batch_index.reshape(
+        (-1)
+    ), ragged_block_index.reshape((-1))
+
     logits, new_caches, new_scales = self._call_model_generate(
         params,
         decode_state.tokens,
@@ -475,8 +559,12 @@ class PyTorchEngine(engine_api.Engine):
         decode_state.caches,
         decode_state.cache_scales,
         mask,
+        decode_state.start,
         decode_state.input_pos,
+        ragged_batch_index,
+        ragged_block_index,
     )
+
     next_token = self._sampling(logits, self.env.batch_size)
     lens = decode_state.lens + 1
     data = jnp.concatenate(
@@ -504,6 +592,7 @@ class PyTorchEngine(engine_api.Engine):
         new_scales,
         (decode_state.current_position + 1) % self.env.cache_sequence_length,
         lens,
+        decode_state.start,
         decode_state.input_pos + 1,
         mask,
     )
@@ -549,46 +638,32 @@ class PyTorchEngine(engine_api.Engine):
     return pytree.tree_map_only(torch.Tensor, make_array, model_args_meta)
 
   def _load_from_safetensors(self, path):
-
     weights = {}
     with safe_open(path, framework="flax", device="cpu") as f:
       for key, model_weights in self.pt_model.state_dict().items():
         if key == "freqs_cis":
           continue
-        arr = jax.device_put(f.get_tensor(key), self.env.sharding_by_name(key))
+        weights[key] = f.get_tensor(key)
         assert tuple(model_weights.shape) == tuple(
-            arr.shape
-        ), f"key: {key} error: {model_weights.shape} != {arr.shape}"
-        weights[key] = arr
-
-    freqs_cis = torch_xla2.tensor.t2j(self.pt_model.freqs_cis)
-    weights["freqs_cis"] = jax.device_put(freqs_cis, self.replicated)
-
-    for k, v in weights.items():
-      if k.startswith("layers") and not k.startswith("layers.0"):
-        continue
-      print(f"Name: {k}, shape: {v.shape} x {v.dtype}")
-
+            weights[key].shape
+        ), f"key: {key} error: {model_weights.shape} != {weights[key].shape}"
+    weights["freqs_cis"] = torch_xla2.tensor.t2j(self.pt_model.freqs_cis)
     return weights
 
   def _load_from_state_dict(self, path):
     state_dict = torch.load(path, map_location=torch.device("cpu"))
     weights = {}
+    print(f"Loaded keys are : {state_dict.keys()}")
     for key, model_weights in self.pt_model.state_dict().items():
-      assert key in state_dict, f"key: {key} not found"
-      arr = jax.device_put(
-          torchjax.from_torch(state_dict[key]), self.env.sharding_by_name(key)
-      )
-      assert tuple(model_weights.shape) == tuple(
-          arr.shape
-      ), f"key: {key} error: {model_weights.shape} != {arr.shape}"
-      weights[key] = arr
-
-    for k, v in weights.items():
-      if k.startswith("layers") and not k.startswith("layers.0"):
+      if key == "freqs_cis":
         continue
-      print(f"Name: {k}, shape: {v.shape} x {v.dtype}")
+      assert key in state_dict, f"key: {key} not found"
+      weights[key] = torch_xla2.tensor.t2j(state_dict[key])
+      assert tuple(model_weights.shape) == tuple(
+          weights[key].shape
+      ), f"key: {key} error: {model_weights.shape} != {weights[key].shape}"
 
+    weights["freqs_cis"] = torch_xla2.tensor.t2j(self.pt_model.freqs_cis)
     return weights
 
   # pylint: disable-next=all
@@ -597,20 +672,35 @@ class PyTorchEngine(engine_api.Engine):
     with jax.default_device(self.colocated_cpus):
       if self.env.checkpoint_path:
         if self.env.checkpoint_format == "safetensors":
-          return self._load_from_safetensors(self.env.checkpoint_path)
+          jax_weights = self._load_from_safetensors(self.env.checkpoint_path)
         elif self.env.checkpoint_format == "state_dict":
-          return self._load_from_state_dict(self.env.checkpoint_path)
+          jax_weights = self._load_from_state_dict(self.env.checkpoint_path)
       else:
         jax_weights = self._make_state_dict_jax(self.pt_model.state_dict())
-    jax_weights = {
-        key: jax.device_put(value, self.env.sharding_by_name(key))
-        for key, value in jax_weights.items()
-    }
-    for k, v in jax_weights.items():
-      if k.startswith("layers") and not k.startswith("layers.0"):
-        continue
-      print(f"Name: {k}, shape: {v.shape} x {v.dtype}")
-    return jax_weights
+
+      if self.env.quant_config.num_bits_weight == 4:
+        assert (
+            "gemma" not in self.env.model_type
+        ), "int-4 is not supported in Gemma model yet."
+        quantize_linear_weights_scaler_map = (
+            self.pt_model.get_quantized_linear_weight_to_scaler_map()
+        )
+        with jax.default_device(jax.devices("cpu")[0]):
+          for key, val in jax_weights.items():
+            for qname in quantize_linear_weights_scaler_map.keys():
+              if key.endswith(qname):
+                val = val.astype(jnp.int4)
+                jax_weights[key] = val
+
+      jax_weights = {
+          key: jax.device_put(value, self.env.sharding_by_name(key))
+          for key, value in jax_weights.items()
+      }
+      for k, v in jax_weights.items():
+        if k.startswith("layers") and not k.startswith("layers.0"):
+          continue
+        print(f"Name: {k}, shape: {v.shape} x {v.dtype}")
+      return jax_weights
 
   @property
   def colocated_cpus(self) -> Union[list[engine_api.CpuDevices], None]:
@@ -629,6 +719,7 @@ class PyTorchEngine(engine_api.Engine):
     return DecodeState(
         self.x_sharding if self.env.shard_on_batch else self.replicated,
         self.cache_sharding,
+        self.replicated,
         self.replicated,
         self.replicated,
         self.replicated,
@@ -677,11 +768,12 @@ def create_pytorch_engine(
     batch_size: int = 1,
     max_decode_length: int = 4096,
     model_name="llama-2",
-    quantize_weights=False,
-    quantize_kv=False,
+    quant_config: QuantizationConfig = QuantizationConfig(),
     max_cache_length=1024,
     sharding_config=None,
     shard_on_batch=False,
+    ragged_mha=False,
+    starting_position=512,
     temperature=None,
     sampling_algorithm="greedy",
     nucleus_topp=None,
@@ -689,7 +781,7 @@ def create_pytorch_engine(
 ) -> PyTorchEngine:
   """Returns: The pytorch engine."""
 
-  supported_models = ["llama-2", "llama-3", "gemma"]
+  supported_models = ["llama-2", "llama-3", "gemma", "mixtral"]
   if model_name not in supported_models:
     raise NotImplementedError(
         f"Model name should be one of{','.join(supported_models)}"
@@ -701,7 +793,6 @@ def create_pytorch_engine(
   jax.config.update("jax_traceback_filtering", "off")
   torch_dtype = torch.bfloat16 if bf16_enable else torch.float32
   torch.set_default_dtype(torch_dtype)
-
   checkpoint_format = ""
   checkpoint_path = ""
 
@@ -726,8 +817,14 @@ def create_pytorch_engine(
 
   pt_model = None
 
+  sharding_file_name = ""
   if not sharding_config:
-    sharding_file_name = "llama" if model_name.startswith("llama") else "gemma"
+    if model_name.startswith("llama"):
+      sharding_file_name = "llama"
+    elif model_name.startswith("gemma"):
+      sharding_file_name = "gemma"
+    elif model_name.startswith("mixtral"):
+      sharding_file_name = "mixtral"
     sharding_config = os.path.join(
         "default_shardings", sharding_file_name + ".yaml"
     )
@@ -739,12 +836,13 @@ def create_pytorch_engine(
       batch_size=batch_size,
       max_decode_length=max_decode_length,
       max_input_sequence_length=context_length,
-      enable_weight_quantization=quantize_weights,
-      enable_kv_quantization=quantize_kv,
+      quant_config=quant_config,
       cache_sequence_length=max_cache_length,
       bf16_enable=bf16_enable,
       sharding_config_path=sharding_config,
       shard_on_batch=shard_on_batch,
+      ragged_mha=ragged_mha,
+      starting_position=starting_position,
       temperature=temperature,
       sampling_algorithm=sampling_algorithm,
       nucleus_topp=nucleus_topp,
@@ -760,7 +858,6 @@ def create_pytorch_engine(
         model_name + "-" + param_size, context_length, batch_size, bf16_enable
     )
     args.device = "meta"
-    args.quantize = quantize_weights
     env_data.cache_shape = (
         batch_size,
         args.n_kv_heads,
@@ -770,7 +867,7 @@ def create_pytorch_engine(
     env_data.model_type = model_name + "-" + param_size
     env_data.num_layers = args.n_layers
     env = JetEngineEnvironment(env_data)
-    pt_model = model_exportable.Transformer(args, env)
+    pt_model = llama_model.Transformer(args, env)
   elif model_name == "gemma":
     args = gemma_config.get_model_config(param_size)
     env_data.cache_shape = (
@@ -782,7 +879,20 @@ def create_pytorch_engine(
     env_data.model_type = model_name + "-" + param_size
     env_data.num_layers = args.num_hidden_layers
     env = JetEngineEnvironment(env_data)
+    print(f"Enviroment variables: {vars(env)}")
     pt_model = gemma_model.GemmaModel(args, env)
+  elif model_name == "mixtral":
+    args = mixtral_config.ModelArgs.from_name("Mixtral-8x7B-v0.1")
+    args.device = "meta"
+    env_data.cache_shape = (
+        batch_size,
+        args.n_local_heads,
+        max_cache_length,
+        args.dim // args.n_head,
+    )
+    env_data.num_layers = args.n_layer
+    env = JetEngineEnvironment(env_data)
+    pt_model = mixtral_model.Transformer(args, env)
   else:
     raise RuntimeError(f"Model with name {model_name} not found")
 

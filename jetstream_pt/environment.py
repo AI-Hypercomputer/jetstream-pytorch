@@ -28,6 +28,16 @@ from jetstream_pt import cache_manager
 
 @dataclasses.dataclass
 # pylint: disable-next=all
+class QuantizationConfig:
+  enable_weight_quantization: bool = False
+  num_bits_weight: int = 8
+  is_blockwise_weight: bool = False
+
+  enable_kv_quantization: bool = False
+
+
+@dataclasses.dataclass
+# pylint: disable-next=all
 class JetEngineEnvironmentData:
   checkpoint_path: str = ""  # if empty string then use model's state_dict()
   checkpoint_format: str = "safetensors"  # torch, safetensors
@@ -39,8 +49,7 @@ class JetEngineEnvironmentData:
   batch_size: int = 32  # batch size is generate step batch size
   cache_sequence_length: int = 2048  # size of the cache.
 
-  enable_weight_quantization: bool = False
-  enable_kv_quantization: bool = False
+  quant_config: QuantizationConfig = QuantizationConfig()
 
   model_type: str = "llama-2-13b"  # this implies the model config
 
@@ -78,6 +87,15 @@ class JetEngineEnvironmentData:
   # Whether to shard on batch dimension. i.e. data parallel.
   shard_on_batch: bool = False
 
+  # Whether to enable ragged multi head attention.
+  ragged_mha: bool = False
+
+  # The block size for the ragged attention.
+  block_size: int = 512
+
+  # Starting position
+  starting_position: int = 512
+
   # Variables used in token sampling
   # sampling algorithm to use ("greedy", "weighted", "neucleus", "topk")
   sampling_algorithm: str = "greedy" 
@@ -98,19 +116,22 @@ class JetEngineEnvironment:
     self._data = data
 
     self.seq_len = self._data.max_input_sequence_length
-
+    self.cache_len = self._data.cache_sequence_length
+    self.ragged_mha = self._data.ragged_mha
+    self.block_size = self._data.block_size
+    self.starting_position = self._data.starting_position
     P = jax.sharding.PartitionSpec
 
     num_of_partitions = jax.device_count()
     # make mesh etc.
-    self._mesh = jsharding.Mesh(
+    self.mesh = jsharding.Mesh(
         mesh_utils.create_device_mesh((num_of_partitions, 1)),
         axis_names=("x", "y"),
     )
 
-    self.y_sharding = jsharding.NamedSharding(self._mesh, P(None, "x"))
-    self.x_sharding = jsharding.NamedSharding(self._mesh, P("x"))
-    self.replicated = jsharding.NamedSharding(self._mesh, P())
+    self.y_sharding = jsharding.NamedSharding(self.mesh, P(None, "x"))
+    self.x_sharding = jsharding.NamedSharding(self.mesh, P("x"))
+    self.replicated = jsharding.NamedSharding(self.mesh, P())
 
     if data.shard_on_batch:
       cache_sharding_axis = 0
@@ -147,16 +168,18 @@ class JetEngineEnvironment:
     # pylint: disable-next=all
     tensor._elem = jax.lax.with_sharding_constraint(tensor._elem, sharding_spec)
 
-  def sharding_by_axis(self, axis):
+  def partition_by_axis(self, axis=None):
     """return sharding partition spc by axis, options are x, y, -1 or Noe"""
     if axis == -1 or axis is None:
-      return jsharding.NamedSharding(self._mesh, jax.sharding.PartitionSpec())
+      return jax.sharding.PartitionSpec()
     sharding = [None] * (axis + 1)
     sharding[axis] = "x"
-    sharding_spec = jsharding.NamedSharding(
-        self._mesh, jax.sharding.PartitionSpec(*sharding)
-    )
+    sharding_spec = jax.sharding.PartitionSpec(*sharding)
     return sharding_spec
+
+  def sharding_by_axis(self, axis):
+    """return sharding partition spc by axis, options are x, y, -1 or Noe"""
+    return jsharding.NamedSharding(self.mesh, self.partition_by_axis(axis))
 
   def make_caches_prefill(self):
     """Create kv caches for inference prefill"""
@@ -171,7 +194,7 @@ class JetEngineEnvironment:
     shape = self._data.cache_shape
 
     for _ in range(self.num_layers):
-      if self.enable_kv_quantization:
+      if self._data.quant_config.enable_kv_quantization:
         caches.append(
             cache_manager.Int8KVCacheGenerate.empty(
                 shape, self.cache_sharding, self.bf16_enable

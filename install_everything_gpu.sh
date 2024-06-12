@@ -25,7 +25,7 @@ pip show tensorflow-text && pip uninstall -y tensorflow-text
 pip show torch_xla2 && pip uninstall -y torch_xla2
 
 pip install flax==0.8.3
-pip install jax[tpu]==0.4.28 -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+pip install -U "jax[cuda12]==0.4.28"
 pip install tensorflow-text
 pip install tensorflow
 

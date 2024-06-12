@@ -29,6 +29,7 @@ Follow the steps in
 ## Get the jetstream-pytorch code
 ```bash
 git clone https://github.com/google/jetstream-pytorch.git
+git checkout jetstream-v0.2.2
 ```
 
 (optional) Create a virtual env using `venv` or `conda` and activate it.
@@ -39,7 +40,6 @@ git clone https://github.com/google/jetstream-pytorch.git
 cd jetstream-pytorch
 source install_everything.sh
 ```
-NOTE: the above script will export PYTHONPATH, so sourcing will make it to take effect in the current shell
 
 # Download and convert weights
 
@@ -64,14 +64,24 @@ huggingface-cli download google/gemma-7b-pytorch --local-dir $input_ckpt_dir
 
 Need to manually modify the `config.json` in the checkpoint folder to make it a valid JSON file. (Replace `'` with `"`, remove the excessive `,` after the last item in the JSON object)
 
+## Mixtral
+### Get Mixtral Checkpoint from HuggingFace
+
+Please sign agreement on Huggingface website to access Mixtral checkpoints. Download Mixtral PyTorch checkpoint using huggingface-cli. Mixtral Tokenizer is included in the checkpoint.
+
+```bash
+huggingface-cli download mistralai/Mixtral-8x7B-v0.1 --local-dir $input_ckpt_dir
+```
+
 ## Run weight safetensor convert
 
 ```bash
 export input_ckpt_dir=Original llama weights directory
 export output_ckpt_dir=The output directory
-export quantize=True #whether to quantize
-export model_name="llama-3" # or "llama-2", "gemma"
-python -m convert_checkpoints --model_name=$model_name --input_checkpoint_dir=$input_ckpt_dir --output_checkpoint_dir=$output_ckpt_dir --quantize=$quantize
+export model_name="llama-3" # or "llama-2", "gemma", "mixtral"
+export quantize_weights=True # Whether to quantize weights
+export quantize_type="int8_per_channel" # "quantize_weights" needs to be turned on. Availabe quantize type: {"int8", "int4"} x {"per_channel", "blockwise"}, "int8_per_channel" is the default option if not specified.
+python -m convert_checkpoints --model_name=$model_name --input_checkpoint_dir=$input_ckpt_dir --output_checkpoint_dir=$output_ckpt_dir --quantize_type=$quantize_type
 ```
 
 
@@ -84,30 +94,40 @@ export tokenizer_path=tokenizer model file path
 
 ## Llama-2 7b
 ```bash
-python run_interactive.py --size=7b --model_name=$model_name --batch_size=128 --max_cache_length=2048 --quantize_weights=$quantize --quantize_kv_cache=$quantize --checkpoint_path=$output_ckpt_dir --tokenizer_path=$tokenizer_path --sharding_config=default_shardings/llama.yaml
+python run_interactive.py --size=7b --model_name=$model_name --batch_size=128 --max_cache_length=2048 --quantize_weights=$quantize --quantize_type=$quantize_type --quantize_kv_cache=$quantize --checkpoint_path=$output_ckpt_dir --tokenizer_path=$tokenizer_path --sharding_config=default_shardings/llama.yaml
 ```
 
 ## Llama-2 13b
 ```bash
-python run_interactive.py --size=13b --model_name=$model_name --batch_size=64 --max_cache_length=2048 --quantize_weights=$quantize --quantize_kv_cache=$quantize --checkpoint_path=$output_ckpt_dir --tokenizer_path=$tokenizer_path --sharding_config=default_shardings/llama.yaml
+python run_interactive.py --size=13b --model_name=$model_name --batch_size=64 --max_cache_length=2048 --quantize_weights=$quantize --quantize_type=$quantize_type --quantize_kv_cache=$quantize --checkpoint_path=$output_ckpt_dir --tokenizer_path=$tokenizer_path --sharding_config=default_shardings/llama.yaml
 ```
 
 ## Llama-3 8b
 ```bash
-python run_interactive.py --size=8b --model_name=$model_name --batch_size=128 --max_cache_length=2048 --quantize_weights=$quantize --quantize_kv_cache=$quantize --checkpoint_path=$output_ckpt_dir --tokenizer_path=$tokenizer_path --sharding_config=default_shardings/llama.yaml
+python run_interactive.py --size=8b --model_name=$model_name --batch_size=128 --max_cache_length=2048 --quantize_weights=$quantize --quantize_type=$quantize_type --quantize_kv_cache=$quantize --checkpoint_path=$output_ckpt_dir --tokenizer_path=$tokenizer_path --sharding_config=default_shardings/llama.yaml
+```
+
+## Llama-3 70b
+```bash
+python run_interactive.py --size=70b --model_name=$model_name --batch_size=8 --max_cache_length=2048 --quantize_weights=$quantize --quantize_type=$quantize_type --quantize_kv_cache=$quantize --checkpoint_path=$output_ckpt_dir --tokenizer_path=$tokenizer_path --sharding_config=default_shardings/llama.yaml
 ```
 
 ## Gemma 7b
 ```bash
-python run_interactive.py --model_name=$model_name --size=7b --batch_size=64 --max_cache_length=2048 --quantize_weights=$quantize --quantize_kv_cache=$quantize --checkpoint_path=$output_ckpt_dir --tokenizer_path=$tokenizer_path --sharding_config=default_shardings/$model_name.yaml
+python run_interactive.py --model_name=$model_name --size=7b --batch_size=64 --max_cache_length=2048 --quantize_weights=$quantize --quantize_type=$quantize_type --quantize_kv_cache=$quantize --checkpoint_path=$output_ckpt_dir --tokenizer_path=$tokenizer_path --sharding_config=default_shardings/$model_name.yaml
+```
+
+## Mixtral 8x7b
+```bash
+python run_interactive.py --model_name=$model_name --batch_size=128 --max_cache_length=2048 --quantize_weights=$quantize --quantize_type=$quantize_type --quantize_kv_cache=$quantize --checkpoint_path=$output_ckpt_dir --tokenizer_path=$tokenizer_path --sharding_config=default_shardings/$model_name.yaml
 ```
 
 
 # Run the server
-Here is an example to run the server with llama2 7B config. Note that the `--platform=tpu=8` need to specify number of tpu devices (which is 4 for v4-8 and 8 for v5light-8`).
+Here is an example to run the server with llama2 7B config.
 
 ```bash
-python run_server.py --param_size=7b --batch_size=128 --max_cache_length=2048 --quantize_weights=$quantize --quantize_kv_cache=$quantize --checkpoint_path=$output_ckpt_dir   --tokenizer_path=$tokenizer_path --platform=tpu=8 --model=$model_name --sharding_config="default_shardings/llama.yaml"
+python run_server.py --model_name=$model_name --size=7b --batch_size=128 --max_cache_length=2048 --quantize_weights=$quantize --quantize_type=$quantize_type --quantize_kv_cache=$quantize --checkpoint_path=$output_ckpt_dir   --tokenizer_path=$tokenizer_path --sharding_config="default_shardings/llama.yaml"
 ```
 
 Now you can fire gRPC to it.
@@ -120,6 +140,41 @@ Optional flags:
 
 * `--sharding_config=<path>` This makes use of alternative sharding config instead of
   the ones in default_shardings directory.
+
+
+# Run the server with ray
+Below are steps run server with ray:
+1. Ssh to Cloud Multiple Host TPU VM (v5e-16 TPU VM)
+2. Step 2 to step 5 in Outline 
+3. Setup ray cluster 
+4. Run server with ray
+
+## Setup Ray Cluster 
+Login host 0 VM, start ray head with below command: 
+
+```bash
+
+ray start --head
+
+```
+
+Login other host VMs, start ray head with below command:
+
+```bash
+
+ray start --address='$ip:$port'
+
+```
+
+Note: Get address ip and port information from ray head.
+
+## Run server with ray
+
+Here is an example to run the server with ray for llama2 7B model:
+
+```bash
+python run_server_with_ray.py --tpu_chips=16 -model_name=$model_name --size=7b --batch_size=96 --max_cache_length=2048 --quantize_weights=$quantize --quantize_type=$quantize_type --quantize_kv_cache=$quantize --checkpoint_path=$output_ckpt_dir   --tokenizer_path=$tokenizer_path --sharding_config="default_shardings/llama.yaml"
+```
 
 # Run benchmark
 Start the server and then go to the deps/JetStream folder (downloaded during `install_everything.sh`)

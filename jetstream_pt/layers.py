@@ -15,14 +15,32 @@
 # pylint: disable-all
 """This version contains modification to make it easier to trace and support batch."""
 
-import math
 from typing import Optional, Tuple
 
-import torch
-from torch import nn
-import torch.nn.functional as F
 import jax
+from . import attention_kernel as ak
 import jax.numpy as jnp
+import torch
+import torch.nn.functional as F
+import torch_xla2
+from jax import lax
+from jetstream_pt import torchjax
+from jetstream_pt.quantize import (
+    dequantize_tensor,
+    load_q_weight_helper,
+    quantize_tensor,
+)
+from torch import nn
+from . import attention_kernel as ak
+
+
+def _calc_cosine_dist(x, y):
+  x = x.flatten().to(torch.float32)
+  y = y.flatten().to(torch.float32)
+  return (torch.dot(x, y) / (x.norm() * y.norm())).item()
+
+
+import numpy as np
 
 
 class Int8Embedding(torch.nn.Module):
@@ -42,9 +60,17 @@ class Int8Embedding(torch.nn.Module):
     return F.embedding(input, self.weight) * self.weight_scaler
 
 
-class WeightOnlyInt8Linear(torch.nn.Module):
+class WeightOnlyPerChannelQuantizedLinear(torch.nn.Module):
 
-  def __init__(self, in_features, out_features, bias=None, device=None):
+  def __init__(
+      self,
+      in_features,
+      out_features,
+      bias=False,
+      device=None,
+      is_symmetric=True,
+      n_bit=8,
+  ):
     super().__init__()
     self.in_features = in_features
     self.out_features = out_features
@@ -59,15 +85,260 @@ class WeightOnlyInt8Linear(torch.nn.Module):
     )
     self.register_buffer("weight_scaler", weight_scaler)
 
-    # if bias:
-    #   self.bias = torch.nn.Parameter(
-    #     torch.zeros((out_features, ),
-    #     dtype=torch.bfloat16, device=device))
-    # else:
-    #   self.register_parameter('bias', None)
+    self.is_symmetric = is_symmetric
+    if not is_symmetric:
+      zero_point = torch.ones(
+          (out_features,), dtype=torch.bfloat16, device=device
+      )
+      self.register_buffer("zero_point", zero_point)
+    else:
+      self.register_buffer("zero_point", None)
+
+    assert not bias, "Quantized Linear doesn't support bias."
+
+    self.n_bit = n_bit
+    # Flag to enable dequantize weight first, then do matmul. Useful for debugging.
+    self.run_fake_quantize = False
+
+  def _load_quantized_weights(self, w_q, scale, zp=None):
+    """
+    Load weights quantized by 'quantize_tensor'.
+    """
+    self.weight, self.weight_scaler, self.zero_point = load_q_weight_helper(
+        w_q, scale, zp, block_size=-1
+    )
+
+  def quantize_weight_from_nn_linear(self, weight):
+    assert weight.dim() == 2, "Expect 2D weight from torch.nn.Linear."
+    assert weight.shape == (
+        self.out_features,
+        self.in_features,
+    ), f"Got unexpected weight of shape {weight.shape}, expected weight shape ({self.out_features}, {self.in_features})."
+    w_q, scale, zp = quantize_tensor(
+        weight, (1,), self.n_bit, self.is_symmetric, block_size=-1
+    )
+    w_dq = dequantize_tensor(w_q, scale, zp)
+    self._load_quantized_weights(w_q, scale, zp)
 
   def forward(self, inputs):
-    return F.linear(inputs, self.weight) * self.weight_scaler
+    if not self.run_fake_quantize:
+      if self.is_symmetric:
+        return torch.mul(F.linear(inputs, self.weight), self.weight_scaler)
+      else:
+        out = torch.mul(F.linear(inputs, self.weight), self.weight_scaler)
+        zp_out = torch.einsum("...c,z->...z", inputs, self.zero_point)
+        return out - zp_out
+    else:
+      # Fake quantization, debugging purpose.
+      scaler = self.weight_scaler.unsqueeze(-1)
+      if not self.is_symmetric:
+        zero_point = self.zero_point.unsqueeze(-1) / scaler
+      else:
+        zero_point = None
+      w_dequantized = dequantize_tensor(
+          self.weight.to(torch.bfloat16), scaler, zero_point
+      )
+      return F.linear(inputs, w_dequantized)
+
+
+class WeightOnlyBlockwiseQuantizedLinear(torch.nn.Module):
+
+  def __init__(
+      self,
+      in_features,
+      out_features,
+      bias=False,
+      device=None,
+      is_symmetric=True,
+      use_dot_general=False,
+      block_size=128,
+      n_bit=8,
+  ):
+    super().__init__()
+    self.in_features = in_features
+    self.out_features = out_features
+
+    # Use dot general instead of einsum
+    # Use dot general is slow now.
+    self.use_dot_general = use_dot_general
+    # Flatten einsum operands to 3D. XLA was slow if operands are 4D. But it's fixed now.
+    # Same perf as non flattened one now.
+    self.flatten = False
+
+    self.block_size = block_size
+    n_blocks = in_features // block_size
+
+    if self.use_dot_general:
+      weight = torch.ones(
+          (n_blocks, out_features, block_size), dtype=torch.int8, device=device
+      )
+    else:
+      weight = torch.ones(
+          (n_blocks, block_size, out_features), dtype=torch.int8, device=device
+      )
+    self.register_buffer("weight", weight)
+
+    weight_scaler = torch.ones(
+        (n_blocks, out_features), dtype=torch.bfloat16, device=device
+    )
+    self.register_buffer("weight_scaler", weight_scaler)
+
+    self.is_symmetric = is_symmetric
+    if not self.is_symmetric:
+      zero_point = torch.ones(
+          (n_blocks, out_features), dtype=torch.bfloat16, device=device
+      )
+      self.register_buffer("zero_point", zero_point)
+    else:
+      self.register_buffer("zero_point", None)
+
+    self.n_bit = n_bit
+    # Flag to enable dequantize weight first, then do matmul. Useful for debugging.
+    self.run_fake_quantize = False
+
+  def _load_quantized_weights(self, w_q, scale, zp=None):
+    """
+    Load weights quantized by 'quantize_tensor'.'
+    """
+    self.weight, self.weight_scaler, self.zero_point = load_q_weight_helper(
+        w_q, scale, zp, self.block_size
+    )
+
+  def quantize_weight_from_nn_linear(self, weight):
+    assert weight.dim() == 2, "Expect 2D weight from torch.nn.Linear."
+    assert weight.shape == (
+        self.out_features,
+        self.in_features,
+    ), f"Unexpected weight shape ({self.out_features}, {self.in_features})."
+    w_q, scale, zp = quantize_tensor(
+        weight, (1,), self.n_bit, self.is_symmetric, self.block_size
+    )
+    w_dq = dequantize_tensor(w_q, scale, zp)
+    print("check qweight cosine dist: ", _calc_cosine_dist(weight, w_dq))
+    # breakpoint()
+    self._load_quantized_weights(w_q, scale, zp)
+
+  @staticmethod
+  def blockwise_jax_kernel(inputs, weight, weight_scaler, zero_point):
+    """Blockwise Matmul kernel impl in JAX using einsum"""
+    weight = weight.astype(jnp.int8)
+    block_size = weight.shape[1]
+    inputs_shape = inputs.shape
+    inputs_new_shape = inputs_shape[:-1] + (
+        inputs_shape[-1] // block_size,
+        block_size,
+    )
+    inputs = inputs.reshape(inputs_new_shape)
+    out = jnp.einsum("scz,bdsc->bdsz", weight, inputs)
+    out = jnp.einsum("bdsz,sz->bdz", out, weight_scaler)
+    if zero_point is not None:
+      zp_out = jnp.einsum("bdsc,sz->bdz", inputs, zero_point)
+      out = out - zp_out
+    return out
+
+  @staticmethod
+  def blockwise_jax_kernel_dot_general(
+      inputs, weight, weight_scaler, zero_point
+  ):
+    """Blockwise Matmul kernel impl in JAX using dot general"""
+    inputs_shape = inputs.shape
+    block_size = weight.shape[2]
+    bs = inputs_shape[0]
+    inputs_new_shape = inputs_shape[:-1] + (
+        inputs_shape[-1] // block_size,
+        block_size,
+    )
+    inputs = inputs.reshape(inputs_new_shape)
+    inputs = jax.lax.collapse(inputs, 0, 2)
+    out = jax.lax.dot_general(
+        inputs, weight, dimension_numbers=([(2), (2)], [(1), (0)])
+    )
+    out = jax.lax.dot_general(
+        out, weight_scaler, dimension_numbers=([(0), (0)], [(2), (1)])
+    )
+    out = jax.lax.transpose(out, [1, 0])
+    out = out.reshape((bs, -1) + out.shape[1:])
+    return out
+
+  @staticmethod
+  def blockwise_jax_kernel_einsum_flatten(
+      inputs, weight, weight_scaler, zero_point
+  ):
+    """Blockwise Matmul kernel impl in JAX using einsum, with operands flattened"""
+    weight = weight.astype(jnp.int8)
+    block_size = weight.shape[1]
+    inputs_shape = inputs.shape
+    bs = inputs_shape[0]
+    inputs_new_shape = inputs_shape[:-1] + (
+        inputs_shape[-1] // block_size,
+        block_size,
+    )
+    inputs = inputs.reshape(inputs_new_shape)
+    inputs = jax.lax.collapse(inputs, 0, 2)
+    out = jnp.einsum("scz,bsc->bsz", weight, inputs)
+    out = jnp.einsum("bsz,sz->bz", out, weight_scaler)
+    out = out.reshape((bs, -1) + out.shape[1:])
+    return out
+
+  def forward(self, inputs):
+    if not self.run_fake_quantize:
+      if self.use_dot_general:
+        assert (
+            self.zero_point is None
+        ), "Blockwise quantized linear doesn't support zero_point in dot_general implementation."
+        return torchjax.call_jax(
+            WeightOnlyBlockwiseQuantizedLinear.blockwise_jax_kernel_dot_general,
+            inputs,
+            self.weight,
+            self.weight_scaler,
+            self.zero_point,
+        )
+      if self.flatten:
+        assert (
+            self.zero_point is None
+        ), "Blockwise quantized linear doesn't support zero_point in einsum (flattened) implementation."
+        return torchjax.call_jax(
+            WeightOnlyBlockwiseQuantizedLinear.blockwise_jax_kernel_einsum_flatten,
+            inputs,
+            self.weight,
+            self.weight_scaler,
+            self.zero_point,
+        )
+      else:
+        return torchjax.call_jax(
+            WeightOnlyBlockwiseQuantizedLinear.blockwise_jax_kernel,
+            inputs,
+            self.weight,
+            self.weight_scaler,
+            self.zero_point,
+        )
+    else:
+      # Fake quantization, debugging purpose.
+      weight = self.weight.permute(2, 0, 1).to(torch.bfloat16)
+      scaler = self.weight_scaler.unsqueeze(-1).transpose(1, 0)
+      if not self.is_symmetric:
+        zero_point = self.zero_point.unsqueeze(-1).transpose(1, 0) / scaler
+      else:
+        zero_point = None
+      w_dequantized = dequantize_tensor(self.weight, scaler, zero_point)
+      w_dequantized = w_dequantized.reshape(w_dequantized.shape[0], -1)
+      return F.linear(inputs, w_dequantized)
+
+
+def get_quantized_linear_layer(config: "QuantizationConfig"):
+  if not config.enable_weight_quantization:
+    return nn.Linear
+  if config.is_blockwise_weight:
+    return WeightOnlyBlockwiseQuantizedLinear
+  else:
+    return WeightOnlyPerChannelQuantizedLinear
+
+
+def get_quantized_enbedding_layer(config: "QuantizationConfig"):
+  if not config.enable_weight_quantization:
+    return nn.Embedding
+  else:
+    return Int8Embedding
 
 
 class RMSNorm(torch.nn.Module):
@@ -132,8 +403,29 @@ class AttentionKernel:
 
   def __init__(self, env):
     self.env = env
+    self.shard_axis = 0 if self.env.shard_on_batch else 1
+    qkv_pspec = self.env.partition_by_axis(self.shard_axis)  # Number of heads
+    others_pspec = self.env.partition_by_axis()
+    self.dense_attention = ak.dense_attention
+    self.ragged_attention = ak.RaggedAttentionKernel(
+        env,
+        input_specs=(*([qkv_pspec] * 3), *([others_pspec] * 4)),
+        output_specs=(qkv_pspec, (others_pspec, others_pspec)),
+        sharding_axis=self.shard_axis,
+    )
 
-  def __call__(self, xq, xk, xv, mask, cache):
+  def __call__(
+      self,
+      xq,
+      xk,
+      xv,
+      mask,
+      cache,
+      start=None,
+      end=None,
+      ragged_batch_index=None,
+      ragged_block_index=None,
+  ):
     """
     Args:
       xq: torch.Tensor of (batch size, num_heads, seqlen, head_dim)
@@ -145,35 +437,34 @@ class AttentionKernel:
     bsz, num_heads, seqlen, head_dim = xq.shape
     _, num_kv_heads, _, kv_head_dim = xk.shape
     n_rep = num_heads // num_kv_heads
-    if seqlen == 1:
+    if not self.env.ragged_mha and seqlen == 1:
       xq = torch.broadcast_to(xq, (xq.shape[0], xq.shape[1], 2, xq.shape[3]))
 
     with jax.named_scope("attn_insert_cache"):
       keys, values = cache.update(xk, xv)
       keys = repeat_kv(keys, n_rep)
       values = repeat_kv(values, n_rep)
-    with jax.named_scope("attn_mat1"):
-      ## Attention start
-      # scores = torch.einsum(jnp.einsum, "ijkl,ikml->ikjm", xq, keys) / math.sqrt(self.head_dim)
-      scores = torch.einsum("ikjl,ikml->ikjm", xq, keys) / math.sqrt(head_dim)
-      if mask is not None:
-        # if mask.shape != (1,1,16,16):
-        #   breakpoint()
-        scores = scores + mask  # (bs, n_local_heads, seqlen, max_seqlen)
-    with jax.named_scope("attn_soft"):
-      scores = F.softmax(scores.float(), dim=-1).type_as(xq)
 
-    with jax.named_scope("attn_mat2"):
-      # output = torch.einsum(
-      #    "ikjm,ikml->ikjl", scores, values
-      # )  # (bs, n_local_heads, seqlen, head_dim)
-      output = torch.einsum("ikjm,ikml->ikjl", scores, values)
-      if seqlen == 1:
+    with jax.named_scope("attn_qkv"):
+      if self.env.ragged_mha and seqlen == 1:
+        output, _ = torch_xla2.interop.call_jax(
+            self.ragged_attention,
+            xq,
+            keys,
+            values,
+            start,
+            end,
+            ragged_batch_index,
+            ragged_block_index,
+        )
+      else:
+        output = self.dense_attention(xq, keys, values, None, None, mask)
+
+      if not self.env.ragged_mha and seqlen == 1:
         output = output[:, :, 0:1, :]
       # For XLA matmul performance boost
       # output = torch.matmul(scores, values)
-      shard_axis = 0 if self.env.shard_on_batch else 1
-      self.env.apply_sharding(output, axis=shard_axis)
+      self.env.apply_sharding(output, axis=self.shard_axis)
       return output
 
 
@@ -181,8 +472,29 @@ class Int8KVAttentionKernel:
 
   def __init__(self, env):
     self.env = env
+    self.shard_axis = 0 if self.env.shard_on_batch else 1
+    qkv_pspec = self.env.partition_by_axis(self.shard_axis)  # Number of heads
+    others_pspec = self.env.partition_by_axis()
+    self.dense_attention = ak.dense_attention
+    self.ragged_attention = ak.RaggedAttentionKernel(
+        env,
+        input_specs=(*([qkv_pspec] * 3), *([others_pspec] * 6)),
+        output_specs=(qkv_pspec, (others_pspec, others_pspec)),
+        sharding_axis=self.shard_axis,
+    )
 
-  def __call__(self, xq, xk, xv, mask, cache):
+  def __call__(
+      self,
+      xq,
+      xk,
+      xv,
+      mask,
+      cache,
+      start=None,
+      end=None,
+      ragged_batch_index=None,
+      ragged_block_index=None,
+  ):
     """
     Args:
       xq: torch.Tensor of (batch size, num_heads, seqlen, head_dim)
@@ -194,37 +506,38 @@ class Int8KVAttentionKernel:
     bsz, num_heads, seqlen, head_dim = xq.shape
     _, num_kv_heads, _, kv_head_dim = xk.shape
     n_rep = num_heads // num_kv_heads
-    if seqlen == 1:
+
+    if not self.env.ragged_mha and seqlen == 1:
       xq = torch.broadcast_to(xq, (xq.shape[0], xq.shape[1], 2, xq.shape[3]))
 
     with jax.named_scope("attn_insert_cache"):
       keys, values, k_scaler, v_scaler = cache.update(xk, xv)
       keys = repeat_kv(keys, n_rep)
       values = repeat_kv(values, n_rep)
-    with jax.named_scope("attn_mat1"):
-      ## Attention start
-      # scores = torch.einsum(jnp.einsum, "ijkl,ikml->ikjm", xq, keys) / math.sqrt(self.head_dim)
-      scores = (
-          torch.einsum("ikjl,ikml->ikjm", xq, keys)
-          / math.sqrt(head_dim)
-          * (k_scaler.reshape(bsz, 1, 1, keys.shape[2]))
-      )
-      if mask is not None:
-        scores = scores + mask  # (bs, n_local_heads, seqlen, max_seqlen)
-    with jax.named_scope("attn_soft"):
-      scores = F.softmax(scores.float(), dim=-1).type_as(xq)
-      scores = scores * v_scaler.reshape((bsz, 1, 1, keys.shape[2]))
 
-    with jax.named_scope("attn_mat2"):
-      # output = torch.einsum(
-      #    "ikjm,ikml->ikjl", scores, values
-      # )  # (bs, n_local_heads, seqlen, head_dim)
-      output = torch.einsum("ikjm,ikml->ikjl", scores, values)
-      if seqlen == 1:
+    with jax.named_scope("attn_qkv"):
+      if self.env.ragged_mha and seqlen == 1:
+        output, _ = torch_xla2.interop.call_jax(
+            self.ragged_attention,
+            xq,
+            keys,
+            values,
+            start,
+            end,
+            ragged_batch_index,
+            ragged_block_index,
+            k_scaler,
+            v_scaler,
+        )
+      else:
+        output = self.dense_attention(
+            xq, keys, values, k_scaler, v_scaler, mask
+        )
+
+      if not self.env.ragged_mha and seqlen == 1:
         output = output[:, :, 0:1, :]
-      # output = torch.matmul(scores, values)
-      shard_axis = 0 if self.env.shard_on_batch else 1
-      self.env.apply_sharding(output, axis=shard_axis)
+
+      self.env.apply_sharding(output, axis=self.shard_axis)
       return output
 
 
@@ -240,9 +553,7 @@ class Attention(nn.Module):
     self.env = env
     self.hidden_size = hidden_size
 
-    LinearLayer = (
-        WeightOnlyInt8Linear if env.enable_weight_quantization else nn.Linear
-    )
+    LinearLayer = get_quantized_linear_layer(env.quant_config)
 
     self.wo = LinearLayer(
         n_heads * self.head_dim,
@@ -252,7 +563,9 @@ class Attention(nn.Module):
     )
 
     Kernel = (
-        Int8KVAttentionKernel if env.enable_kv_quantization else AttentionKernel
+        Int8KVAttentionKernel
+        if env.quant_config.enable_kv_quantization
+        else AttentionKernel
     )
     self.attention_kernel = Kernel(env)
 
@@ -299,8 +612,11 @@ class Attention(nn.Module):
       freqs_cis: torch.Tensor,
       mask: Optional[torch.Tensor],
       cache,
+      start=None,
+      end=None,
+      ragged_batch_index=None,
+      ragged_block_index=None,
   ):
-    # bsz, seqlen, _ = x.shape
     with jax.named_scope("attn_linear_before_cache"):
       bsz, seqlen = x.shape[0], x.shape[-2]
 
@@ -327,6 +643,16 @@ class Attention(nn.Module):
     xv = xv.transpose(1, 2)
     xq = xq.transpose(1, 2)
 
-    output = self.attention_kernel(xq, xk, xv, mask, cache)
+    output = self.attention_kernel(
+        xq,
+        xk,
+        xv,
+        mask,
+        cache,
+        start,
+        end,
+        ragged_batch_index,
+        ragged_block_index,
+    ).type_as(xq)
     output = output.transpose(-3, -2).contiguous().view(bsz, seqlen, -1)
     return self.wo(output)

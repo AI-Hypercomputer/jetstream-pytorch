@@ -14,17 +14,15 @@ It serves 2 purposes:
 import torch_xla2
 import torch_xla2.interop
 
-jax_mode = torch_xla2.default_env()
-
 call_jax = torch_xla2.interop.call_jax
 call_torch = torch_xla2.interop.call_torch
 
 
 def to_torch(tensors):
   """Wrap a jax Array into XLATensor."""
-  return jax_mode.j2t_iso(tensors)
+  return torch_xla2.default_env().j2t_iso(tensors)
 
 
 def from_torch(tensors):
   """Unwrap a XLATensor into jax Array."""
-  return jax_mode.t2j_iso(tensors)
+  return torch_xla2.default_env().t2j_iso(tensors)

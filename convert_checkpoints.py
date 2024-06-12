@@ -26,18 +26,22 @@ import gc
 import hashlib
 import json
 import os
+import re
 import time
 
-from absl import app
-from absl import flags
-from etils import epath
-
-from safetensors.torch import save_file
 import torch
+import torch.utils._pytree as pytree
+from absl import app, flags
+from etils import epath
 from google.cloud import storage
-
 from jetstream_pt import quantize
+from jetstream_pt.config import FLAGS
+from jetstream_pt.third_party.gemma import model as gemma_model
+from jetstream_pt.third_party.llama import model_exportable as llama_model
+from jetstream_pt.third_party.mixtral import model as mixtral_model
 
+from safetensors import safe_open
+from safetensors.torch import save_file
 
 _INPUT_CHECKPOINT_DIR = epath.DEFINE_path(
     "input_checkpoint_dir",
@@ -68,67 +72,66 @@ _OUTPUT_SAFETENSORS = flags.DEFINE_bool(
     True,
     "When set to true, save to HugginFace SafeTensors format",
 )
-_QUANTIZE = flags.DEFINE_bool(
-    "quantize", False, "When set to true, produces quantized weights"
+
+_FROM_HF = flags.DEFINE_bool(
+    "from_hf",
+    False,
+    "Set to True if the input is a HuggingFace checkpoint.",
 )
-_MODEL_TYPE = flags.DEFINE_string("model_name", "llama", "Type of the model.")
-
-# ParallelEmbedding is col partitioned across the shards.
-# ColumnParallelLinear is row partitioned across shards due to transpose.
-# RowParallelLinear is col partitioned across shards due to transpose.
-# None is no partitioning and tensor should be identical across shards
-_WEIGHT_SHARDING_TYPE = {
-    "tok_embeddings.weight": "ParallelEmbedding",
-    "rope.freqs": None,
-    "attention.wq.weight": "ColumnParallelLinear",
-    "attention.wk.weight": "ColumnParallelLinear",
-    "attention.wv.weight": "ColumnParallelLinear",
-    "attention.wo.weight": "RowParallelLinear",
-    "feed_forward.w1.weight": "ColumnParallelLinear",
-    "feed_forward.w2.weight": "RowParallelLinear",
-    "feed_forward.w3.weight": "ColumnParallelLinear",
-    "attention_norm.weight": None,
-    "ffn_norm.weight": None,
-    "norm.weight": None,
-    "output.weight": "ColumnParallelLinear",
-}
-
-_LLAMA_QUANTIZED_WEIGHTS_TO_SCALER_NAME = {
-    "tok_embeddings.weight": "tok_embeddings.weight_scaler",
-    "attention.wq.weight": "attention.wq.weight_scaler",
-    "attention.wk.weight": "attention.wk.weight_scaler",
-    "attention.wv.weight": "attention.wv.weight_scaler",
-    "attention.wo.weight": "attention.wo.weight_scaler",
-    "feed_forward.w1.weight": "feed_forward.w1.weight_scaler",
-    "feed_forward.w2.weight": "feed_forward.w2.weight_scaler",
-    "feed_forward.w3.weight": "feed_forward.w3.weight_scaler",
-    "output.weight": "output.weight_scaler",
-}
-
-_GEMMA_QUANTIZED_WEIGHTS_TO_SCALER_NAME = {
-    "self_attn.o_proj.weight": "self_attn.o_proj.weight_scaler",
-    "self_attn.wq.weight": "self_attn.wq.weight_scaler",
-    "self_attn.wk.weight": "self_attn.wk.weight_scaler",
-    "self_attn.wv.weight": "self_attn.wv.weight_scaler",
-    "mlp.gate_proj.weight": "mlp.gate_proj.weight_scaler",
-    "mlp.up_proj.weight": "mlp.up_proj.weight_scaler",
-    "mlp.down_proj.weight": "mlp.down_proj.weight_scaler",
-    "embedder.weight": "embedder.weight_scaler",
-}
 
 
-def _quantize_state_dict(state_dict, weight_map, weight_axis):
+def _find_scale_name(name, map):
+  for key, val in map.items():
+    if name.endswith(key):
+      return key, val
+  return "", ""
+
+
+def _quantize_state_dict(
+    state_dict,
+    linear_weight_map,
+    embedding_weight_names,
+    weight_axis,
+    n_bit,
+    is_blockwise,
+):
   updated_weights = {}
-  for key, val in state_dict.items():
-    for qname, qscale_name in weight_map.items():
-      if key.endswith(qname):
-        new_weights, scaler = quantize.quantize_torch_int8(
-            val, reduce_axis=(weight_axis(key),)
-        )
-        updated_weights[key] = new_weights
-        scale_name = key[: -len(qname)] + qscale_name
-        updated_weights[scale_name] = scaler.squeeze()
+  block_size = 128 if is_blockwise else -1
+  for name, val in state_dict.items():
+    name_suffix, qscale_name = _find_scale_name(name, embedding_weight_names)
+    is_embedding = qscale_name != ""
+    if is_embedding:
+      # Embedding layers do not support blockwise and int4 quant now.
+      # Quantize to per-channel int8 for now.
+      orig_block_size = block_size
+      block_size = -1
+      orig_n_bit = n_bit
+      n_bit = 8
+    else:
+      name_suffix, qscale_name = _find_scale_name(name, linear_weight_map)
+    if qscale_name != "":
+      new_weights, scaler, _ = quantize.quantize_tensor(
+          val,
+          reduce_axis=(weight_axis(name),),
+          n_bit=n_bit,
+          block_size=block_size,
+      )
+      new_weights, scaler, _ = quantize.load_q_weight_helper(
+          new_weights, scaler, zp=None, block_size=block_size
+      )
+      updated_weights[name] = new_weights
+      scale_name = name[: -len(name_suffix)] + qscale_name
+      updated_weights[scale_name] = scaler.squeeze()
+      if is_embedding:
+        block_size = orig_block_size
+        n_bit = orig_n_bit
   state_dict.update(updated_weights)
+  for k, v in state_dict.items():
+    if "layers" in k and "layers.0" not in k:
+      continue
+    print(
+        f"After quantization the converted key: {k} and value: {v.shape} {v.dtype}"
+    )
   return state_dict
 
 
@@ -192,17 +195,21 @@ def _merge_llama_weights(
         f"{len(tensors)} shards (shape = {tensors[0].shape}) for {key})"
     )
     state_dict_for_key = {}
-    for pattern, kind in _WEIGHT_SHARDING_TYPE.items():
+
+    weight_sharding_type = llama_model.Transformer.get_weight_sharding_type(
+        model_name=FLAGS.model_name
+    ).items()
+    for pattern, kind in weight_sharding_type:
       if not key.endswith(pattern):
         continue
       with torch.no_grad():
         if kind in ("ParallelEmbedding", "RowParallelLinear"):
           state_dict_for_key[key] = torch.cat(tensors, 1)
-        elif kind == "ColumnParallelLinear":
+        elif kind in ("ColumnParallelLinear", "VocabParallelEmbedding"):
           state_dict_for_key[key] = torch.cat(tensors, 0)
         else:
           if not all(
-              torch.allclose(tensors[0], tensor, atol=1e-6)
+              torch.allclose(tensors[0], tensor, atol=1e-2)
               for tensor in tensors[1:]
           ):
             raise ValueError(
@@ -262,7 +269,7 @@ def _load_from_gcs(input_ckpt_dir: epath.Path):
   return checkpoints, params
 
 
-def _load_from_local(input_ckpt_dir: epath.Path):
+def _load_orig_llama_weight(input_ckpt_dir: epath.Path):
   checkpoints = []
   params = json.loads((input_ckpt_dir / "params.json").read_text())
 
@@ -278,6 +285,84 @@ def _load_from_local(input_ckpt_dir: epath.Path):
   return checkpoints, params
 
 
+def _load_hf_llama_weight(input_ckpt_dir: epath.Path):
+  print(f"Loading checkpoint files from {input_ckpt_dir}.")
+  safetensors_files = list(input_ckpt_dir.glob("*.safetensors"))
+  if len(list(safetensors_files)) == 0:
+    raise ValueError(
+        f"No *.safetensors found in the input dir {input_ckpt_dir}"
+    )
+  checkpoint = {}
+  for st_f in safetensors_files:
+    with safe_open(st_f, framework="pt", device="cpu") as f:
+      for key in f.keys():
+        if "inv_freq" in key:
+          # Don't include 'rotary_emb.inv_freq' in the converted
+          # checkpoint, because in JetStream implementation we
+          # precompute it during weight loading.
+          continue
+        new_key = key
+        # Remove 'model.' prefix for all weights.
+        prefix_to_remove = "model."
+        if key.startswith(prefix_to_remove):
+          new_key = new_key.removeprefix(prefix_to_remove)
+
+        # Weight name substring mapping between hf and jetstream.
+        _load_hf_llama_weight.hf_to_jetstream_keys_mapping = {
+            "lm_head": "output",
+            "embed_tokens": "tok_embeddings",
+            "input_layernorm": "attention_norm",
+            "post_attention_layernorm": "ffn_norm",
+            "self_attn.q_proj": "attention.wq",
+            "self_attn.k_proj": "attention.wk",
+            "self_attn.v_proj": "attention.wv",
+            "self_attn.o_proj": "attention.wo",
+            "mlp.gate_proj": "feed_forward.w1",
+            "mlp.down_proj": "feed_forward.w2",
+            "mlp.up_proj": "feed_forward.w3",
+            "model.norm.weight": "norm.weight",
+        }
+        found_substute = False
+        for (
+            hf_weight_key
+        ) in _load_hf_llama_weight.hf_to_jetstream_keys_mapping.keys():
+          if hf_weight_key in key:
+            jet_stream_key = _load_hf_llama_weight.hf_to_jetstream_keys_mapping[
+                hf_weight_key
+            ]
+            new_key = new_key.replace(hf_weight_key, jet_stream_key)
+            found_substute = True
+            break
+        assert found_substute, f"No substitute name found for {key}."
+        print(f"convert weight name {key} to {new_key}.")
+        weight_tensor = f.get_tensor(key)
+        if weight_tensor.dtype == torch.float16:
+          # JetStream expects bf16 weight, since activation is in bf16
+          # float16 x bf16 will hit mix precision assertion.
+          weight_tensor = weight_tensor.to(torch.bfloat16)
+          print(f"convert weight name {new_key} from float16 to bfloat16.")
+        if "wq" in new_key or "wk" in new_key:
+          # In HF weight, wq and wk are interleaved differently
+          weight_shape = weight_tensor.shape
+          weight_tensor = (
+              weight_tensor.reshape(-1, 2, 64, weight_shape[1])
+              .transpose(1, 2)
+              .reshape(weight_shape)
+          )
+        checkpoint[new_key] = weight_tensor
+  return [checkpoint], None
+
+
+def _load_from_local(input_ckpt_dir: epath.Path):
+  if not _FROM_HF.value:
+    return _load_orig_llama_weight(input_ckpt_dir)
+  else:
+    assert (
+        not FLAGS.quantize_weights
+    ), "Quantization not supported for HF checkpoint."
+    return _load_hf_llama_weight(input_ckpt_dir)
+
+
 def _export_to_gcs(output_ckpt_dir: epath.Path, params, state_dict):
   # pylint: disable-next=all
   bucket_name, output_ckpt = str(output_ckpt_dir).split("//")[-1].split("/", 1)
@@ -286,11 +371,12 @@ def _export_to_gcs(output_ckpt_dir: epath.Path, params, state_dict):
   bucket = storage_client.bucket(bucket_name)
 
   ckpt_blob = bucket.blob(os.path.join(output_ckpt, "consolidated.00.pth"))
-  param_blob = bucket.blob(os.path.join(output_ckpt, "params.json"))
   checklist_blob = bucket.blob(os.path.join(output_ckpt, "checklist.chk"))
-  with param_blob.open("w") as f:
-    f.write(json.dumps(params))
-    f.close()
+  if params is not None:
+    param_blob = bucket.blob(os.path.join(output_ckpt, "params.json"))
+    with param_blob.open("w") as f:
+      f.write(json.dumps(params))
+      f.close()
   with ckpt_blob.open("w") as f:
     torch.save(state_dict, f)
     f.close()
@@ -301,8 +387,15 @@ def _export_to_gcs(output_ckpt_dir: epath.Path, params, state_dict):
 
 def _export_to_local(output_ckpt_dir: epath.Path, params, state_dict):
   output_ckpt_dir.mkdir(parents=True, exist_ok=True)
-  (output_ckpt_dir / "params.json").write_text(json.dumps(params))
+  if params is not None:
+    (output_ckpt_dir / "params.json").write_text(json.dumps(params))
   if _OUTPUT_SAFETENSORS.value:
+    # safetensors.torch.save_file expects tensor to be contiguous.
+    state_dict = pytree.tree_map_only(
+        torch.Tensor,
+        lambda t: t.contiguous() if not t.is_contiguous() else t,
+        state_dict,
+    )
     save_file(state_dict, os.fspath(output_ckpt_dir / "model.safetensors"))
   else:
     torch.save(state_dict, os.fspath(output_ckpt_dir / "consolidated.00.pth"))
@@ -335,6 +428,13 @@ def _get_llama_state_dict(input_ckpt_dir):
   return state_dict, params
 
 
+def fix_json(text):
+  text = text.replace("'", '"')
+  lines = text.split("\n")
+  lines[-3] = lines[-3].replace(",", "")
+  return "\n".join(lines)
+
+
 def _get_gemma_state_dict(input_ckpt_dir):
   ckpt_file = list(input_ckpt_dir.glob("*.ckpt"))
   assert len(ckpt_file) == 1, "only expect 1 ckpt file for Gemma model."
@@ -342,7 +442,8 @@ def _get_gemma_state_dict(input_ckpt_dir):
   state_dict = torch.load(str(ckpt_file), map_location=torch.device("cpu"))[
       "model_state_dict"
   ]
-  model_config = json.loads((input_ckpt_dir / "config.json").read_text())
+  config_text = fix_json((input_ckpt_dir / "config.json").read_text())
+  model_config = json.loads(config_text)
   for key in list(state_dict.keys()):
     if state_dict[key].dtype.is_complex and _OUTPUT_SAFETENSORS.value:
       assert (
@@ -378,22 +479,129 @@ def _get_gemma_state_dict(input_ckpt_dir):
   return state_dict, model_config
 
 
+def _get_mixtral_state_dict(input_ckpt_dir):
+  ckpt_files = list(input_ckpt_dir.glob("*.pt"))
+  assert len(ckpt_files) == 8, "only expect 8 ckpt file for Mistral model."
+
+  start = time.perf_counter()
+  state_dict = {}
+  for file in sorted(ckpt_files):
+    ckpt = torch.load(
+        str(file), map_location="cpu", mmap=True, weights_only=True
+    )
+    state_dict.update(ckpt)
+  end = time.perf_counter()
+  print(f"Loading checkpoints takes {end - start} seconds")
+
+  for k, v in state_dict.items():
+    if "layers" in k and "layers.0" not in k:
+      continue
+    print(f"The loaded key: {k} and value: {v.shape} {v.dtype}")
+
+  config = json.loads((input_ckpt_dir / "config.json").read_text())
+  print(f"Loaded config: {config}")
+  weight_map = {
+      "layers.{}.block_sparse_moe.w1": "layers.{}.block_sparse_moe.cond_ffn.w1",
+      "layers.{}.block_sparse_moe.w2": "layers.{}.block_sparse_moe.cond_ffn.w2",
+      "layers.{}.block_sparse_moe.w3": "layers.{}.block_sparse_moe.cond_ffn.w3",
+  }
+  for key in list(state_dict.keys()):
+    if state_dict[key].dtype.is_complex and _OUTPUT_SAFETENSORS.value:
+      assert (
+          key == "freqs_cis"
+      ), "Only expect key 'freqs_cis' in the state_dict has complex dtype."
+      # Remove "freqs_cis" since it has complex dtype, and safetensor doesn't support it.
+      # The "freqs_cis" will be reconstructed when it's loaded by inference engine.
+      state_dict.pop(key)
+      continue
+    prefix_to_remove = "model."
+    new_key = key
+    if key.startswith(prefix_to_remove):
+      new_key = new_key.removeprefix(prefix_to_remove)
+
+    if "layers" in key:
+      abstract_key = re.sub(r".(\d+).", ".{}.", key)
+      layer_num = re.search(r"\d+", key).group(0)
+      new_key = weight_map.get(abstract_key)
+      if new_key is None:
+        continue
+      new_key = new_key.format(layer_num)
+
+    if new_key == key:
+      continue
+
+    if "w1" in key or "w3" in key:
+      state_dict[new_key] = (
+          state_dict.pop(key)
+          .reshape(
+              config["num_local_experts"],
+              config["intermediate_size"],
+              config["hidden_size"],
+          )
+          .contiguous()
+      )
+    elif "w2" in key:
+      state_dict[new_key] = (
+          state_dict.pop(key)
+          .reshape(
+              config["num_local_experts"],
+              config["intermediate_size"],
+              config["hidden_size"],
+          )
+          .permute(0, 2, 1)
+          .contiguous()
+      )
+    elif "gate" in key:
+      state_dict[new_key] = state_dict.pop(key).contiguous()
+    else:
+      state_dict[new_key] = state_dict.pop(key)
+  for k, v in state_dict.items():
+    if "layers" in k and "layers.0" not in k:
+      continue
+    print(f"The converted key: {k} and value: {v.shape} {v.dtype}")
+  return state_dict, config
+
+
 def main(argv) -> None:
   """merge weights"""
 
-  if _MODEL_TYPE.value == "gemma":
+  if FLAGS.model_name == "gemma":
     state_dict, params = _get_gemma_state_dict(_INPUT_CHECKPOINT_DIR.value)
-    quantize_weight_map = _GEMMA_QUANTIZED_WEIGHTS_TO_SCALER_NAME
-    weight_axis = lambda x: 0 if x == "embedder.weight" else 1
+    quantize_linear_weight_map = (
+        gemma_model.GemmaModel.get_quantized_linear_weight_to_scaler_map()
+    )
+    quantize_embedding_weight_map = (
+        gemma_model.GemmaModel.get_quantized_embedding_weight_to_scaler_map()
+    )
+  elif FLAGS.model_name == "mixtral":
+    state_dict, params = _get_mixtral_state_dict(_INPUT_CHECKPOINT_DIR.value)
+    quantize_linear_weight_map = (
+        mixtral_model.Transformer.get_quantized_linear_weight_to_scaler_map()
+    )
+    quantize_embedding_weight_map = (
+        mixtral_model.Transformer.get_quantized_embedding_weight_to_scaler_map()
+    )
   else:
     state_dict, params = _get_llama_state_dict(_INPUT_CHECKPOINT_DIR.value)
-    quantize_weight_map = _LLAMA_QUANTIZED_WEIGHTS_TO_SCALER_NAME
-    weight_axis = lambda x: 0 if x == "tok_embeddings.weight" else 1
+    quantize_linear_weight_map = (
+        llama_model.Transformer.get_quantized_linear_weight_to_scaler_map()
+    )
+    quantize_embedding_weight_map = (
+        llama_model.Transformer.get_quantized_embedding_weight_to_scaler_map()
+    )
 
-  if _QUANTIZE.value:
+  if FLAGS.quantize_weights:
+    quantize_num_bits = 8 if "int8" in FLAGS.quantize_type else 4
+    is_blockwise = "blockwise" in FLAGS.quantize_type
+    weight_axis = lambda x: 0 if x in quantize_embedding_weight_map else 1
     start = time.perf_counter()
     state_dict = _quantize_state_dict(
-        state_dict, quantize_weight_map, weight_axis
+        state_dict,
+        quantize_linear_weight_map,
+        quantize_embedding_weight_map,
+        weight_axis,
+        quantize_num_bits,
+        is_blockwise,
     )
     end = time.perf_counter()
     print(f"Quantizing weights takes {end - start} seconds")

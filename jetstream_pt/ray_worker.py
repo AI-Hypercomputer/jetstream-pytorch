@@ -13,36 +13,35 @@
 # limitations under the License.
 
 """Implement Jet Engine API."""
-import queue
-from typing import Any, List, Optional, Tuple, Union
-import threading
 import functools
 import os
+import queue
+import threading
+from typing import Any, List, Optional, Tuple, Union
+
 import humanize
-
-
-from etils import epath
-import safetensors
-from flax import struct
 import jax
-from jax import numpy as jnp
-from jax.experimental import multihost_utils
-import torch
 import numpy as np
 import ray
-from torch.utils import _pytree as pytree
+from ray.util.accelerators import tpu
+import safetensors
+import torch
 import torch_xla2
-
+from etils import epath
+from flax import struct
+from jax import numpy as jnp
+from jax.experimental import multihost_utils
+from torch.utils import _pytree as pytree
 from jetstream.engine import engine_api, tokenizer_pb2
-
-from jetstream_pt.third_party.llama import model_exportable, model_args
-
-from jetstream_pt import cache_manager
-from jetstream_pt import quantize
-from jetstream_pt import torchjax
-from jetstream_pt.environment import JetEngineEnvironment, JetEngineEnvironmentData
-from jetstream_pt.third_party.gemma import config as gemma_config, model as gemma_model
-
+from jetstream_pt import cache_manager, quantize, torchjax
+from jetstream_pt.environment import (
+    JetEngineEnvironment,
+    JetEngineEnvironmentData,
+    QuantizationConfig,
+)
+from jetstream_pt.third_party.gemma import config as gemma_config
+from jetstream_pt.third_party.gemma import model as gemma_model
+from jetstream_pt.third_party.llama import model_args, model_exportable
 
 Mesh = jax.sharding.Mesh
 P = jax.sharding.PartitionSpec
@@ -54,6 +53,14 @@ PrefillInputs = np.ndarray
 @struct.dataclass
 # pylint: disable-next=all
 class Prefix:
+  token: jax.Array  # [1, seqlen]
+  caches: List[Tuple[jax.Array, jax.Array]]
+  seq_len: int  # true seqlen front pad
+
+
+@struct.dataclass
+# pylint: disable-next=all
+class NpPrefix:
   token: jax.Array  # [1, seqlen]
   caches: List[Tuple[jax.Array, jax.Array]]
   seq_len: int  # true seqlen front pad
@@ -107,6 +114,8 @@ class PyTorchRayWorker:
       quantize_kv=False,
       max_cache_length=1024,
       sharding_config=None,    
+      enable_jax_profiler: bool = False,
+      jax_profiler_port: int = 9999,
       temperature=None,
       sampling_algorithm="greedy",
       nucleus_topp=None,
@@ -126,6 +135,10 @@ class PyTorchRayWorker:
     print(
         f"---Jax device_count:{device_count}, local_device_count{local_device_count} "
     )
+
+    if enable_jax_profiler:
+      jax.profiler.start_server(jax_profiler_port)
+      print(f"Started JAX profiler server on port {jax_profiler_port}")
 
     checkpoint_format = ""
     checkpoint_path = ""
@@ -155,6 +168,11 @@ class PyTorchRayWorker:
     if not sharding_config:
       sharding_config = os.path.join("default_shardings", model_name + ".yaml")
 
+    quant_config = QuantizationConfig(
+        enable_weight_quantization=quantize_weights,
+        enable_kv_quantization=quantize_kv,
+    )
+
     env_data = JetEngineEnvironmentData(
         tokenizer_path=tokenizer_path,
         checkpoint_path=checkpoint_path,
@@ -162,8 +180,7 @@ class PyTorchRayWorker:
         batch_size=batch_size,
         max_decode_length=max_decode_length,
         max_input_sequence_length=context_length,
-        enable_weight_quantization=quantize_weights,
-        enable_kv_quantization=quantize_kv,
+        quant_config=quant_config,
         cache_sequence_length=max_cache_length,
         bf16_enable=bf16_enable,
         sharding_config_path=sharding_config,
@@ -172,7 +189,6 @@ class PyTorchRayWorker:
         nucleus_topp=nucleus_topp,
         topk=topk
     )
-    env = JetEngineEnvironment(env_data)
 
     if model_name.startswith("llama"):
 
@@ -180,7 +196,6 @@ class PyTorchRayWorker:
           model_name + "-" + param_size, context_length, batch_size, bf16_enable
       )
       args.device = "meta"
-      args.quantize = quantize_weights
       env_data.cache_shape = (
           batch_size,
           args.n_kv_heads,
@@ -292,7 +307,7 @@ class PyTorchRayWorker:
     caches_obj = self.env.make_caches_generate()
     caches = [c.state() for c in caches_obj]
     scalers = []
-    if self.env.enable_kv_quantization:
+    if self.env.quant_config.enable_kv_quantization:
       scalers = [c.scalers() for c in caches_obj]
     return DecodeState(
         jnp.zeros((self.env.batch_size, 1), dtype=jnp.int32),
@@ -341,7 +356,7 @@ class PyTorchRayWorker:
     pos = current_position
     input_indexes = jnp.full((1,), pos)
     new_mask = mask.at[:, current_position].set(0)
-    if self.env.enable_kv_quantization:
+    if self.env.quant_config.enable_kv_quantization:
       caches_obj = [
           cache_manager.Int8KVCacheGenerate(k, v, ks, vs, input_indexes)
           for (k, v), (ks, vs) in torchjax.to_torch(
@@ -360,11 +375,11 @@ class PyTorchRayWorker:
     args = (tokens, input_pos, caches_obj, mask)
     paramst, argst = torchjax.to_torch((weights, args))
     with self._lock:
-      with torchjax.jax_mode():
+      with torch_xla2.default_env():
         res = torch.func.functional_call(self.pt_model, paramst, argst)
       updated_caches = [c.state() for c in caches_obj]
     scales = []
-    if self.env.enable_kv_quantization:
+    if self.env.quant_config.enable_kv_quantization:
       scales = [c.scalers() for c in caches_obj]
     new_current_position = (
         current_position + 1
@@ -388,7 +403,9 @@ class PyTorchRayWorker:
   )
   def _call_model_prefill(self, weights, tokens, input_indexes):
     caches = [
-        cache_manager.KVCachePrefill(self.env.enable_kv_quantization)
+        cache_manager.KVCachePrefill(
+            self.env.quant_config.enable_kv_quantization
+        )
         for _ in self.pt_model.layers
     ]
     mask = jnp.full(
@@ -401,7 +418,7 @@ class PyTorchRayWorker:
 
     paramst, argst = torchjax.to_torch((weights, args))
     with self._lock:
-      with torchjax.jax_mode:
+      with torch_xla2.default_env():
         res = torch.func.functional_call(self.pt_model, paramst, argst)[0]
     caches_res = [c.state() for c in caches]
     return torchjax.from_torch((res, caches_res))
@@ -467,6 +484,50 @@ class PyTorchRayWorker:
 
     return token
 
+  def _convert_to_np_caches(
+      self, caches: List[Tuple[jax.Array, jax.Array]]
+  ) -> List[Tuple[np.ndarray, np.ndarray]]:
+    return [(np.asarray(tup[0]), np.asarray(tup[1])) for tup in caches]
+
+  def _convert_to_jax_caches(
+      self, np_caches: List[Tuple[np.ndarray, np.ndarray]]
+  ) -> List[Tuple[jax.Array, jax.Array]]:
+    return [(jnp.asarray(tup[0]), jnp.asarray(tup[1])) for tup in np_caches]
+
+  def prefill_ray_disaggregation(
+      self,
+      *,
+      params: Any,  # Weights
+      existing_prefix: Optional[Prefix] = None,
+      padded_tokens: PrefillInputs,  # PrefillInputs[np.ndarray],
+      true_length: int,
+  ) -> Any:
+    """Do prefill in ray worker"""
+    logits, updated_caches = self.prefill(
+        params=params,
+        existing_prefix=existing_prefix,
+        padded_tokens=padded_tokens,
+        true_length=true_length,
+    )
+    if len(logits.shape) == 3:  # b, seqlen, num words
+      logits = logits[0]
+
+    token = np.argmax(logits[true_length - 1])
+    updated_caches = multihost_utils.process_allgather(
+        updated_caches, tiled=True
+    )
+    np_update_caches = self._convert_to_np_caches(updated_caches)
+    np_prefix = NpPrefix(token, np_update_caches, true_length)
+
+    return np_prefix
+
+  def transfer(self, np_prefix: NpPrefix) -> Any:
+    """Transfer prefill result from object store to HBM"""
+    updated_caches = self._convert_to_jax_caches(np_prefix.caches)
+    prefix = Prefix(np_prefix.token, updated_caches, np_prefix.seq_len)
+    self.prefix_queue.put(prefix, block=False)
+    return True
+
   def shrink_prefix(
       self,
       prefix: Prefix,
@@ -492,7 +553,7 @@ class PyTorchRayWorker:
     mask_insert = jnp.where(cond, 0, float("-inf"))
     mask = decode_state.mask.at[slot].set(mask_insert)
     input_pos = decode_state.input_pos.at[slot].set(prefix.seq_len)
-    if not self.env.enable_kv_quantization:
+    if not self.env.quant_config.enable_kv_quantization:
 
       @functools.partial(jax.jit, donate_argnums=(0, 1), inline=True)
       def insert(cache, new_entry):
@@ -513,8 +574,8 @@ class PyTorchRayWorker:
       @functools.partial(jax.jit, donate_argnums=(0, 1), inline=True)
       def insert(cache, scaler, new_entry):
         reduce_axis = (1, 3)
-        vals, scales = torchjax.call_torch(
-            quantize.quantize_torch_int8, new_entry, reduce_axis
+        vals, scales, _ = torchjax.call_torch(
+            quantize.quantize_tensor, new_entry, reduce_axis
         )
         new_scaler = jax.lax.dynamic_update_slice(
             scaler,
@@ -593,7 +654,7 @@ class PyTorchRayWorker:
 
     scales = []
     caches = []
-    if not self.env.enable_kv_quantization:
+    if not self.env.quant_config.enable_kv_quantization:
 
       @functools.partial(jax.jit, donate_argnums=(0, 1), inline=True)
       def insert(cache, new_entry):
@@ -612,8 +673,8 @@ class PyTorchRayWorker:
       def insert(cache, scaler, new_entry):
         new_entry = jnp.transpose(new_entry.squeeze(0), (1, 0, 2))
         reduce_axis = (1, 2)
-        vals, scales = torchjax.call_torch(
-            quantize.quantize_torch_int8, new_entry, reduce_axis
+        vals, scales, _ = torchjax.call_torch(
+            quantize.quantize_tensor, new_entry, reduce_axis
         )
         new_scaler = scaler.at[slot, :, update_indexes, :].set(scales)
         new_scaler = jax.lax.with_sharding_constraint(
@@ -890,3 +951,7 @@ class PyTorchRayWorker:
   def mesh(self):
     """return mesh"""
     return None
+
+  def pod_slice_name(self):
+    """pod slice name"""
+    return tpu.get_current_pod_name()
