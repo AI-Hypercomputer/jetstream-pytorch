@@ -106,7 +106,11 @@ class PyTorchRayWorker:
       quantize_weights=False,
       quantize_kv=False,
       max_cache_length=1024,
-      sharding_config=None,
+      sharding_config=None,    
+      temperature=None,
+      sampling_algorithm="greedy",
+      nucleus_topp=None,
+      topk=None    
   ):
 
     jax.config.update("jax_default_prng_impl", "unsafe_rbg")
@@ -163,6 +167,10 @@ class PyTorchRayWorker:
         cache_sequence_length=max_cache_length,
         bf16_enable=bf16_enable,
         sharding_config_path=sharding_config,
+        temperature=temperature,
+        sampling_algorithm=sampling_algorithm,
+        nucleus_topp=nucleus_topp,
+        topk=topk
     )
     env = JetEngineEnvironment(env_data)
 

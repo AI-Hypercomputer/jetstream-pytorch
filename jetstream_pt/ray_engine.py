@@ -153,6 +153,10 @@ def create_pytorch_ray_engine(
     quantize_kv=False,
     max_cache_length=1024,
     sharding_config=None,
+    temperature=None,
+    sampling_algorithm="greedy",
+    nucleus_topp=None,
+    topk=None
 ) -> PyTorchRayEngine:
 
   supported_models = ["llama-2", "llama-3", "gemma"]
@@ -190,7 +194,11 @@ def create_pytorch_ray_engine(
         quantize_kv=quantize_kv,
         max_cache_length=max_cache_length,
         sharding_config=sharding_config,
-    )
+        temperature=temperature,
+        sampling_algorithm=sampling_algorithm,
+        nucleus_topp=nucleus_topp,
+        topk=topk
+      )
     engine_workers.append(engine_worker)
   engine_master = PyTorchRayEngine(
       engine_workers=engine_workers,

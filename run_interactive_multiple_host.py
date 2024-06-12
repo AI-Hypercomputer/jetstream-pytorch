@@ -73,6 +73,32 @@ _SHARDING_CONFIG = flags.DEFINE_string(
     "sharding_config", "", "config file for sharding"
 )
 
+_TEMPERATURE = flags.DEFINE_float(
+    "temperature",
+    1.0,
+    "temperature parameter for scaling probability." 
+    "Only invoked when sampling algorithm is set to" 
+    "weighted or topk"
+)
+
+_SAMPLING_ALGORITHM = flags.DEFINE_string(
+    "sampling_algorithm",
+    "greedy",
+    "sampling algorithm to use. Options:"
+    "('greedy', 'weighted', 'neucleus', 'topk')",
+)
+
+_NUCLEUS_TOPP = flags.DEFINE_float(
+    "nucleus_topp",
+    0.0,
+    "restricting to p probability mass before sampling",
+)
+
+_TOPK = flags.DEFINE_integer(
+    "topk",
+    0,
+    "size of top k used when sampling next token",
+)
 
 def create_engine():
   """create a pytorch engine"""
@@ -91,7 +117,11 @@ def create_engine():
       quantize_weights=_QUANTIZE_WEIGHTS.value,
       quantize_kv=_QUANTIZE_KV_CACHE.value,
       max_cache_length=_MAX_CACHE_LENGTH.value,
-      sharding_config=_SHARDING_CONFIG.value,
+      sharding_config=_SHARDING_CONFIG.value,      
+      temperature=_TEMPERATURE.value,
+      sampling_algorithm=_SAMPLING_ALGORITHM.value,
+      nucleus_topp=_NUCLEUS_TOPP.value,
+      topk=_TOPK.value
   )
 
   print("Initialize engine", time.perf_counter() - start)
