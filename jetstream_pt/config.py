@@ -42,6 +42,11 @@ flags.DEFINE_string("profiling_output", "", "The profiling output")
 
 # Quantization related flags
 flags.DEFINE_bool("quantize_weights", False, "weight quantization")
+flags.DEFINE_bool(
+    "quantize_activation",
+    False,
+    "Quantize Q,K,V projection and FeedForward activation.",
+)
 flags.DEFINE_string(
     "quantize_type", "int8_per_channel", "Type of quantization."
 )
@@ -90,6 +95,9 @@ def create_quantization_config_from_flags():
   config.enable_weight_quantization = True
   config.num_bits_weight = 8 if "int8" in quantize_type else 4
   config.is_blockwise_weight = "blockwise" in quantize_type
+
+  config.enable_activation_quantization = FLAGS.quantize_activation
+
   config.enable_kv_quantization = FLAGS.quantize_kv_cache
   return config
 

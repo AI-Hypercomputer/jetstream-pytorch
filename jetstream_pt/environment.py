@@ -32,6 +32,10 @@ class QuantizationConfig:
   enable_weight_quantization: bool = False
   num_bits_weight: int = 8
   is_blockwise_weight: bool = False
+  block_size_weight: int = 128
+  is_symmetric_weight: bool = True
+
+  enable_activation_quantization: bool = False
 
   enable_kv_quantization: bool = False
 
