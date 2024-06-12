@@ -162,10 +162,10 @@ def create_engine_from_config_flags():
       shard_on_batch=FLAGS.shard_on_batch,
       ragged_mha=FLAGS.ragged_mha,
       starting_position=FLAGS.starting_position,
-      temperature=FLAGS.temperature.value,
-      sampling_algorithm=FLAGS.sampling_algorithm.value,
-      nucleus_topp=FLAGS.nucleus_topp.value,
-      topk=FLAGS.topk.value
+      temperature=FLAGS.temperature,
+      sampling_algorithm=FLAGS.sampling_algorithm,
+      nucleus_topp=FLAGS.nucleus_topp,
+      topk=FLAGS.topk
   )
 
   print("Initialize engine", time.perf_counter() - start)

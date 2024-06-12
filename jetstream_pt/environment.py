@@ -98,7 +98,7 @@ class JetEngineEnvironmentData:
 
   # Variables used in token sampling
   # sampling algorithm to use ("greedy", "weighted", "neucleus", "topk")
-  sampling_algorithm: str = "greedy" 
+  sampling_algorithm: str = "greedy"
 
   # size of top k used when sampling next token
   topk: int = 0

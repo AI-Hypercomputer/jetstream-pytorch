@@ -17,13 +17,14 @@ limitations under the License.
 import jax
 import jax.numpy as jnp
 
-NEG_INF = -1.0e7  # Masking purpose
+# Masking purpose
+NEG_INF = -1.0e7
 
 
 # pylint: disable=bare-except, consider-using-generator
 """ Maxtext inference utilities. These seem like they should be a library.
 
-    Inspired by an Google-internal implementation, Global Vision Transformer.
+  Inspired by an Google-internal implementation, Global Vision Transformer.
 """
 
 
@@ -38,14 +39,13 @@ def sampling(logits, rng, algorithm, topk=0, nucleus_topp=0, temperature=1.0):
   """
   if algorithm == "greedy":
     return jnp.argmax(logits, axis=-1)
-  elif algorithm == "weighted":
+  if algorithm == "weighted":
     return jax.random.categorical(rng, logits / temperature)
-  elif algorithm == "nucleus":
+  if algorithm == "nucleus":
     return sample_nucleus_topp_logits(logits, nucleus_topp, temperature, rng)
-  elif algorithm == "topk":
+  if algorithm == "topk":
     return sample_topk_logits(logits, topk, temperature, rng)
-  else:
-    raise ValueError(f"Sampling {algorithm=} not supported!")
+  raise ValueError(f"Sampling {algorithm=} not supported!")
 
 
 def sample_nucleus_topp_logits(logits, nucleus_topp, temperature, rng):
@@ -58,8 +58,12 @@ def sample_nucleus_topp_logits(logits, nucleus_topp, temperature, rng):
   if nucleus_topp < 0:
     raise ValueError("Can't apply nucleus with parameter {nucleus_topp=} less zero")
   logits_sorted = jnp.sort(logits, axis=-1)[..., ::-1]  # sort descending
-  sorted_cum_probs = jnp.cumsum(jax.nn.softmax(logits_sorted, axis=-1), axis=-1)  # get cumsum probs
-  cutoff_index = jnp.sum(sorted_cum_probs < nucleus_topp, axis=-1, keepdims=True)  # find cutoff index
+  sorted_cum_probs = jnp.cumsum(
+    jax.nn.softmax(logits_sorted, axis=-1), axis=-1
+  )  # get cumsum probs
+  cutoff_index = jnp.sum(
+    sorted_cum_probs < nucleus_topp, axis=-1, keepdims=True
+  )  # find cutoff index
   cutoff_logit = jnp.take_along_axis(logits_sorted, cutoff_index, axis=-1)
   logits = jnp.where(logits < cutoff_logit, jnp.full_like(logits, NEG_INF), logits)
   return jax.random.categorical(rng, logits / temperature)
@@ -68,8 +72,15 @@ def sample_nucleus_topp_logits(logits, nucleus_topp, temperature, rng):
 def sample_topk_logits(logits, topk, temperature, rng):
   """Restricting sampling to the best k logits."""
   if topk <= 0:
-    raise ValueError("Can't apply algorithm topk with parameter {topk=} less than or equal to zero")
+    raise ValueError(
+      "Can't apply algorithm topk with parameter {topk=} less than or equal to zero"
+    )
   topk_logits, topk_idxs = jax.lax.top_k(logits, topk)
-  topk_token = jnp.expand_dims(jax.random.categorical(rng, topk_logits / temperature).astype(jnp.int32), axis=-1)
-  sampled_tokens = jnp.squeeze(jnp.take_along_axis(topk_idxs, topk_token, axis=-1), axis=-1).astype(jnp.int32)
+  topk_token = jnp.expand_dims(
+    jax.random.categorical(rng, topk_logits / temperature).astype(jnp.int32),
+    axis=-1,
+  )
+  sampled_tokens = jnp.squeeze(
+    jnp.take_along_axis(topk_idxs, topk_token, axis=-1), axis=-1
+  ).astype(jnp.int32)
   return sampled_tokens

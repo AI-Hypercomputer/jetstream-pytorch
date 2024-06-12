@@ -255,14 +255,14 @@ class PyTorchEngine(engine_api.Engine):
     if len(logits.shape) == 3:  # b, seqlen, num words
       logits = logits[0] # seqlen, num words
 
-      token = sampling_utils.sampling(
-        logits[true_length - 1],
-        self.rng,
-        self.env.sampling_algorithm,
-        self.env.topk,
-        self.env.nucleus_topp,
-        self.env.temperature,
-      )
+    token = sampling_utils.sampling(
+      logits[true_length - 1],
+      self.rng,
+      self.env.sampling_algorithm,
+      self.env.topk,
+      self.env.nucleus_topp,
+      self.env.temperature,
+    )
 
     # truncate to true_length didnt work need to be out side of jit
     # caches = [
