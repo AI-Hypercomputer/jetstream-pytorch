@@ -109,6 +109,7 @@ class JetEngineEnvironmentData:
   # temperature parameter for scaling probability
   temperature: float = 1.0
 
+
 # pylint: disable-next=all
 class JetEngineEnvironment:
 

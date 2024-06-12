@@ -34,7 +34,7 @@ from torch.utils import _pytree as pytree
 from jetstream_pt import cache_manager
 from jetstream_pt import quantize
 from jetstream_pt import torchjax
-from jetstream_pt import sampling_utils # TODO: import from jetstream.engine next release
+from jetstream_pt import sampling_utils  # TODO: import from jetstream.engine next release
 from jetstream_pt.environment import JetEngineEnvironment, JetEngineEnvironmentData, QuantizationConfig
 from jetstream_pt.third_party.llama import model_exportable as llama_model, model_args
 from jetstream_pt.third_party.gemma import config as gemma_config, model as gemma_model
@@ -221,14 +221,18 @@ class PyTorchEngine(engine_api.Engine):
   def _sampling(self, logits: Any, batch_size: int) -> jnp.ndarray:
     if len(logits.shape) == 2:
       logits = jnp.expand_dims(logits, 0)
-    return sampling_utils.sampling(
-      logits[:, -1],
-      self.rng,
-      self.env.sampling_algorithm,
-      self.env.topk,
-      self.env.nucleus_topp,
-      self.env.temperature
-      ).reshape(batch_size, -1).astype(jnp.int32)
+    return (
+        sampling_utils.sampling(
+            logits[:, -1],
+            self.rng,
+            self.env.sampling_algorithm,
+            self.env.topk,
+            self.env.nucleus_topp,
+            self.env.temperature,
+        )
+        .reshape(batch_size, -1)
+        .astype(jnp.int32)
+    )
 
   def prefill(
       self,
@@ -253,15 +257,15 @@ class PyTorchEngine(engine_api.Engine):
         input_indexes,
     )
     if len(logits.shape) == 3:  # b, seqlen, num words
-      logits = logits[0] # seqlen, num words
+      logits = logits[0]  # seqlen, num words
 
     token = sampling_utils.sampling(
-      logits[true_length - 1],
-      self.rng,
-      self.env.sampling_algorithm,
-      self.env.topk,
-      self.env.nucleus_topp,
-      self.env.temperature,
+        logits[true_length - 1],
+        self.rng,
+        self.env.sampling_algorithm,
+        self.env.topk,
+        self.env.nucleus_topp,
+        self.env.temperature,
     )
 
     # truncate to true_length didnt work need to be out side of jit
@@ -777,7 +781,7 @@ def create_pytorch_engine(
     temperature=None,
     sampling_algorithm="greedy",
     nucleus_topp=None,
-    topk=None
+    topk=None,
 ) -> PyTorchEngine:
   """Returns: The pytorch engine."""
 
@@ -846,7 +850,7 @@ def create_pytorch_engine(
       temperature=temperature,
       sampling_algorithm=sampling_algorithm,
       nucleus_topp=nucleus_topp,
-      topk=topk
+      topk=topk,
   )
 
   if shard_on_batch and sharding_config:

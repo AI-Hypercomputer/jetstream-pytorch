@@ -81,9 +81,9 @@ flags.DEFINE_integer(
 flags.DEFINE_float(
     "temperature",
     1.0,
-    "temperature parameter for scaling probability." 
-    "Only invoked when sampling algorithm is set to" 
-    "weighted or topk"
+    "temperature parameter for scaling probability."
+    "Only invoked when sampling algorithm is set to"
+    "weighted or topk",
 )
 flags.DEFINE_string(
     "sampling_algorithm",
@@ -101,6 +101,7 @@ flags.DEFINE_integer(
     0,
     "size of top k used when sampling next token",
 )
+
 
 def create_quantization_config_from_flags():
   """Create Quantization Config from cmd flags"""
@@ -165,7 +166,7 @@ def create_engine_from_config_flags():
       temperature=FLAGS.temperature,
       sampling_algorithm=FLAGS.sampling_algorithm,
       nucleus_topp=FLAGS.nucleus_topp,
-      topk=FLAGS.topk
+      topk=FLAGS.topk,
   )
 
   print("Initialize engine", time.perf_counter() - start)
