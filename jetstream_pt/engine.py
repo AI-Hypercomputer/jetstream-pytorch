@@ -28,13 +28,13 @@ import torch
 import numpy as np
 
 from jetstream.engine import engine_api, tokenizer_api, tokenizer_pb2, token_utils
+from jetstream.engine import sampling_utils
 import torch_xla2
 from torch.utils import _pytree as pytree
 
 from jetstream_pt import cache_manager
 from jetstream_pt import quantize
 from jetstream_pt import torchjax
-from jetstream_pt import sampling_utils  # TODO: import from jetstream.engine next release
 from jetstream_pt.environment import JetEngineEnvironment, JetEngineEnvironmentData, QuantizationConfig
 from jetstream_pt.third_party.llama import model_exportable as llama_model, model_args
 from jetstream_pt.third_party.gemma import config as gemma_config, model as gemma_model
