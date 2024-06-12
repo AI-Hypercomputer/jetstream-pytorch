@@ -102,7 +102,6 @@ class PyTorchEngine(engine_api.Engine):
         donate_argnums=(0, 1),
         out_shardings=self.get_decode_state_sharding(),
     )
-
     self.generate = jax.jit(
         self.generate,
         donate_argnums=(1,),
@@ -206,8 +205,7 @@ class PyTorchEngine(engine_api.Engine):
 
   def _sampling(self, logits: Any, batch_size: int) -> jnp.ndarray:
     if len(logits.shape) == 2:
-      logits = jnp.expand_dims(
-          logits, 0)
+      logits = jnp.expand_dims(logits, 0)
     return sampling_utils.sampling(
       logits[:, -1],
       self.rng,
@@ -269,6 +267,7 @@ class PyTorchEngine(engine_api.Engine):
     """shrink prefix"""
     return prefix
 
+  # pylint: disable-next=all
   def _insert_no_wrap(
       self,
       prefix: Prefix,
@@ -277,7 +276,6 @@ class PyTorchEngine(engine_api.Engine):
   ):
     scales = []
     caches = []
-    
     pos = decode_state.current_position - prefix.seq_len
     tokens = decode_state.tokens.at[slot].set(prefix.token)
 
@@ -480,7 +478,6 @@ class PyTorchEngine(engine_api.Engine):
         decode_state.input_pos,
     )
     next_token = self._sampling(logits, self.env.batch_size)
-
     lens = decode_state.lens + 1
     data = jnp.concatenate(
         [
