@@ -95,7 +95,29 @@ _SHARD_ON_BATCH = flags.DEFINE_bool(
     "whether to shard on batch dimension"
     "If set true, sharding_config will be ignored.",
 )
-
+_TEMPERATURE = flags.DEFINE_float(
+    "temperature",
+    1.0,
+    "temperature parameter for scaling probability." 
+    "Only invoked when sampling algorithm is set to" 
+    "weighted or topk"
+)
+_SAMPLING_ALGORITHM = flags.DEFINE_string(
+    "sampling_algorithm",
+    "greedy",
+    "sampling algorithm to use. Options:"
+    "('greedy', 'weighted', 'neucleus', 'topk')",
+)
+_NUCLEUS_TOPP = flags.DEFINE_float(
+    "nucleus_topp",
+    0.0,
+    "restricting to p probability mass before sampling",
+)
+_TOPK = flags.DEFINE_integer(
+    "topk",
+    0,
+    "size of top k used when sampling next token",
+)
 
 # pylint: disable-next=all
 def main(argv: Sequence[str]):
@@ -119,6 +141,10 @@ def main(argv: Sequence[str]):
       max_cache_length=_MAX_CACHE_LENGTH.value,
       sharding_config=sharding_config_path,
       shard_on_batch=_SHARD_ON_BATCH.value,
+      temperature=_TEMPERATURE.value,
+      sampling_algorithm=_SAMPLING_ALGORITHM.value,
+      nucleus_topp=_NUCLEUS_TOPP.value,
+      topk=_TOPK.value
   )
   server_config = ServerConfig(
       interleaved_slices=(_PLATFORM.value,),

@@ -34,6 +34,7 @@ from torch.utils import _pytree as pytree
 from jetstream_pt import cache_manager
 from jetstream_pt import quantize
 from jetstream_pt import torchjax
+from jetstream_pt import sampling_utils # TODO: import from jetstream.engine next release
 from jetstream_pt.environment import JetEngineEnvironment, JetEngineEnvironmentData
 from jetstream_pt.third_party.llama import model_exportable, model_args
 from jetstream_pt.third_party.gemma import config as gemma_config, model as gemma_model
@@ -83,6 +84,7 @@ class PyTorchEngine(engine_api.Engine):
     self.pt_model = pt_model
     self.env = env
     self.default_dtype = jnp.bfloat16 if env.bf16_enable else jnp.float32
+    self.rng = jax.random.PRNGKey(0)
 
     self.y_sharding = env.sharding_by_axis(1)
     self.x_sharding = env.sharding_by_axis(0)
@@ -100,6 +102,7 @@ class PyTorchEngine(engine_api.Engine):
         donate_argnums=(0, 1),
         out_shardings=self.get_decode_state_sharding(),
     )
+
     self.generate = jax.jit(
         self.generate,
         donate_argnums=(1,),
@@ -203,12 +206,16 @@ class PyTorchEngine(engine_api.Engine):
 
   def _sampling(self, logits: Any, batch_size: int) -> jnp.ndarray:
     if len(logits.shape) == 2:
-      logits = jnp.expand_dims(logits, 0)
-    return (
-        jnp.argmax(logits[:, -1], axis=-1)
-        .reshape(batch_size, -1)
-        .astype(jnp.int32)
-    )
+      logits = jnp.expand_dims(
+          logits, 0)
+    return sampling_utils.sampling(
+      logits[:, -1],
+      self.rng,
+      self.env.sampling_algorithm,
+      self.env.topk,
+      self.env.nucleus_topp,
+      self.env.temperature
+      ).reshape(batch_size, -1).astype(jnp.int32)
 
   def prefill(
       self,
@@ -233,9 +240,16 @@ class PyTorchEngine(engine_api.Engine):
         input_indexes,
     )
     if len(logits.shape) == 3:  # b, seqlen, num words
-      logits = logits[0]
+      logits = logits[0] # seqlen, num words
 
-    token = jnp.argmax(logits[true_length - 1])
+      token = sampling_utils.sampling(
+        logits[true_length - 1],
+        self.rng,
+        self.env.sampling_algorithm,
+        self.env.topk,
+        self.env.nucleus_topp,
+        self.env.temperature,
+      )
 
     # truncate to true_length didnt work need to be out side of jit
     # caches = [
@@ -255,7 +269,6 @@ class PyTorchEngine(engine_api.Engine):
     """shrink prefix"""
     return prefix
 
-  # pylint: disable-next=all
   def _insert_no_wrap(
       self,
       prefix: Prefix,
@@ -264,6 +277,7 @@ class PyTorchEngine(engine_api.Engine):
   ):
     scales = []
     caches = []
+    
     pos = decode_state.current_position - prefix.seq_len
     tokens = decode_state.tokens.at[slot].set(prefix.token)
 
@@ -466,6 +480,7 @@ class PyTorchEngine(engine_api.Engine):
         decode_state.input_pos,
     )
     next_token = self._sampling(logits, self.env.batch_size)
+
     lens = decode_state.lens + 1
     data = jnp.concatenate(
         [
@@ -670,6 +685,10 @@ def create_pytorch_engine(
     max_cache_length=1024,
     sharding_config=None,
     shard_on_batch=False,
+    temperature=None,
+    sampling_algorithm="greedy",
+    nucleus_topp=None,
+    topk=None
 ) -> PyTorchEngine:
   """Returns: The pytorch engine."""
 
@@ -729,6 +748,10 @@ def create_pytorch_engine(
       bf16_enable=bf16_enable,
       sharding_config_path=sharding_config,
       shard_on_batch=shard_on_batch,
+      temperature=temperature,
+      sampling_algorithm=sampling_algorithm,
+      nucleus_topp=nucleus_topp,
+      topk=topk
   )
 
   if shard_on_batch and sharding_config:

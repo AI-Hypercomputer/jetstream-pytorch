@@ -78,6 +78,18 @@ class JetEngineEnvironmentData:
   # Whether to shard on batch dimension. i.e. data parallel.
   shard_on_batch: bool = False
 
+  # Variables used in token sampling
+  # sampling algorithm to use ("greedy", "weighted", "neucleus", "topk")
+  sampling_algorithm: str = "greedy" 
+
+  # size of top k used when sampling next token
+  topk: int = 0
+
+  # restricting to p probability mass before sampling
+  nucleus_topp: float = 0.0
+
+  # temperature parameter for scaling probability
+  temperature: float = 1.0
 
 # pylint: disable-next=all
 class JetEngineEnvironment:
