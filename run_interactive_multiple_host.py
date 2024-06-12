@@ -43,10 +43,6 @@ def create_engine():
       quantize_kv=FLAGS.quantize_kv_cache,
       max_cache_length=FLAGS.max_cache_length,
       sharding_config=FLAGS.sharding_config,
-      temperature=FLAGS.temperature,
-      sampling_algorithm=FLAGS.sampling_algorithm,
-      nucleus_topp=FLAGS.nucleus_topp,
-      topk=FLAGS.topk
   )
 
   print("Initialize engine", time.perf_counter() - start)

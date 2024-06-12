@@ -175,10 +175,6 @@ def create_pytorch_ray_engine(
     quantize_kv=False,
     max_cache_length=1024,
     sharding_config=None,
-    temperature=None,
-    sampling_algorithm="greedy",
-    nucleus_topp=None,
-    topk=None,
     is_disaggregated: bool = False,
     num_hosts: int = 0,
     decode_pod_slice_name: str = None,
@@ -228,11 +224,7 @@ def create_pytorch_ray_engine(
         sharding_config=sharding_config,
         enable_jax_profiler=enable_jax_profiler,
         jax_profiler_port=jax_profiler_port,
-        temperature=temperature,
-        sampling_algorithm=sampling_algorithm,
-        nucleus_topp=nucleus_topp,
-        topk=topk
-      )
+    )
     engine_workers.append(engine_worker)
 
   if not is_disaggregated:

@@ -116,10 +116,6 @@ class PyTorchRayWorker:
       sharding_config=None,
       enable_jax_profiler: bool = False,
       jax_profiler_port: int = 9999,
-      temperature=None,
-      sampling_algorithm="greedy",
-      nucleus_topp=None,
-      topk=None
   ):
 
     jax.config.update("jax_default_prng_impl", "unsafe_rbg")
@@ -184,10 +180,6 @@ class PyTorchRayWorker:
         cache_sequence_length=max_cache_length,
         bf16_enable=bf16_enable,
         sharding_config_path=sharding_config,
-        temperature=temperature,
-        sampling_algorithm=sampling_algorithm,
-        nucleus_topp=nucleus_topp,
-        topk=topk
     )
 
     if model_name.startswith("llama"):
