@@ -59,10 +59,11 @@ the tokenizer that we will use.
 Please sign agreement on Huggingface website to access Gemma checkpoints. Download Gemma PyTorch checkpoint using huggingface-cli. Gemma Tokenizer is included in the checkpoint.
 
 ```bash
+# Install huggingface-cli and login if it's not set up.
+pip install -U "huggingface_hub[cli]"
+huggingface-cli login
 huggingface-cli download google/gemma-7b-pytorch --local-dir $input_ckpt_dir
 ```
-
-Need to manually modify the `config.json` in the checkpoint folder to make it a valid JSON file. (Replace `'` with `"`, remove the excessive `,` after the last item in the JSON object)
 
 ## Mixtral
 ### Get Mixtral Checkpoint from HuggingFace
