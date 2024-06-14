@@ -1,6 +1,14 @@
 # Jetstream-PyTorch
 JetStream Engine implementation in PyTorch
 
+# Latest Release:
+
+The latest release version is tagged with `jetstream-v0.2.3`. If you are running the release version
+Please follow the README of the that version here:
+https://github.com/google/jetstream-pytorch/blob/jetstream-v0.2.3/README.md
+
+Commandline Flags might have changed between the release version to HEAD.
+
 # Outline
 
 1. Ssh to Cloud TPU VM (using v5e-8 TPU VM)
@@ -29,7 +37,7 @@ Follow the steps in
 ## Get the jetstream-pytorch code
 ```bash
 git clone https://github.com/google/jetstream-pytorch.git
-git checkout jetstream-v0.2.2
+git checkout jetstream-v0.2.3
 ```
 
 (optional) Create a virtual env using `venv` or `conda` and activate it.
