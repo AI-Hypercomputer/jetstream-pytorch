@@ -1,4 +1,5 @@
 from collections import defaultdict
+import threading
 from typing import Any, Iterable, Optional, Union, Tuple, List
 
 import numpy as np
@@ -38,6 +39,8 @@ class PyTorchRayEngine(engine_api.Engine):
     self.batch_size = batch_size
     self.is_disaggregated = is_disaggregated
     self.pod_slice_name = pod_slice_name
+    if not self.is_disaggregated:
+      self._lock = threading.Lock()
 
   # pylint: disable-next=all
   def load_params(self) -> Params:
@@ -60,6 +63,31 @@ class PyTorchRayEngine(engine_api.Engine):
     return None
 
   def prefill(
+      self,
+      *,
+      params: Any,  # Weights
+      existing_prefix: Optional[Prefix] = None,
+      padded_tokens: np.ndarray,  # PrefillInputs[np.ndarray],
+      true_length: int,
+  ) -> Prefix:
+    if self.is_disaggregated:
+      return self.prefill_impl(
+          params=params,
+          existing_prefix=existing_prefix,
+          padded_tokens=padded_tokens,
+          true_length=true_length,
+      )
+
+    with self._lock:
+      return self.prefill_impl(
+          params=params,
+          existing_prefix=existing_prefix,
+          padded_tokens=padded_tokens,
+          true_length=true_length,
+      )
+
+  # pylint: disable-next=all
+  def prefill_impl(
       self,
       *,
       params: Any,  # Weights
@@ -115,6 +143,15 @@ class PyTorchRayEngine(engine_api.Engine):
     return None
 
   def generate(
+      self, params: Any, decode_state: DecodeState
+  ) -> tuple[None, engine_api.ResultTokens]:
+    if self.is_disaggregated:
+      return self.generate_impl(params=params, decode_state=decode_state)
+    with self._lock:
+      return self.generate_impl(params=params, decode_state=decode_state)
+
+  # pylint: disable-next=all
+  def generate_impl(
       self, params: Any, decode_state: DecodeState
   ) -> tuple[None, engine_api.ResultTokens]:
     all_outputs = []
