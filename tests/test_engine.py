@@ -14,46 +14,92 @@
 
 # pylint: disable=all
 
+import unittest
+import jax
+import jax.numpy as jnp
 
-# This model will output tokens with value of 2
-# and will update caches with value of 1.0
-# class Dummy(torch.nn.Module):
-
-#     def __init__(self):
-#         super().__init__()
-#         self.params = None
-
-#     def forward(
-#       self,
-#       tokens: torch.Tensor,
-#       input_pos: torch.Tensor,
-#       caches: List[Any],
-#       mask,
-#     ):
-#         batch_size, seqlen = tokens.shape
-#         for cache in caches:
-#             cache.update(torch.ones((batch_size, seqlen)))
-#         return torch.ones((batch_size, seqlen), dtype=torch.int32) * 2
+from jetstream_pt.third_party.llama import model_exportable
+from jetstream_pt.engine import PyTorchEngine
+from tests import helpers
 
 
-# class EngineTest(unittest.TestCase):
+class EngineTest(unittest.TestCase):
 
-#     def _make_small_engine(self, quantize=False):
-#         env_data = JetEngineEnvironmentData()
-#         env_data.max_input_sequence_length = 128
-#         env_data.max_input_sequence_length = 128
-#         env_data.cache_sequence_length = 128
-#         env_data.model_type = 'llama-2-tiny'
-#         if quantize:
-#             env_data.enable_kv_quantization = True
-#             env_data.enable_weight_quantization = True
+  def setup(self):
+    env, model_arg = helpers.make_env_tiny(bf16_enable=True)
+    model_ours = model_exportable.Transformer(model_arg, env)
+    engine = PyTorchEngine(pt_model=model_ours, env=env)
+    engine.rng = jax.random.PRNGKey(0)
+    return engine
 
-#         env = JetEngineEnvironment(env_data)
-#         model = Dummy()
-#         model.params = env._model_arg  # llama's model arg
+  def test_sampling_2D(self):
+    # test greedy
+    engine = self.setup()
+    self.assertEqual(engine.env.sampling_algorithm, "greedy")
+    logits = jnp.array([[0.5, 0.6, 0.7, 0.8], [0.4, 0.3, 0.2, 0.1]])
+    token = engine._sampling(logits, batch_size=1)
+    self.assertEqual(token, jnp.array([[0]]))
+    self.assertTrue(jnp.isdtype(token, jnp.int32))
 
-#         engine = PyTorchEngine(model, env)
-#         return engine
+    # test weighted
+    engine.env.sampling_algorithm = "weighted"
+    engine.env.temperature = 5.0
+    token = engine._sampling(logits, batch_size=1)
+    self.assertTrue(jnp.array_equal(token, jnp.array([[0]])))
+    self.assertTrue(jnp.isdtype(token, jnp.int32))
+
+    # test topk
+    engine.env.sampling_algorithm = "topk"
+    engine.env.temperature = 5.0
+    engine.env.topk = 4
+    token = engine._sampling(logits, batch_size=1)
+    self.assertTrue(jnp.array_equal(token, jnp.array([[0]])))
+    self.assertTrue(jnp.isdtype(token, jnp.int32))
+
+    # test nucleus
+    engine.env.sampling_algorithm = "nucleus"
+    engine.env.temperature = 0.0
+    engine.env.nucleus_topp = 0.8
+    token = engine._sampling(logits, batch_size=1)
+    self.assertTrue(jnp.array_equal(token, jnp.array([[0]])))
+    self.assertTrue(jnp.isdtype(token, jnp.int32))
+
+  def test_sampling_3D(self):
+    # test greedy
+    engine = self.setup()
+    self.assertEqual(engine.env.sampling_algorithm, "greedy")
+    logits = jnp.array(
+        [
+            [[0.4, 0.3, 0.2, 0.1], [0.5, 0.6, 0.7, 0.8]],
+            [[0.5, 0.6, 0.7, 0.8], [0.4, 0.3, 0.2, 0.1]],
+        ]
+    )
+    token = engine._sampling(logits, batch_size=2)
+    self.assertTrue(jnp.array_equal(token, jnp.array([[3], [0]])))
+    self.assertTrue(jnp.isdtype(token, jnp.int32))
+
+    # test weighted
+    engine.env.sampling_algorithm = "weighted"
+    engine.env.temperature = 10.0
+    token = engine._sampling(logits, batch_size=2)
+    self.assertTrue(jnp.array_equal(token, jnp.array([[3], [1]])))
+    self.assertTrue(jnp.isdtype(token, jnp.int32))
+
+    # test topk
+    engine.env.sampling_algorithm = "topk"
+    engine.env.temperature = 1.0
+    engine.env.topk = 3
+    token = engine._sampling(logits, batch_size=2)
+    self.assertTrue(jnp.array_equal(token, jnp.array([[1], [0]])))
+    self.assertTrue(jnp.isdtype(token, jnp.int32))
+
+    # test nucleus
+    engine.env.sampling_algorithm = "nucleus"
+    engine.env.temperature = 1.0
+    engine.env.nucleus_topp = 0.8
+    token = engine._sampling(logits, batch_size=2)
+    self.assertTrue(jnp.array_equal(token, jnp.array([[3], [1]])))
+    self.assertTrue(jnp.isdtype(token, jnp.int32))
 
 
 #     def test_insert(self):
@@ -229,5 +275,5 @@
 #         # prefill
 
 
-# if __name__ == '__main__':
-#     unittest.main()
+if __name__ == "__main__":
+  unittest.main()

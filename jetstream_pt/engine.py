@@ -28,6 +28,7 @@ import torch
 import numpy as np
 
 from jetstream.engine import engine_api, tokenizer_api, tokenizer_pb2, token_utils
+from jetstream.engine import sampling_utils
 import torch_xla2
 from torch.utils import _pytree as pytree
 
@@ -85,6 +86,7 @@ class PyTorchEngine(engine_api.Engine):
     self.pt_model = pt_model
     self.env = env
     self.default_dtype = jnp.bfloat16 if env.bf16_enable else jnp.float32
+    self.rng = jax.random.PRNGKey(0)
 
     self.y_sharding = env.sharding_by_axis(1)
     self.x_sharding = env.sharding_by_axis(0)
@@ -220,7 +222,14 @@ class PyTorchEngine(engine_api.Engine):
     if len(logits.shape) == 2:
       logits = jnp.expand_dims(logits, 0)
     return (
-        jnp.argmax(logits[:, -1], axis=-1)
+        sampling_utils.sampling(
+            logits[:, -1],
+            self.rng,
+            self.env.sampling_algorithm,
+            self.env.topk,
+            self.env.nucleus_topp,
+            self.env.temperature,
+        )
         .reshape(batch_size, -1)
         .astype(jnp.int32)
     )
@@ -248,9 +257,16 @@ class PyTorchEngine(engine_api.Engine):
         input_indexes,
     )
     if len(logits.shape) == 3:  # b, seqlen, num words
-      logits = logits[0]
+      logits = logits[0]  # seqlen, num words
 
-    token = jnp.argmax(logits[true_length - 1])
+    token = sampling_utils.sampling(
+        logits[true_length - 1],
+        self.rng,
+        self.env.sampling_algorithm,
+        self.env.topk,
+        self.env.nucleus_topp,
+        self.env.temperature,
+    )
 
     # truncate to true_length didnt work need to be out side of jit
     # caches = [
@@ -762,6 +778,10 @@ def create_pytorch_engine(
     shard_on_batch=False,
     ragged_mha=False,
     starting_position=512,
+    temperature=None,
+    sampling_algorithm="greedy",
+    nucleus_topp=None,
+    topk=None,
 ) -> PyTorchEngine:
   """Returns: The pytorch engine."""
 
@@ -827,6 +847,10 @@ def create_pytorch_engine(
       shard_on_batch=shard_on_batch,
       ragged_mha=ragged_mha,
       starting_position=starting_position,
+      temperature=temperature,
+      sampling_algorithm=sampling_algorithm,
+      nucleus_topp=nucleus_topp,
+      topk=topk,
   )
 
   if shard_on_batch and sharding_config:

@@ -100,6 +100,19 @@ class JetEngineEnvironmentData:
   # Starting position
   starting_position: int = 512
 
+  # Variables used in token sampling
+  # sampling algorithm to use ("greedy", "weighted", "neucleus", "topk")
+  sampling_algorithm: str = "greedy"
+
+  # size of top k used when sampling next token
+  topk: int = 0
+
+  # restricting to p probability mass before sampling
+  nucleus_topp: float = 0.0
+
+  # temperature parameter for scaling probability
+  temperature: float = 1.0
+
 
 # pylint: disable-next=all
 class JetEngineEnvironment:
