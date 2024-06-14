@@ -17,6 +17,8 @@ import random
 import time
 from typing import List
 
+# import torch_xla2 first!
+import torch_xla2  # pylint: disable
 import jax
 import numpy as np
 from absl import app, flags
