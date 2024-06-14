@@ -16,6 +16,9 @@ import functools
 import os
 import time
 
+# import torch_xla2 first!
+# pylint: disable-next=all
+import torch_xla2
 import humanize
 import jax
 import numpy as np
