@@ -23,7 +23,7 @@ from jetstream_pt.third_party.llama import model_exportable
 from jetstream_pt.third_party.llama import model_original
 from jetstream_pt.third_party.gemma import model_original as gemma_orig
 from jetstream_pt.third_party.gemma import model as gemma
-from jetstream_pt.third_party.mixtral import model as mixtral 
+from jetstream_pt.third_party.mixtral import model as mixtral
 from jetstream_pt.third_party.mixtral import config as mixtral_config
 from jetstream_pt import torchjax
 from jetstream_pt import layers
@@ -370,19 +370,19 @@ class ModelComponentTest(unittest.TestCase):
     # random init
     states = m.state_dict()
     for k, v in states.items():
-        states[k].normal_()
+      states[k].normal_()
     m.load_state_dict(states, assign=True)
 
     seqlen = 3
-    num_expert = 8 
+    num_expert = 8
     num_active_expert = 2
-    x = torch.randn(10, config.dim)
+    x = torch.randn(seqlen, config.dim)
     exp_index = torch.randint(0, num_expert, (seqlen, num_active_expert))
 
     res1 = m.forward_for_short_seq_len(x, exp_index)
     res2 = m.forward_for_long_seq_len(x, exp_index)
 
-    torch.testing.assert_close(res1, res2, atol=1e-4, rtol=1e-4)
+    torch.testing.assert_close(res1, res2)
 
 
 if __name__ == "__main__":
