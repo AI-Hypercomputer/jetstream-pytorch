@@ -16,8 +16,9 @@
 import os
 from typing import Sequence
 
+# import torch_xla2 first!
+import torch_xla2  # pylint: disable
 import jax
-import jetstream_pt
 from absl import app, flags
 from jetstream.core import server_lib
 from jetstream.core.config_lib import ServerConfig, MetricsServerConfig

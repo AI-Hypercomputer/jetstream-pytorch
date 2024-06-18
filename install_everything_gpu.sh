@@ -24,8 +24,7 @@ pip show tensorboard && pip uninstall -y tensorboard
 pip show tensorflow-text && pip uninstall -y tensorflow-text
 pip show torch_xla2 && pip uninstall -y torch_xla2
 
-pip install flax==0.8.3
-pip install -U "jax[cuda12]==0.4.28"
+pip install flax
 pip install tensorflow-text
 pip install tensorflow
 
@@ -39,3 +38,4 @@ git submodule update --init --recursive
 pip show google-jetstream && pip uninstall -y google-jetstream
 pip show torch_xla2 && pip uninstall -y torch_xla2
 pip install -e .
+pip install -U jax[cuda12]==0.4.30
