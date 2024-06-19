@@ -75,4 +75,15 @@ transformer_configs = {
         num_experts=8,
         num_activated_experts=2,
     ),
+    "Mixtral-tiny": dict(
+        block_size=128,
+        n_layer=3,
+        n_head=32,
+        n_local_heads=8,
+        dim=128,
+        intermediate_size=None,
+        rope_base=1000000.0,
+        num_experts=8,
+        num_activated_experts=2,
+    ),
 }
