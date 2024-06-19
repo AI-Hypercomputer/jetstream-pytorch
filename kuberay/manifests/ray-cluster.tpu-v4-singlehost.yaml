@@ -79,12 +79,12 @@ spec:
             imagePullPolicy: IfNotPresent
             resources:
               limits:
-                cpu: "1"
+                cpu: "8"
                 ephemeral-storage: 20Gi
                 google.com/tpu: "4"
                 memory: 40G
               requests:
-                cpu: "1"
+                cpu: "8"
                 ephemeral-storage: 10Gi
                 google.com/tpu: "4"
                 memory: 40G
