@@ -24,7 +24,7 @@ pip show tensorboard && pip uninstall -y tensorboard
 pip show tensorflow-text && pip uninstall -y tensorflow-text
 pip show torch_xla2 && pip uninstall -y torch_xla2
 
-pip install flax
+pip install flax==0.8.4
 pip install tensorflow-text
 pip install tensorflow
 
