@@ -490,7 +490,7 @@ class PyTorchEngine(engine_api.Engine):
       )
     # Left aligned, starts from 0, guaranteed no wrap
     else:
-      self._insert_no_wrap(prefix, decode_state, slot)
+      return self._insert_no_wrap(prefix, decode_state, slot)
 
   def precompute_ragged_block_indices(self, decode_state: DecodeState):
     """Precompute the ragged attention block indices. Ragged attention iterates the grid

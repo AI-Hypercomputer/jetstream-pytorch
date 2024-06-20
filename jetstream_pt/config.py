@@ -181,6 +181,7 @@ def create_engine_from_config_flags():
       sampling_algorithm=FLAGS.sampling_algorithm,
       nucleus_topp=FLAGS.nucleus_topp,
       topk=FLAGS.topk,
+      ring_buffer=FLAGS.ring_buffer,
   )
 
   print("Initialize engine", time.perf_counter() - start)
