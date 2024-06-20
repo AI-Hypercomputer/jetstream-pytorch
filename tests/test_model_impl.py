@@ -399,9 +399,6 @@ class ModelComponentTest(unittest.TestCase):
         continue
       new_dict[k] = v
 
-    import pdb
-
-    pdb.set_trace()
     model_ours = mixtral.Transformer(model_arg, env)
 
     # Invoke original model
