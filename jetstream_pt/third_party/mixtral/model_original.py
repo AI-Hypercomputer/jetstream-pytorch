@@ -23,6 +23,12 @@ from torch.nn import functional as F
 from .config import ModelArgs, find_multiple
 
 
+def find_multiple(n: int, k: int) -> int:
+  if n % k == 0:
+    return n
+  return n + k - (n % k)
+
+
 class KVCache(nn.Module):
 
   def __init__(
@@ -31,7 +37,8 @@ class KVCache(nn.Module):
       max_seq_length,
       n_heads,
       head_dim,
-      dtype=torch.bfloat16,
+      # dtype=torch.bfloat16,
+      dtype=torch.float32,
   ):
     super().__init__()
     cache_shape = (max_batch_size, n_heads, max_seq_length, head_dim)
@@ -191,22 +198,21 @@ class ConditionalFeedForward(nn.Module):
 
   def __init__(self, config):
     super().__init__()
+    # Replace the weight init of torch.empty with torch.rand for testing purpose
     self.w1 = nn.Parameter(
-        torch.empty(config.num_experts, config.intermediate_size, config.dim)
+        torch.rand(config.num_experts, config.intermediate_size, config.dim)
     )
     self.w2 = nn.Parameter(
-        torch.empty(config.num_experts, config.dim, config.intermediate_size)
+        torch.rand(config.num_experts, config.dim, config.intermediate_size)
     )
     self.w3 = nn.Parameter(
-        torch.empty(config.num_experts, config.intermediate_size, config.dim)
+        torch.rand(config.num_experts, config.intermediate_size, config.dim)
     )
 
   def forward(self, x: Tensor, expert_indices: Tensor) -> Tensor:
-    # T = num_tokens, I = intermediate size, D = hidden dim, A = activated experts
     w1_weights = self.w1[expert_indices]  # [T, A, D, D]
     w3_weights = self.w3[expert_indices]  # [T, A, D, D]
     w2_weights = self.w2[expert_indices]  # [T, A, D, D]
-    # x: [T, D]
     x1 = F.silu(torch.einsum("ti,taoi -> tao", x, w1_weights))
     x3 = torch.einsum("ti, taoi -> tao", x, w3_weights)
     expert_outs = torch.einsum("tao, taio -> tai", (x1 * x3), w2_weights)
@@ -215,7 +221,7 @@ class ConditionalFeedForward(nn.Module):
 
 class MOEFeedForward(nn.Module):
 
-  def __init__(self, config, env=None) -> None:
+  def __init__(self, config) -> None:
     super().__init__()
     self.gate = nn.Linear(config.dim, config.num_experts, bias=False)
     self.cond_ffn = ConditionalFeedForward(config)
@@ -261,7 +267,8 @@ def precompute_freqs_cis(
   freqs = torch.outer(t, freqs)
   freqs_cis = torch.polar(torch.ones_like(freqs), freqs)
   cache = torch.stack([freqs_cis.real, freqs_cis.imag], dim=-1)
-  return cache.to(dtype=torch.bfloat16)
+  # return cache.to(dtype=torch.bfloat16)
+  return cache
 
 
 def apply_rotary_emb(x: Tensor, freqs_cis: Tensor) -> Tensor:
