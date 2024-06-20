@@ -607,20 +607,24 @@ class Attention(nn.Module):
     with jax.named_scope("attn_rope"):
       xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
 
-    xk = xk.transpose(1, 2)
-    xv = xv.transpose(1, 2)
-    xq = xq.transpose(1, 2)
+    with jax.named_scope("attn_prepare"):
+      xk = xk.transpose(1, 2)
+      xv = xv.transpose(1, 2)
+      xq = xq.transpose(1, 2)
 
-    output = self.attention_kernel(
-        xq,
-        xk,
-        xv,
-        mask,
-        cache,
-        start,
-        end,
-        ragged_batch_index,
-        ragged_block_index,
-    ).type_as(xq)
-    output = output.transpose(-3, -2).contiguous().view(bsz, seqlen, -1)
+    with jax.named_scope("attn_kernel"):
+      output = self.attention_kernel(
+          xq,
+          xk,
+          xv,
+          mask,
+          cache,
+          start,
+          end,
+          ragged_batch_index,
+          ragged_block_index,
+      ).type_as(xq)
+
+    with jax.named_scope("attn_output"):
+      output = output.transpose(-3, -2).contiguous().view(bsz, seqlen, -1)
     return self.wo(output)
