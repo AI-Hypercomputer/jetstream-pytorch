@@ -65,7 +65,7 @@ class DecodeState:
       Tuple[jax.Array, jax.Array]
   ]  # only present in quantized kv
   current_position: int
-  lens: jax.Array  # [batch_size, 1]
+  lens: jax.Array  # [batch_size, 1], the output token length
   start: jax.Array  # [batch_size, 1], the starting pos for each slot
   input_pos: jax.Array  # [batch_size, 1] input pos for each slot
   mask: jax.Array  # [batch_size, seqlen] -inf for invalid; 0 for valid
@@ -295,11 +295,16 @@ class PyTorchEngine(engine_api.Engine):
   ):
     scales = []
     caches = []
-    pos = decode_state.current_position - prefix.seq_len
+    if self.env.ring_buffer:
+      current_pos = decode_state.current_position 
+    else:
+      current_pos = prefix.seq_len
+
+    pos = current_pos - prefix.seq_len
     tokens = decode_state.tokens.at[slot].set(prefix.token)
 
     x = jnp.arange(0, self.env.cache_sequence_length)
-    cond = jnp.logical_and(x <= decode_state.current_position, x >= pos)
+    cond = jnp.logical_and(x <= current_pos, x >= pos)
     mask_insert = jnp.where(cond, 0, float("-inf"))
     mask = decode_state.mask.at[slot].set(mask_insert)
     start = decode_state.start.at[slot].set(
@@ -470,18 +475,22 @@ class PyTorchEngine(engine_api.Engine):
     #     prefix,
     #     decode_state,
     # )
-    start_insert = decode_state.current_position - prefix.seq_len
-    end_insert = start_insert + prefix.caches[0][0].shape[2]  # padded seclen
-    return jax.lax.cond(
-        jnp.logical_and(
-            start_insert >= 0, end_insert < self.env.cache_sequence_length
-        ),
-        self._insert_no_wrap,
-        self._insert_wrap,
-        prefix,
-        decode_state,
-        slot,
-    )
+    if self.env.ring_buffer:
+      start_insert = decode_state.current_position - prefix.seq_len
+      end_insert = start_insert + prefix.caches[0][0].shape[2]  # padded seclen
+      return jax.lax.cond(
+          jnp.logical_and(
+              start_insert >= 0, end_insert < self.env.cache_sequence_length
+          ),
+          self._insert_no_wrap,
+          self._insert_wrap,
+          prefix,
+          decode_state,
+          slot,
+      )
+    # Left aligned, starts from 0, guaranteed no wrap
+    else:
+      self._insert_no_wrap(prefix, decode_state, slot)
 
   def precompute_ragged_block_indices(self, decode_state: DecodeState):
     """Precompute the ragged attention block indices. Ragged attention iterates the grid
@@ -782,6 +791,7 @@ def create_pytorch_engine(
     sampling_algorithm="greedy",
     nucleus_topp=None,
     topk=None,
+    ring_buffer=True,
 ) -> PyTorchEngine:
   """Returns: The pytorch engine."""
 
@@ -851,6 +861,7 @@ def create_pytorch_engine(
       sampling_algorithm=sampling_algorithm,
       nucleus_topp=nucleus_topp,
       topk=topk,
+      ring_buffer=ring_buffer,
   )
 
   if shard_on_batch and sharding_config:

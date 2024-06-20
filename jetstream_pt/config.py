@@ -83,6 +83,12 @@ flags.DEFINE_integer(
     "for performance tuning and debugging only",
     required=False,
 )
+flags.DEFINE_bool(
+    "ring_buffer",
+    True,
+    "Whether to enable ring buffer",
+    required=False,
+)
 flags.DEFINE_float(
     "temperature",
     1.0,
