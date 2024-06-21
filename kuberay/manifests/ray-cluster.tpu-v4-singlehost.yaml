@@ -49,6 +49,8 @@ spec:
                 name: client
               - containerPort: 8000
                 name: serve
+              - containerPort: 8888
+                name: grpc
         volumes:
           - emptyDir: {}
             name: ray-logs

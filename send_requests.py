@@ -1,9 +1,30 @@
-def send_sample_request():
-   import requests
-   prompt = "How do I cook fried rice?"
-   sample_input = {"prompt": prompt}
-   output = requests.post("http://localhost:8000/default", json=sample_input)
-   for line in output.iter_lines():
-      print(line.decode("utf-8"))
+import requests
+import os
+import grpc
 
-send_sample_request()
+from jetstream.core.proto import jetstream_pb2
+from jetstream.core.proto import jetstream_pb2_grpc
+
+prompt = "who is going to win Euro 2024?"
+prompt = "how do I cook fried rice?"
+
+channel = grpc.insecure_channel("localhost:8888")
+stub = jetstream_pb2_grpc.OrchestratorStub(channel)
+
+request = jetstream_pb2.DecodeRequest(
+    text_content=jetstream_pb2.DecodeRequest.TextContent(
+        text=prompt
+    ),
+    priority=0,
+    max_tokens=4,
+)
+
+response = stub.Decode(request)
+output = []
+for resp in response:
+  #print(resp)
+  output.extend(resp.stream_content.samples[0].text)
+
+text_output = "".join(output)
+print(f"Prompt: {prompt}")
+print(f"Response: {text_output}")

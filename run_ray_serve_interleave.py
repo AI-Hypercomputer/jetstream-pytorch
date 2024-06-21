@@ -10,13 +10,19 @@ from typing import Sequence
 from absl import app, flags
 from io import BytesIO  # pylint:disable=g-importing-member
 from typing import List
+from typing import Any, AsyncIterator
+
 from ray import serve
+from ray.serve.config import gRPCOptions
+
 from starlette.requests import Request
 from starlette.responses import Response
 import json
 
 import jax
 from jetstream.core import server_lib
+from jetstream.core import config_lib
+from jetstream.core import orchestrator
 from jetstream.core.config_lib import ServerConfig
 from jetstream_pt import ray_engine
 from jetstream_pt.config import FLAGS
@@ -24,6 +30,11 @@ from jetstream_pt.config import FLAGS
 import numpy as np
 from jetstream.engine import token_utils
 #from jetstream_pt import engine as je
+
+import grpc
+from jetstream.core.proto import jetstream_pb2
+from jetstream.core.proto import jetstream_pb2_grpc
+#from jetstream.core.proto.jetstream_pb2_grpc import add_OrchestratorServicer_to_server
 
 
 flags.DEFINE_integer("port", 9000, "port to listen on")
@@ -118,6 +129,9 @@ class JetStreamDeployment:
     print(f"devices: {devices}")
 
     self.batch_size = kwargs['batch_size']
+    self.threads = kwargs['threads']
+    self.port = kwargs['port']
+    self.devices = devices
 
     #if FLAGS.is_disaggregated:
     #  prefill_engine_list, decode_engine_list = create_disaggregated_engine()
@@ -131,88 +145,41 @@ class JetStreamDeployment:
     #)
 
     #else:
+
+
     self.engine = create_engine(**kwargs)
-    self.server_config = ServerConfig(
+    server_config = ServerConfig(
       interleaved_slices=(f"tpu={len(devices)}",),
       interleaved_engine_create_fns=(lambda a: self.engine,),
     )
 
-    print(f"server_config: {self.server_config}")
 
-    self.jetstream_server = server_lib.run(
-      threads=kwargs['threads'],
-      port=kwargs['port'],
-      config=self.server_config,
-      devices=devices,
-      jax_padding=False,  # Jax_padding must be set as False
+    engines = config_lib.get_engines(server_config, devices=devices)
+    prefill_params = [pe.load_params() for pe in engines.prefill_engines]
+    generate_params = [ge.load_params() for ge in engines.generate_engines]
+    shared_params = [ie.load_params() for ie in engines.interleaved_engines]
+    print("Loaded all weights.")
+
+
+    self.driver = orchestrator.Driver(
+      prefill_engines=engines.prefill_engines + engines.interleaved_engines,
+      generate_engines=engines.generate_engines + engines.interleaved_engines,
+      prefill_params=prefill_params + shared_params,
+      generate_params=generate_params + shared_params,
+      interleaved_mode=True,
+      jax_padding=False,
+      metrics_collector=None,
+      is_ray_backend=True,
     )
-    print("Started jetstream_server....")
 
-    #print("sleeping for 10 minutes...")
-    #time.sleep(10 * 60)
-    #print("sleep time over.")
+    self.orchestrator = orchestrator.LLMOrchestrator(driver=self.driver)
 
-  async def __call__(self, request: Request) -> Response:
-    request_dict = await request.json()
-    prompt = request_dict.pop("prompt")
-    print("Processing prompt ", prompt)
+    print("Started jetstream driver....")
 
-    start = time.perf_counter()
-    params = self.engine.load_params()
-    print("Load params ", time.perf_counter() - start)
 
-    metadata = self.engine.get_tokenizer()
-    tokenizer = self.engine.build_tokenizer(metadata)
-    max_output_length = 1024
+  async def Decode(self, request: jetstream_pb2.DecodeRequest) -> AsyncIterator[jetstream_pb2.DecodeResponse]:
 
-    #profiling_output = FLAGS.profiling_output
-    #profiling_prefill = FLAGS.profiling_prefill
-    #if profiling_output and profiling_prefill:
-    #  jax.profiler.start_trace(profiling_output)
-
-    decode_state = self.engine.init_decode_state()
-
-    slot = random.randint(0, self.batch_size - 1)
-    tokens, true_length = tokenizer.encode(prompt)
-
-    print(f"---- Input prompts are: {prompt}")
-    print(f"---- Encoded tokens are: {tokens}")
-
-    # pylint: disable-next=all
-    prefill_result = self.engine.prefill(
-        params=params, padded_tokens=tokens, true_length=true_length
-    )
-    # pylint: disable-next=all
-    decode_state = self.engine.insert(prefill_result, decode_state, slot=slot)
-    sampled_tokens_list = []
-    print(f"---- Streaming decode started on #slot{slot}.")
-    complete = np.zeros((1,), dtype=np.bool_)
-    while True:
-      #if profiling_output and not profiling_prefill:
-      #  jax.profiler.start_trace(profiling_output)
-      decode_state, result_tokens = self.engine.generate(params, decode_state)
-      #if profiling_output and not profiling_prefill:
-      #  jax.profiler.stop_trace()
-      result_tokens = result_tokens.convert_to_numpy()
-      output, complete = token_utils.process_result_tokens(
-          tokenizer=tokenizer,
-          slot=slot,
-          slot_max_length=max_output_length,
-          result_tokens=result_tokens,
-          complete=complete,
-      )
-      if complete[0]:
-        break
-      token_ids = output[0].token_ids
-      sampled_tokens_list.extend(token_ids)
-
-    print("---- All output tokens.")
-    tokens = sampled_tokens_list
-    print("---- All output text.")
-    text_outputs = tokenizer.decode(sampled_tokens_list)
-
-    ret = {"tokens": tokens, "text": text_outputs}
-    return Response(content=json.dumps(ret))
+    return self.orchestrator.Decode(request)
 
 
 def main(_argv):
@@ -234,8 +201,19 @@ def main(_argv):
     enable_jax_profiler=FLAGS.enable_jax_profiler,
     jax_profiler_port=FLAGS.jax_profiler_port,
   )
-  serve.run(deployment)
 
+  grpc_port = 8888
+  grpc_servicer_functions = [
+    "jetstream.core.proto.jetstream_pb2_grpc.add_OrchestratorServicer_to_server",
+  ]
+  serve.start(
+    grpc_options=gRPCOptions(
+      port=grpc_port,
+      grpc_servicer_functions=grpc_servicer_functions,
+    ),
+  )
+
+  serve.run(deployment)
 
 if __name__ == "__main__":
   app.run(main)
