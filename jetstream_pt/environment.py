@@ -207,13 +207,13 @@ class JetEngineEnvironment:
       if self._data.quant_config.enable_kv_quantization:
         caches.append(
             cache_manager.Int8KVCacheGenerate.empty(
-                shape, self.cache_sharding, self.bf16_enable
+                shape, self.cache_sharding, self.bf16_enable, env=self
             )
         )
       else:
         caches.append(
             cache_manager.KVCacheGenerate.empty(
-                shape, self.cache_sharding, self.bf16_enable
+                shape, self.cache_sharding, self.bf16_enable, env=self
             )
         )
     return caches

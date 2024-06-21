@@ -157,7 +157,9 @@ class PyTorchEngine(engine_api.Engine):
   ):
     if self.env.quant_config.enable_kv_quantization:
       caches_obj = [
-          cache_manager.Int8KVCacheGenerate(k, v, ks, vs, input_indexes)
+          cache_manager.Int8KVCacheGenerate(
+              k, v, ks, vs, input_indexes, env=self.env
+          )
           for (k, v), (ks, vs) in torchjax.to_torch(
               list(zip(caches, cache_scales))
           )
@@ -165,7 +167,7 @@ class PyTorchEngine(engine_api.Engine):
     else:
       caches_obj = [
           cache_manager.KVCacheGenerate(
-              k, v, input_indexes, self.cache_sharding
+              k, v, input_indexes, self.cache_sharding, env=self.env
           )
           for k, v in torchjax.to_torch(caches)
       ]
@@ -296,7 +298,7 @@ class PyTorchEngine(engine_api.Engine):
     scales = []
     caches = []
     if self.env.ring_buffer:
-      current_pos = decode_state.current_position 
+      current_pos = decode_state.current_position
     else:
       current_pos = prefix.seq_len
 
@@ -554,15 +556,12 @@ class PyTorchEngine(engine_api.Engine):
   ) -> tuple[DecodeState, engine_api.ResultTokens]:
     # seq_len = padded_tokens.shape[0]
     pos = decode_state.current_position
-
     if self.env.ring_buffer:
       input_indexes = jnp.full((1,), pos)
-    # fill mask first
       mask = decode_state.mask.at[:, decode_state.current_position].set(0)
     else:
       input_indexes = decode_state.input_pos
       batch = jnp.arange(self.env.batch_size)
-      # batch = jnp.expand_dims(batch, 1)
       mask = decode_state.mask.at[batch, decode_state.input_pos].set(0)
     ragged_batch_index, ragged_block_index = (
         self.precompute_ragged_block_indices(decode_state)
@@ -589,9 +588,15 @@ class PyTorchEngine(engine_api.Engine):
       input_pos = decode_state.input_pos + 1
       lens = decode_state.lens + 1
     else:
-      input_pos = jnp.where(decode_state.input_pos == 0, 0, decode_state.input_pos + 1 % self.env.cache_len)
-      lens = jnp.where(decode_state.lens == 0, 0, decode_state.lens + 1 % self.env.cache_len)
-    
+      input_pos = jnp.where(
+          decode_state.input_pos == 0,
+          0,
+          decode_state.input_pos + 1 % self.env.cache_len,
+      )
+      lens = jnp.where(
+          decode_state.lens == 0, 0, decode_state.lens + 1 % self.env.cache_len
+      )
+
     data = jnp.concatenate(
         [
             decode_state.tokens,
@@ -625,6 +630,7 @@ class PyTorchEngine(engine_api.Engine):
         "new_pos",
         (decode_state.current_position + 1) % self.env.cache_sequence_length,
     )
+    print(f"new_token: {jnp.squeeze(next_token)}")
     return new_decode_state, result_tokens
 
   # pylint: disable-next=all
