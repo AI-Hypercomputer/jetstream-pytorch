@@ -32,6 +32,10 @@ class QuantizationConfig:
   enable_weight_quantization: bool = False
   num_bits_weight: int = 8
   is_blockwise_weight: bool = False
+  block_size_weight: int = 128
+  is_symmetric_weight: bool = True
+
+  enable_activation_quantization: bool = False
 
   enable_kv_quantization: bool = False
 
@@ -95,6 +99,19 @@ class JetEngineEnvironmentData:
 
   # Starting position
   starting_position: int = 512
+
+  # Variables used in token sampling
+  # sampling algorithm to use ("greedy", "weighted", "neucleus", "topk")
+  sampling_algorithm: str = "greedy"
+
+  # size of top k used when sampling next token
+  topk: int = 0
+
+  # restricting to p probability mass before sampling
+  nucleus_topp: float = 0.0
+
+  # temperature parameter for scaling probability
+  temperature: float = 1.0
 
 
 # pylint: disable-next=all

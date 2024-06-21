@@ -42,6 +42,11 @@ flags.DEFINE_string("profiling_output", "", "The profiling output")
 
 # Quantization related flags
 flags.DEFINE_bool("quantize_weights", False, "weight quantization")
+flags.DEFINE_bool(
+    "quantize_activation",
+    False,
+    "Quantize Q,K,V projection and FeedForward activation.",
+)
 flags.DEFINE_string(
     "quantize_type", "int8_per_channel", "Type of quantization."
 )
@@ -78,6 +83,29 @@ flags.DEFINE_integer(
     "for performance tuning and debugging only",
     required=False,
 )
+flags.DEFINE_float(
+    "temperature",
+    1.0,
+    "temperature parameter for scaling probability."
+    "Only invoked when sampling algorithm is set to"
+    "weighted or topk",
+)
+flags.DEFINE_string(
+    "sampling_algorithm",
+    "greedy",
+    "sampling algorithm to use. Options:"
+    "('greedy', 'weighted', 'neucleus', 'topk')",
+)
+flags.DEFINE_float(
+    "nucleus_topp",
+    0.0,
+    "restricting to p probability mass before sampling",
+)
+flags.DEFINE_integer(
+    "topk",
+    0,
+    "size of top k used when sampling next token",
+)
 
 
 def create_quantization_config_from_flags():
@@ -90,6 +118,9 @@ def create_quantization_config_from_flags():
   config.enable_weight_quantization = True
   config.num_bits_weight = 8 if "int8" in quantize_type else 4
   config.is_blockwise_weight = "blockwise" in quantize_type
+
+  config.enable_activation_quantization = FLAGS.quantize_activation
+
   config.enable_kv_quantization = FLAGS.quantize_kv_cache
   return config
 
@@ -140,6 +171,10 @@ def create_engine_from_config_flags():
       shard_on_batch=FLAGS.shard_on_batch,
       ragged_mha=FLAGS.ragged_mha,
       starting_position=FLAGS.starting_position,
+      temperature=FLAGS.temperature,
+      sampling_algorithm=FLAGS.sampling_algorithm,
+      nucleus_topp=FLAGS.nucleus_topp,
+      topk=FLAGS.topk,
   )
 
   print("Initialize engine", time.perf_counter() - start)

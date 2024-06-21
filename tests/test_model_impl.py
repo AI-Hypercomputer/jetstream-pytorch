@@ -23,6 +23,9 @@ from jetstream_pt.third_party.llama import model_exportable
 from jetstream_pt.third_party.llama import model_original
 from jetstream_pt.third_party.gemma import model_original as gemma_orig
 from jetstream_pt.third_party.gemma import model as gemma
+from jetstream_pt.third_party.mixtral import model_original as mixtral_orig
+from jetstream_pt.third_party.mixtral import model as mixtral
+from jetstream_pt.third_party.mixtral import config as mixtral_config
 from jetstream_pt import torchjax
 from jetstream_pt import layers
 from jetstream_pt import cache_manager
@@ -359,6 +362,90 @@ class ModelComponentTest(unittest.TestCase):
 
     print("Transformer: Diff norm", (result_torch - expected_out).norm())
     self.assertTrue(torch.allclose(result_torch, expected_out, atol=1e-4))
+
+  # pylint: disable-next=all
+  def test_mixtral_transformer(self):
+    """test transformer diff between original model vs xla_model"""
+    env, model_arg = helpers.make_mixtral_env(False)
+
+    model_orig = mixtral_orig.Transformer(model_arg)
+    model_orig.setup_caches(max_batch_size=1, max_seq_length=env.cache_len)
+
+    state_dict = dict(model_orig.state_dict())
+    state_dict["freqs_cis"] = model_orig.freqs_cis
+    new_dict = {}
+
+    for k, v in state_dict.items():
+      if "kv_cache" in k:
+        continue
+      if "wqkv" in k:
+        wq = k.replace("wqkv", "wq")
+        wk = k.replace("wqkv", "wk")
+        wv = k.replace("wqkv", "wv")
+        kv_size = model_arg.n_local_heads * model_arg.head_dim
+        wq_t, wk_t, wv_t = v.split([model_arg.dim, kv_size, kv_size], dim=0)
+
+        new_dict[wq] = wq_t
+        new_dict[wk] = wk_t
+        new_dict[wv] = wv_t
+        continue
+      # "Freqs_cis" for exported model is calculated differently, by complex data type
+      if "freqs_cis" in k:
+        new_dict[k] = mixtral.precompute_freqs_cis(
+            model_arg.block_size,
+            model_arg.dim // model_arg.n_head,
+            model_arg.rope_base,
+        )
+        continue
+      new_dict[k] = v
+
+    model_ours = mixtral.Transformer(model_arg, env)
+
+    # Invoke original model
+    seqlen = 32
+    x = torch.randint(0, 32000, (1, seqlen))  # (batch, seqlen, embedding dim)
+    start_pos = 0
+    mask = self._prefill_mask(seqlen, start_pos)
+    input_pos = torch.arange(0, seqlen)
+    inputs_orig = (x, input_pos)
+
+    expected_out = model_orig(*inputs_orig)
+
+    # Invoke the exported model
+    caches = env.make_caches_prefill()
+
+    input_ours = (
+        x,
+        input_pos,
+        caches,
+        mask,
+    )
+    result_torch = helpers.call_xla_model(model_ours, new_dict, input_ours)
+
+    print("Transformer: Diff norm", (result_torch - expected_out).norm())
+    self.assertTrue(torch.allclose(result_torch, expected_out, atol=1e-4))
+
+  def test_mixtral_moe(self):
+    config = mixtral_config.ModelArgs()
+    config.intermediate_size = 16
+    config.dim = 16
+    m = mixtral.ConditionalFeedForward(config)
+    # random init
+    states = m.state_dict()
+    for k, v in states.items():
+      states[k].normal_()
+    m.load_state_dict(states, assign=True)
+
+    seqlen = 3
+    num_expert = 8
+    num_active_expert = 2
+    x = torch.randn(seqlen, config.dim)
+    exp_index = torch.randint(0, num_expert, (seqlen, num_active_expert))
+
+    res1 = m.forward_for_short_seq_len(x, exp_index)
+    res2 = m.forward_for_long_seq_len(x, exp_index)
+
+    torch.testing.assert_close(res1, res2)
 
 
 if __name__ == "__main__":

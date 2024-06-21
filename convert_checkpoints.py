@@ -428,13 +428,6 @@ def _get_llama_state_dict(input_ckpt_dir):
   return state_dict, params
 
 
-def fix_json(text):
-  text = text.replace("'", '"')
-  lines = text.split("\n")
-  lines[-3] = lines[-3].replace(",", "")
-  return "\n".join(lines)
-
-
 def _get_gemma_state_dict(input_ckpt_dir):
   ckpt_file = list(input_ckpt_dir.glob("*.ckpt"))
   assert len(ckpt_file) == 1, "only expect 1 ckpt file for Gemma model."
@@ -442,7 +435,7 @@ def _get_gemma_state_dict(input_ckpt_dir):
   state_dict = torch.load(str(ckpt_file), map_location=torch.device("cpu"))[
       "model_state_dict"
   ]
-  config_text = fix_json((input_ckpt_dir / "config.json").read_text())
+  config_text = (input_ckpt_dir / "config.json").read_text()
   model_config = json.loads(config_text)
   for key in list(state_dict.keys()):
     if state_dict[key].dtype.is_complex and _OUTPUT_SAFETENSORS.value:
@@ -593,7 +586,7 @@ def main(argv) -> None:
   if FLAGS.quantize_weights:
     quantize_num_bits = 8 if "int8" in FLAGS.quantize_type else 4
     is_blockwise = "blockwise" in FLAGS.quantize_type
-    weight_axis = lambda x: 0 if x in quantize_embedding_weight_map else 1
+    weight_axis = lambda x: 0 if x in quantize_embedding_weight_map else -1
     start = time.perf_counter()
     state_dict = _quantize_state_dict(
         state_dict,

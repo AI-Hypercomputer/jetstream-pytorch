@@ -24,14 +24,12 @@ pip show tensorboard && pip uninstall -y tensorboard
 pip show tensorflow-text && pip uninstall -y tensorflow-text
 pip show torch_xla2 && pip uninstall -y torch_xla2
 
-pip install flax==0.8.3
-pip install -U "jax[cuda12]==0.4.28"
+pip install flax==0.8.4
 pip install tensorflow-text
 pip install tensorflow
 
 pip install ray[default]==2.22.0
 # torch cpu
-pip install torch==2.2.1+cpu --index-url https://download.pytorch.org/whl/cpu
 pip install tensorflow flatbuffers absl-py sentencepiece seqio google-cloud-storage 
 pip install safetensors colorama coverage humanize
 
@@ -39,3 +37,5 @@ git submodule update --init --recursive
 pip show google-jetstream && pip uninstall -y google-jetstream
 pip show torch_xla2 && pip uninstall -y torch_xla2
 pip install -e .
+pip install -U jax[cuda12]==0.4.30
+pip install -U torch==2.3.1+cpu --index-url https://download.pytorch.org/whl/cpu

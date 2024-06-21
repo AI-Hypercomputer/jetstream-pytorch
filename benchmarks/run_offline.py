@@ -16,6 +16,9 @@ import logging
 import os
 import time
 
+# import torch_xla2 first!
+# pylint: disable-next=all
+import torch_xla2
 import jax
 import jax.numpy as jnp
 # pylint: disable-next=all
