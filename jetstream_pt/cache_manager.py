@@ -91,7 +91,7 @@ class KVCacheGenerate:
       cache_v: torch.Tensor,  # previous cache
       position: int,  # position to store the cache
       sharding,
-      env,
+      env = None,
   ):
     super().__init__()
     self.cache_k = cache_k

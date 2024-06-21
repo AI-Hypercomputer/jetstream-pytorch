@@ -72,7 +72,8 @@ class QuantizationTest(unittest.TestCase):
     """test kv cache quantization"""
     cache_shape = (3, 2, 100, 2)  # bs, num heads, seqlen, dim
     with jax.default_device(jax.devices("cpu")[0]):
-      cache = cache_manager.Int8KVCacheGenerate.empty(cache_shape, None, False)
+      env, _ = helpers.make_env_tiny()
+      cache = cache_manager.Int8KVCacheGenerate.empty(cache_shape, None, False, env)
       # seqlen is 1
       k = self._xla_tensor((3, 2, 1, 2))
       v = self._xla_tensor((3, 2, 1, 2))
@@ -101,7 +102,7 @@ class QuantizationTest(unittest.TestCase):
 
       cache_k, cache_v = torchjax.to_torch((cache_k_jax, cache_v_jax))
 
-      cache = cache_manager.KVCacheGenerate(cache_k, cache_v, [0], None)
+      cache = cache_manager.KVCacheGenerate(cache_k, cache_v, [0], None, env)
 
       # 1 is seqlen
       xq = jax.random.normal(key, (3, 2, 1, 2))
@@ -119,7 +120,7 @@ class QuantizationTest(unittest.TestCase):
       cache_k_int, cache_k_scaler, _ = quantize_tensor(cache_k, (1, 3))
       cache_v_int, cache_v_scaler, _ = quantize_tensor(cache_v, (1, 3))
       cache_int = cache_manager.Int8KVCacheGenerate(
-          cache_k_int, cache_v_int, cache_k_scaler, cache_v_scaler, [0], None
+          cache_k_int, cache_v_int, cache_k_scaler, cache_v_scaler, [0], None, env
       )
       attention_quant = layers.Int8KVAttentionKernel(env)
       int_res = attention_quant(xq, xk, xv, None, cache_int)
