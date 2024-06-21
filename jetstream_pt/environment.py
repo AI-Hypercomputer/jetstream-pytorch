@@ -123,6 +123,7 @@ class JetEngineEnvironment:
   def __init__(self, data: JetEngineEnvironmentData):
     self._data = data
 
+    self.batch_size = self._data.batch_size
     self.seq_len = self._data.max_input_sequence_length
     self.cache_len = self._data.cache_sequence_length
     self.ragged_mha = self._data.ragged_mha
