@@ -84,6 +84,8 @@ huggingface-cli download mistralai/Mixtral-8x7B-v0.1 --local-dir $input_ckpt_dir
 
 ## Run weight safetensor convert
 
+There are limited support (only Llama models as of now) for accessing checkpoints on GCS. Accessing GCS takes a long time and therefore storing checkpoints to local is recommended.
+
 ```bash
 export input_ckpt_dir=Original llama weights directory
 export output_ckpt_dir=The output directory
