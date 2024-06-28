@@ -65,7 +65,7 @@ class DecodeState:
       Tuple[jax.Array, jax.Array]
   ]  # only present in quantized kv
   current_position: int
-  lens: jax.Array  # [batch_size, 1]
+  lens: jax.Array  # [batch_size, 1], the output token length
   start: jax.Array  # [batch_size, 1], the starting pos for each slot
   input_pos: jax.Array  # [batch_size, 1] input pos for each slot
   mask: jax.Array  # [batch_size, seqlen] -inf for invalid; 0 for valid
@@ -157,7 +157,9 @@ class PyTorchEngine(engine_api.Engine):
   ):
     if self.env.quant_config.enable_kv_quantization:
       caches_obj = [
-          cache_manager.Int8KVCacheGenerate(k, v, ks, vs, input_indexes)
+          cache_manager.Int8KVCacheGenerate(
+              k, v, ks, vs, input_indexes, env=self.env
+          )
           for (k, v), (ks, vs) in torchjax.to_torch(
               list(zip(caches, cache_scales))
           )
@@ -165,7 +167,7 @@ class PyTorchEngine(engine_api.Engine):
     else:
       caches_obj = [
           cache_manager.KVCacheGenerate(
-              k, v, input_indexes, self.cache_sharding
+              k, v, input_indexes, self.cache_sharding, env=self.env
           )
           for k, v in torchjax.to_torch(caches)
       ]
@@ -295,11 +297,16 @@ class PyTorchEngine(engine_api.Engine):
   ):
     scales = []
     caches = []
-    pos = decode_state.current_position - prefix.seq_len
+    if self.env.ring_buffer:
+      current_pos = decode_state.current_position
+    else:
+      current_pos = prefix.seq_len
+
+    pos = current_pos - prefix.seq_len
     tokens = decode_state.tokens.at[slot].set(prefix.token)
 
     x = jnp.arange(0, self.env.cache_sequence_length)
-    cond = jnp.logical_and(x <= decode_state.current_position, x >= pos)
+    cond = jnp.logical_and(x <= current_pos, x >= pos)
     mask_insert = jnp.where(cond, 0, float("-inf"))
     mask = decode_state.mask.at[slot].set(mask_insert)
     start = decode_state.start.at[slot].set(
@@ -470,18 +477,22 @@ class PyTorchEngine(engine_api.Engine):
     #     prefix,
     #     decode_state,
     # )
-    start_insert = decode_state.current_position - prefix.seq_len
-    end_insert = start_insert + prefix.caches[0][0].shape[2]  # padded seclen
-    return jax.lax.cond(
-        jnp.logical_and(
-            start_insert >= 0, end_insert < self.env.cache_sequence_length
-        ),
-        self._insert_no_wrap,
-        self._insert_wrap,
-        prefix,
-        decode_state,
-        slot,
-    )
+    if self.env.ring_buffer:
+      start_insert = decode_state.current_position - prefix.seq_len
+      end_insert = start_insert + prefix.caches[0][0].shape[2]  # padded seclen
+      return jax.lax.cond(
+          jnp.logical_and(
+              start_insert >= 0, end_insert < self.env.cache_sequence_length
+          ),
+          self._insert_no_wrap,
+          self._insert_wrap,
+          prefix,
+          decode_state,
+          slot,
+      )
+    # Left aligned, starts from 0, guaranteed no wrap
+    else:
+      return self._insert_no_wrap(prefix, decode_state, slot)
 
   def precompute_ragged_block_indices(self, decode_state: DecodeState):
     """Precompute the ragged attention block indices. Ragged attention iterates the grid
@@ -545,10 +556,13 @@ class PyTorchEngine(engine_api.Engine):
   ) -> tuple[DecodeState, engine_api.ResultTokens]:
     # seq_len = padded_tokens.shape[0]
     pos = decode_state.current_position
-    input_indexes = jnp.full((1,), pos)
-
-    # fill mask first
-    mask = decode_state.mask.at[:, decode_state.current_position].set(0)
+    if self.env.ring_buffer:
+      input_indexes = jnp.full((1,), pos)
+      mask = decode_state.mask.at[:, decode_state.current_position].set(0)
+    else:
+      input_indexes = decode_state.input_pos
+      batch = jnp.arange(self.env.batch_size)
+      mask = decode_state.mask.at[batch, decode_state.input_pos].set(0)
     ragged_batch_index, ragged_block_index = (
         self.precompute_ragged_block_indices(decode_state)
     )
@@ -570,7 +584,19 @@ class PyTorchEngine(engine_api.Engine):
     )
 
     next_token = self._sampling(logits, self.env.batch_size)
-    lens = decode_state.lens + 1
+    if self.env.ring_buffer:
+      input_pos = decode_state.input_pos + 1
+      lens = decode_state.lens + 1
+    else:
+      input_pos = jnp.where(
+          decode_state.input_pos == 0,
+          0,
+          decode_state.input_pos + 1 % self.env.cache_len,
+      )
+      lens = jnp.where(
+          decode_state.lens == 0, 0, decode_state.lens + 1 % self.env.cache_len
+      )
+
     data = jnp.concatenate(
         [
             decode_state.tokens,
@@ -597,15 +623,14 @@ class PyTorchEngine(engine_api.Engine):
         (decode_state.current_position + 1) % self.env.cache_sequence_length,
         lens,
         decode_state.start,
-        decode_state.input_pos + 1,
+        input_pos,
         mask,
     )
     print(
         "new_pos",
         (decode_state.current_position + 1) % self.env.cache_sequence_length,
     )
-    print("cache_seq_len", self.env.cache_sequence_length)
-
+    print(f"new_token: {jnp.squeeze(next_token)}")
     return new_decode_state, result_tokens
 
   # pylint: disable-next=all
@@ -782,6 +807,7 @@ def create_pytorch_engine(
     sampling_algorithm="greedy",
     nucleus_topp=None,
     topk=None,
+    ring_buffer=True,
 ) -> PyTorchEngine:
   """Returns: The pytorch engine."""
 
@@ -851,6 +877,7 @@ def create_pytorch_engine(
       sampling_algorithm=sampling_algorithm,
       nucleus_topp=nucleus_topp,
       topk=topk,
+      ring_buffer=ring_buffer,
   )
 
   if shard_on_batch and sharding_config:

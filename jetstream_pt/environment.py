@@ -100,6 +100,9 @@ class JetEngineEnvironmentData:
   # Starting position
   starting_position: int = 512
 
+  # Ring buffer
+  ring_buffer: bool = True
+
   # Variables used in token sampling
   # sampling algorithm to use ("greedy", "weighted", "neucleus", "topk")
   sampling_algorithm: str = "greedy"
@@ -120,11 +123,13 @@ class JetEngineEnvironment:
   def __init__(self, data: JetEngineEnvironmentData):
     self._data = data
 
+    self.batch_size = self._data.batch_size
     self.seq_len = self._data.max_input_sequence_length
     self.cache_len = self._data.cache_sequence_length
     self.ragged_mha = self._data.ragged_mha
     self.block_size = self._data.block_size
     self.starting_position = self._data.starting_position
+    self.ring_buffer = self._data.ring_buffer
     P = jax.sharding.PartitionSpec
 
     num_of_partitions = jax.device_count()
@@ -202,13 +207,13 @@ class JetEngineEnvironment:
       if self._data.quant_config.enable_kv_quantization:
         caches.append(
             cache_manager.Int8KVCacheGenerate.empty(
-                shape, self.cache_sharding, self.bf16_enable
+                shape, self.cache_sharding, self.bf16_enable, env=self
             )
         )
       else:
         caches.append(
             cache_manager.KVCacheGenerate.empty(
-                shape, self.cache_sharding, self.bf16_enable
+                shape, self.cache_sharding, self.bf16_enable, env=self
             )
         )
     return caches
