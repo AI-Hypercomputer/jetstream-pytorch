@@ -85,7 +85,7 @@ class ModelComponentTest(unittest.TestCase):
         (cache_array_k, cache_array_v)
     )
     cache_decode = cache_manager.KVCacheGenerate(
-        cache_array_k, cache_array_v, pos, None
+        cache_array_k, cache_array_v, pos, None, env
     )
     return cache_decode
 
