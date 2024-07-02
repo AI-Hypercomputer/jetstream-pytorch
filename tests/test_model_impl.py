@@ -101,6 +101,7 @@ class ModelComponentTest(unittest.TestCase):
         hidden_size=model_arg.dim,
         device="cpu",
         env=env,
+        layer_id=0,
     )
 
     seqlen = 32
