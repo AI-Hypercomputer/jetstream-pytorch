@@ -100,6 +100,10 @@ class JetEngineEnvironmentData:
   # Starting position
   starting_position: int = 512
 
+  #
+  flash_attention: bool = True
+
+  generate_cache_stacked: bool = False
   # Variables used in token sampling
   # sampling algorithm to use ("greedy", "weighted", "neucleus", "topk")
   sampling_algorithm: str = "greedy"
@@ -125,6 +129,9 @@ class JetEngineEnvironment:
     self.ragged_mha = self._data.ragged_mha
     self.block_size = self._data.block_size
     self.starting_position = self._data.starting_position
+    self.flash_attention = self._data.flash_attention
+    self.generate_cache_stacked = self._data.generate_cache_stacked
+    self.num_layers = self._data.num_layers
     P = jax.sharding.PartitionSpec
 
     num_of_partitions = jax.device_count()
@@ -138,12 +145,23 @@ class JetEngineEnvironment:
     self.x_sharding = jsharding.NamedSharding(self.mesh, P("x"))
     self.replicated = jsharding.NamedSharding(self.mesh, P())
 
+    if self.generate_cache_stacked:
+      
+      self.attention_kv_axis_names = (
+      "layer",
+      "batch",
+      "num_attn_heads",
+      "sequence_length",
+      "head_dim",
+    )
     if data.shard_on_batch:
-      cache_sharding_axis = 0
+      self.kv_cache_shard_axis = "batch"
     else:
-      cache_sharding_axis = self.attention_kv_axis_names.index(
-          self.kv_cache_shard_axis
-      )
+      self.kv_cache_shard_axis = "num_attn_heads"
+
+    cache_sharding_axis = self.attention_kv_axis_names.index(
+        self.kv_cache_shard_axis
+    )
 
     if self.cache_shape[cache_sharding_axis] == 1:
       # cannot shard on an axis that is 1
@@ -198,17 +216,24 @@ class JetEngineEnvironment:
     caches = []
     shape = self._data.cache_shape
 
-    for _ in range(self.num_layers):
+    if self.generate_cache_stacked:
+      cache_shape = (self.num_layers, *shape)
+      layered_cache_count = 1
+    else:
+      cache_shape = shape
+      layered_cache_count = self.num_layers
+
+    for _ in range(layered_cache_count):
       if self._data.quant_config.enable_kv_quantization:
         caches.append(
             cache_manager.Int8KVCacheGenerate.empty(
-                shape, self.cache_sharding, self.bf16_enable
+                cache_shape, self.cache_sharding, self
             )
         )
       else:
         caches.append(
             cache_manager.KVCacheGenerate.empty(
-                shape, self.cache_sharding, self.bf16_enable
+                cache_shape, self.cache_sharding, self
             )
         )
     return caches

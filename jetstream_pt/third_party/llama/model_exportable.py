@@ -94,6 +94,7 @@ class TransformerBlock(nn.Module):
         args.dim,
         env=env,
         device=args.device,
+        layer_id=layer_id,
     )
     self.feed_forward = FeedForward(
         dim=args.dim,
@@ -227,12 +228,18 @@ class Transformer(nn.Module):
       freqs_cis = self.freqs_cis[input_pos]
       freqs_cis = freqs_cis.reshape(bsz, seqlen, -1)
 
-    assert len(caches) == len(
-        self.layers
-    ), f"Number of caches ({len(caches)}) and layers ({len(self.layers)}) dont match"
+    # Should check more thoroughly, as of now, when prefill, it's always not stacked. When generate, it's controlled by the parameter.
+    # target_cache_layers = 1 if self.env.generate_cache_stacked else len(self.layers)
+    # assert len(caches) == target_cache_layers, f"Number of caches ({len(caches)}) and layers ({target_cache_layers}) dont match"
+  
     end = None if start is None else (start + input_pos) % self.env.cache_len
-    for layer, cache in zip(self.layers, caches):
-      with jax.named_scope("TransformerBlock_Layer_" + str(layer.layer_id)):
+    for layer_id, layer in enumerate(self.layers):
+      if not caches[0].stacked:
+        cache = caches[layer_id]
+      else:  # For stacked case, there is only 1 layer of kv cache
+        cache = caches[0]
+
+      with jax.named_scope("TransformerBlock_Layer_" + str(layer_id)):
         h = layer(
             h,
             freqs_cis,

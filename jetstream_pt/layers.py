@@ -361,18 +361,20 @@ def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
 
 class AttentionKernel:
 
-  def __init__(self, env):
+  def __init__(self, env, layer_id):
     self.env = env
     self.shard_axis = 0 if self.env.shard_on_batch else 1
     qkv_pspec = self.env.partition_by_axis(self.shard_axis)  # Number of heads
     others_pspec = self.env.partition_by_axis()
     self.dense_attention = ak.dense_attention
+    self.flash_attention = ak.flash_attention
     self.ragged_attention = ak.RaggedAttentionKernel(
         env,
         input_specs=(*([qkv_pspec] * 3), *([others_pspec] * 4)),
         output_specs=(qkv_pspec, (others_pspec, others_pspec)),
         sharding_axis=self.shard_axis,
     )
+    self.layer_id = layer_id
 
   def __call__(
       self,
@@ -397,17 +399,15 @@ class AttentionKernel:
     bsz, num_heads, seqlen, head_dim = xq.shape
     _, num_kv_heads, _, kv_head_dim = xk.shape
     n_rep = num_heads // num_kv_heads
+
     if not self.env.ragged_mha and seqlen == 1:
-      xq = torch.broadcast_to(xq, (xq.shape[0], xq.shape[1], 2, xq.shape[3]))
+      xq_expanded = torch.broadcast_to(xq, (xq.shape[0], xq.shape[1], 2, xq.shape[3]))
+    else:
+      xq_expanded = xq
 
-    with jax.named_scope("attn_insert_cache"):
-      keys, values = cache.update(xk, xv)
-      keys = repeat_kv(keys, n_rep)
-      values = repeat_kv(values, n_rep)
-
-    with jax.named_scope("attn_qkv"):
+    def attend(xq, keys, values, local_mask=None):
       if self.env.ragged_mha and seqlen == 1:
-        output, _ = torch_xla2.interop.call_jax(
+        local_output, (local_max, local_denom) = torch_xla2.interop.call_jax(
             self.ragged_attention,
             xq,
             keys,
@@ -417,31 +417,79 @@ class AttentionKernel:
             ragged_batch_index,
             ragged_block_index,
         )
+      elif self.env.flash_attention:
+        with torch_xla2.default_env():
+          local_output, (local_max, local_denom) = self.flash_attention(xq, keys, values, mask=local_mask)
       else:
-        output = self.dense_attention(xq, keys, values, None, None, mask)
+        local_output = self.dense_attention(xq, keys, values, None, None, local_mask)
+        local_max = None
+        local_denom = None
 
       if not self.env.ragged_mha and seqlen == 1:
-        output = output[:, :, 0:1, :]
-      # For XLA matmul performance boost
-      # output = torch.matmul(scores, values)
-      self.env.apply_sharding(output, axis=self.shard_axis)
-      return output
+        local_output = local_output[:, :, 0:1, :]
+        if local_max is not None:
+          local_max = local_max[:, :, 0:1, :]
+        if local_denom is not None:
+          local_denom = local_denom[:, :, 0:1, :]
+
+      print(f"attention kernel local_output {local_output.shape} seqlen {seqlen}")
+      if local_max is not None and local_denom is not None:
+        print(f"local_max {local_max.shape} local_denom {local_denom.shape}")
+      self.env.apply_sharding(local_output, axis=self.shard_axis)
+      return local_output, (local_max, local_denom)
+    
+
+    
+    with jax.named_scope("attn_insert_cache"):
+      keys, values = cache.update(xk, xv, self.layer_id)
+      keys = repeat_kv(keys, n_rep)
+      values = repeat_kv(values, n_rep)
+
+    print(f"attention kernel xq {xq.shape} seqlen {seqlen} keys {keys.shape} mask {mask.shape}")
+    with jax.named_scope("attn_qkv"):
+      existing_output, (existing_max, existing_denom) = attend(xq_expanded, keys, values, mask)
+
+    # For non flash attention or prefill, existing output contains everything
+    if not self.env.flash_attention or seqlen > 1:
+      return existing_output
+
+    # For flash attention, existing output contains the existing kv cache generated logits
+    with jax.named_scope("attn_new_qkv"):
+      new_keys = repeat_kv(xk, n_rep)
+      new_values = repeat_kv(xv, n_rep)
+      new_output, (new_max, new_denom) = attend(xq, new_keys, new_values, None)
+      # if cache.cache_k is None:  # Prefill
+      #   return new_output
+
+    with jax.named_scope("attn_global"):
+      print(f"existing_output {existing_output} existing_max {existing_max} existing_denom {existing_denom}")
+      print(f"new_output {new_output} new_max {new_max} new_denom {new_denom}")
+
+      global_sum = existing_denom * torch.exp(existing_max) + new_denom * torch.exp(new_max)
+      existing_output = existing_output * existing_denom * torch.exp(existing_max) / global_sum
+      new_output = new_output * new_denom * torch.exp(new_max) / global_sum
+      attn_out = existing_output + new_output
+
+      
+      return attn_out
 
 
 class Int8KVAttentionKernel:
 
-  def __init__(self, env):
+  def __init__(self, env, layer_id):
     self.env = env
     self.shard_axis = 0 if self.env.shard_on_batch else 1
     qkv_pspec = self.env.partition_by_axis(self.shard_axis)  # Number of heads
     others_pspec = self.env.partition_by_axis()
     self.dense_attention = ak.dense_attention
+    self.flash_attention = ak.flash_attention_quantized
     self.ragged_attention = ak.RaggedAttentionKernel(
         env,
         input_specs=(*([qkv_pspec] * 3), *([others_pspec] * 6)),
         output_specs=(qkv_pspec, (others_pspec, others_pspec)),
         sharding_axis=self.shard_axis,
     )
+    self.layer_id = layer_id
 
   def __call__(
       self,
@@ -468,16 +516,13 @@ class Int8KVAttentionKernel:
     n_rep = num_heads // num_kv_heads
 
     if not self.env.ragged_mha and seqlen == 1:
-      xq = torch.broadcast_to(xq, (xq.shape[0], xq.shape[1], 2, xq.shape[3]))
+      xq_expanded = torch.broadcast_to(xq, (xq.shape[0], xq.shape[1], 2, xq.shape[3]))
+    else:
+      xq_expanded = xq
 
-    with jax.named_scope("attn_insert_cache"):
-      keys, values, k_scaler, v_scaler = cache.update(xk, xv)
-      keys = repeat_kv(keys, n_rep)
-      values = repeat_kv(values, n_rep)
-
-    with jax.named_scope("attn_qkv"):
+    def attend(xq, keys, values, k_scaler, v_scaler, local_mask=None):
       if self.env.ragged_mha and seqlen == 1:
-        output, _ = torch_xla2.interop.call_jax(
+        local_output, (local_max, local_denom) = torch_xla2.interop.call_jax(
             self.ragged_attention,
             xq,
             keys,
@@ -489,22 +534,63 @@ class Int8KVAttentionKernel:
             k_scaler,
             v_scaler,
         )
+      elif self.env.flash_attention:
+        with torch_xla2.default_env():
+          local_output, (local_max, local_denom) = self.flash_attention(xq, keys, values, mask=local_mask)
       else:
-        output = self.dense_attention(
-            xq, keys, values, k_scaler, v_scaler, mask
-        )
+        local_output = self.dense_attention(xq, keys, values, k_scaler, v_scaler, local_mask)
+        local_max = None
+        local_denom = None
 
       if not self.env.ragged_mha and seqlen == 1:
-        output = output[:, :, 0:1, :]
+        local_output = local_output[:, :, 0:1, :]
+        if local_max is not None:
+          local_max = local_max[:, :, 0:1, :]
+          local_denom = local_denom[:, :, 0:1, :]
 
-      self.env.apply_sharding(output, axis=self.shard_axis)
-      return output
+      print(f"attention kernel local_output {local_output.shape} seqlen {seqlen}")
+      if local_max is not None and local_denom is not None:
+        print(f"local_max {local_max.shape} local_denom {local_denom.shape}")
+      self.env.apply_sharding(local_output, axis=self.shard_axis)
+      return local_output, (local_max, local_denom)
+    
+    with jax.named_scope("attn_insert_cache"):
+      keys, values, new_key, new_value, k_scaler, v_scaler, new_k_scaler, new_v_scaler  = cache.update(xk, xv, self.layer_id)
+      keys = repeat_kv(keys, n_rep)
+      values = repeat_kv(values, n_rep)
 
+    print(f"attention kernel xq {xq.shape} seqlen {seqlen} keys {keys.shape} mask {mask.shape}")
+    with jax.named_scope("attn_qkv"):
+      existing_output, (existing_max, existing_denom) = attend(xq_expanded, keys, values, k_scaler, v_scaler, mask)
+
+    # For non flash attention or prefill, existing output contains everything
+    if not self.env.flash_attention or seqlen > 1:
+      return existing_output
+
+    # For flash attention, existing output contains the existing kv cache generated logits
+    with jax.named_scope("attn_new_qkv"):
+      new_keys = repeat_kv(new_key, n_rep)
+      new_values = repeat_kv(new_value, n_rep)
+      new_output, (new_max, new_denom) = attend(xq, new_keys, new_values, new_k_scaler, new_v_scaler, None)
+      # if cache.cache_k is None:  # Prefill
+      #   return new_output
+
+    with jax.named_scope("attn_global"):
+      print(f"existing_output {existing_output} existing_max {existing_max} existing_denom {existing_denom}")
+      print(f"new_output {new_output} new_max {new_max} new_denom {new_denom}")
+
+      global_sum = existing_denom * torch.exp(existing_max) + new_denom * torch.exp(new_max)
+      existing_output = existing_output * existing_denom * torch.exp(existing_max) / global_sum
+      new_output = new_output * new_denom * torch.exp(new_max) / global_sum
+      attn_out = existing_output + new_output
+
+      
+      return attn_out
 
 class Attention(nn.Module):
   """Attention module."""
 
-  def __init__(self, n_heads, n_kv_heads, head_dim, hidden_size, device, env):
+  def __init__(self, n_heads, n_kv_heads, head_dim, hidden_size, device, env, layer_id):
     super().__init__()
     self.n_heads = n_heads
     self.n_kv_heads = n_kv_heads
@@ -512,6 +598,7 @@ class Attention(nn.Module):
     self.n_rep = self.n_heads // self.n_kv_heads
     self.env = env
     self.hidden_size = hidden_size
+    self.layer_id = layer_id
 
     LinearLayer = get_quantized_linear_layer(env.quant_config)
     linear_kwargs = {}
@@ -531,7 +618,7 @@ class Attention(nn.Module):
         if env.quant_config.enable_kv_quantization
         else AttentionKernel
     )
-    self.attention_kernel = Kernel(env)
+    self.attention_kernel = Kernel(env, self.layer_id)
 
     self.q_size = n_heads * self.head_dim
     self.kv_size = self.n_kv_heads * self.head_dim
@@ -611,16 +698,20 @@ class Attention(nn.Module):
     xv = xv.transpose(1, 2)
     xq = xq.transpose(1, 2)
 
+    if cache is not None and cache.cache_k is not None:
+      print(f"xq {xq.shape} xk {xk.shape} cache shape {cache.cache_k.shape}")
     output = self.attention_kernel(
         xq,
         xk,
         xv,
         mask,
+        # cache[self.layer_id],
         cache,
         start,
         end,
         ragged_batch_index,
         ragged_block_index,
     ).type_as(xq)
+    print(f"output {output.shape}")
     output = output.transpose(-3, -2).contiguous().view(bsz, seqlen, -1)
     return self.wo(output)

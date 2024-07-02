@@ -157,7 +157,7 @@ class PyTorchEngine(engine_api.Engine):
   ):
     if self.env.quant_config.enable_kv_quantization:
       caches_obj = [
-          cache_manager.Int8KVCacheGenerate(k, v, ks, vs, input_indexes)
+          cache_manager.Int8KVCacheGenerate(k, v, ks, vs, input_indexes, stacked=self.env.generate_cache_stacked)
           for (k, v), (ks, vs) in torchjax.to_torch(
               list(zip(caches, cache_scales))
           )
@@ -165,7 +165,7 @@ class PyTorchEngine(engine_api.Engine):
     else:
       caches_obj = [
           cache_manager.KVCacheGenerate(
-              k, v, input_indexes, self.cache_sharding
+              k, v, input_indexes, self.cache_sharding, stacked=self.env.generate_cache_stacked
           )
           for k, v in torchjax.to_torch(caches)
       ]
@@ -186,7 +186,10 @@ class PyTorchEngine(engine_api.Engine):
         # The mode is needed so that tensors created inside of
         # the model (such as via torch.ones etc) also have the right type
         res = torch.func.functional_call(self.pt_model, paramst, argst)
-    updated_caches = [c.state() for c in caches_obj]
+    updated_caches = []
+    for c in caches_obj:
+      c.finalize()
+      updated_caches.append(c.state())
     scales = []
     if self.env.quant_config.enable_kv_quantization:
       scales = [c.scalers() for c in caches_obj]
@@ -299,7 +302,7 @@ class PyTorchEngine(engine_api.Engine):
     tokens = decode_state.tokens.at[slot].set(prefix.token)
 
     x = jnp.arange(0, self.env.cache_sequence_length)
-    cond = jnp.logical_and(x <= decode_state.current_position, x >= pos)
+    cond = jnp.logical_and(x < decode_state.current_position, x >= pos)
     mask_insert = jnp.where(cond, 0, float("-inf"))
     mask = decode_state.mask.at[slot].set(mask_insert)
     start = decode_state.start.at[slot].set(
@@ -309,19 +312,28 @@ class PyTorchEngine(engine_api.Engine):
     if not self.env.quant_config.enable_kv_quantization:
 
       @functools.partial(jax.jit, donate_argnums=(0, 1), inline=True)
-      def insert(cache, new_entry):
+      def insert(cache, new_entry, update_index):
         res = jax.lax.dynamic_update_slice(
             cache,
             new_entry,
-            [slot, 0, pos, 0],
+            update_index,
         )
         res = jax.lax.with_sharding_constraint(res, self.cache_sharding)
         return res
 
-      caches = [
-          (insert(k, newk), insert(v, newv))
-          for (k, v), (newk, newv) in zip(decode_state.caches, prefix.caches)
-      ]
+      if self.env.generate_cache_stacked:
+        caches = decode_state.caches
+        for idx, (newk, newv) in enumerate(prefix.caches):
+          update_index = [idx, slot, 0, pos, 0]
+          newk = jnp.expand_dims(newk, 0)
+          newv = jnp.expand_dims(newv, 0)
+          caches = [(insert(caches[0][0], newk, update_index),insert(caches[0][1], newv, update_index))]
+      else:
+        update_index = [slot, 0, pos, 0]
+        caches = [
+            (insert(k, newk, update_index), insert(v, newv, update_index))
+            for (k, v), (newk, newv) in zip(decode_state.caches, prefix.caches)
+        ]
     else:
 
       @functools.partial(jax.jit, donate_argnums=(0, 1), inline=True)
@@ -387,10 +399,10 @@ class PyTorchEngine(engine_api.Engine):
     cond = jax.lax.cond(
         decode_state.current_position > start_insert,
         lambda x, start_insert, current_position: jnp.logical_and(
-            x >= start_insert, x <= current_position
+            x >= start_insert, x < current_position
         ),
         lambda x, start_insert, current_position: jnp.logical_or(
-            x >= start_insert, x <= current_position
+            x >= start_insert, x < current_position
         ),
         x,
         start_insert,
@@ -406,21 +418,25 @@ class PyTorchEngine(engine_api.Engine):
     old_scales = decode_state.cache_scales
     cache_inserts = prefix.caches
 
+    print(f"YY old_caches: {len(decode_state.caches)} cache_inserts: {len(cache_inserts)}")
     scales = []
     caches = []
     if not self.env.quant_config.enable_kv_quantization:
 
       @functools.partial(jax.jit, donate_argnums=(0, 1), inline=True)
-      def insert(cache, new_entry):
+      def insert(cache, new_entry, layer_id):
         new_entry = jnp.transpose(new_entry.squeeze(0), (1, 0, 2))
-        res = cache.at[slot, :, update_indexes, :].set(new_entry)
+        if self.env.generate_cache_stacked:
+          res = cache.at[layer_id, slot, :, update_indexes, :].set(new_entry)
+        else:
+          res = cache.at[slot, :, update_indexes, :].set(new_entry)
         res = jax.lax.with_sharding_constraint(res, self.cache_sharding)
         return res
 
-      caches = [
-          (insert(k, newk), insert(v, newv))
-          for (k, v), (newk, newv) in zip(old_caches, cache_inserts)
-      ]
+      for idx, (newk, newv) in enumerate(prefix.caches):
+        caches = [
+          (insert(old_caches[0][0], newk, idx), insert(old_caches[0][1], newv, idx))
+        ]
     else:
 
       @functools.partial(jax.jit, donate_argnums=(0, 1), inline=True)
@@ -547,14 +563,17 @@ class PyTorchEngine(engine_api.Engine):
     pos = decode_state.current_position
     input_indexes = jnp.full((1,), pos)
 
-    # fill mask first
-    mask = decode_state.mask.at[:, decode_state.current_position].set(0)
     ragged_batch_index, ragged_block_index = (
         self.precompute_ragged_block_indices(decode_state)
     )
     ragged_batch_index, ragged_block_index = ragged_batch_index.reshape(
         (-1)
     ), ragged_block_index.reshape((-1))
+
+    # fill mask later, now use flash attention
+    mask = decode_state.mask
+    if not self.env.flash_attention:
+      mask = decode_state.mask.at[:, decode_state.current_position].set(0)
 
     logits, new_caches, new_scales = self._call_model_generate(
         params,
@@ -568,6 +587,10 @@ class PyTorchEngine(engine_api.Engine):
         ragged_batch_index,
         ragged_block_index,
     )
+
+    if self.env.flash_attention:
+      # fill mask later, now use flash attention
+      mask = decode_state.mask.at[:, decode_state.current_position].set(0)
 
     next_token = self._sampling(logits, self.env.batch_size)
     lens = decode_state.lens + 1
