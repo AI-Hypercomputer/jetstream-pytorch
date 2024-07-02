@@ -309,6 +309,64 @@ def dense_attention(xq, keys, values, k_scaler=None, v_scaler=None, mask=None):
     output = torch.einsum("ikjm,ikml->ikjl", scores, values)
   return output
 
+def flash_attention(xq, keys, values, mask=None, normalize_var=True):
+  """The vanilla attention kernel implementation."""
+  import pdb; pdb.set_trace()
+  # mask_value: float = DEFAULT_MASK_VALUE
+  logits = torch.einsum(
+      "bhqd,bhkd->bhqk", xq.type(torch.float32), keys.type(torch.float32)
+  )
+
+  if normalize_var:
+    logits = logits / math.sqrt(keys.shape[-1]) # Align with meta llama
+  if mask is not None:
+    # logits = logits + torch.where(mask, 0.0, mask_value)[:, None]
+    logits = logits + mask
+
+  logits_max, _ = torch.max(logits, axis=-1, keepdim=True)
+  # unnormalized = torch.exp(logits - logits_max[..., None])
+  unnormalized = torch.exp(logits - logits_max)
+  denominator = unnormalized.sum(axis=-1, keepdim=True)
+  # print(f"logits {logits.shape} logits_max {logits_max.shape} denominator {denominator}")
+  o = (
+      torch.einsum("bhqk,bhkd->bhqd", unnormalized.type_as(values), values)
+      # / denominator[..., None]
+      / denominator
+  )
+  return o, (logits_max, denominator)
+
+
+def flash_attention_quantized(xq, keys, values, k_scaler, v_scaler, mask=None, normalize_var=True):
+  mask_value: float = DEFAULT_MASK_VALUE
+  logits = torch.einsum(
+      "bhqd,bhkd->bhqk", xq.type(torch.float32), keys.type(torch.float32)
+  )
+
+  if normalize_var:
+    logits = logits / torch.sqrt(keys.shape[-1]) # Align with meta llama
+  # Quantized
+  logits = logits * k_scaler
+
+  # mask = jnp.arange(keys.shape[1])[None] < lengths[:, None]
+  if mask is not None:
+    # logits = logits + jnp.where(mask, 0.0, DEFAULT_MASK_VALUE)[:, None]
+    logits = logits + mask
+
+  logits_max = torch.max(axis=-1, keepdim=True)
+  unnormalized = torch.exp(logits - logits_max)
+  #Quantized, should not put here, otherwise sum will have this too, which cancels with denominator
+  # unnormalized = unnormalized * v_scaler
+
+  denominator = unnormalized.sum(axis=-1, keepdim=True)
+  unnormalized = unnormalized * v_scaler
+
+  o = (
+      jnp.einsum("bhqk,bhkd->bhqd", unnormalized.type_as(values), values)
+      / denominator
+  )
+
+  return o, (logits_max, denominator)
+
 
 class RaggedAttentionKernel:
   """Ragged attention kernel."""
