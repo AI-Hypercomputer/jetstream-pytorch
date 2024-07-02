@@ -311,7 +311,7 @@ def dense_attention(xq, keys, values, k_scaler=None, v_scaler=None, mask=None):
 
 def flash_attention(xq, keys, values, mask=None, normalize_var=True):
   """The vanilla attention kernel implementation."""
-  import pdb; pdb.set_trace()
+  # import pdb; pdb.set_trace()
   # mask_value: float = DEFAULT_MASK_VALUE
   logits = torch.einsum(
       "bhqd,bhkd->bhqk", xq.type(torch.float32), keys.type(torch.float32)
