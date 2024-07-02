@@ -86,8 +86,20 @@ flags.DEFINE_integer(
 )
 flags.DEFINE_bool(
     "ring_buffer",
-    True,
+    False,
     "Whether to enable ring buffer",
+    required=False,
+)
+flags.DEFINE_bool(
+    "flash_attention",
+    True,
+    "Whether to enable flas attention",
+    required=False,
+)
+flags.DEFINE_bool(
+    "generate_cache_stacked",
+    True,
+    "Whether to stack the generate cache to the layer dimension",
     required=False,
 )
 flags.DEFINE_float(
@@ -184,6 +196,8 @@ def create_engine_from_config_flags():
       nucleus_topp=FLAGS.nucleus_topp,
       topk=FLAGS.topk,
       ring_buffer=FLAGS.ring_buffer,
+      flash_attention=FLAGS.flash_attention,
+      generate_cache_stacked=FLAGS.generate_cache_stacked,
   )
 
   print("Initialize engine", time.perf_counter() - start)

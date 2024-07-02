@@ -67,7 +67,7 @@ class ModelComponentTest(unittest.TestCase):
 
   def _generate_mask(self, cache_length, pos, seqlen):
     x = jnp.arange(0, cache_length)
-    cond = jnp.logical_and(x <= pos, x >= pos - seqlen)
+    cond = jnp.logical_and(x < pos, x >= pos - seqlen)
     res = jnp.where(cond, 0, float("-inf"))
     return torchjax.to_torch(res)
 
@@ -91,6 +91,7 @@ class ModelComponentTest(unittest.TestCase):
 
   # pylint: disable-next=all
   def test_attention(self):
+    torch.manual_seed(0)
     env, model_arg = helpers.make_env_tiny(False)
 
     attention_orig = model_original.Attention(model_arg)
@@ -137,11 +138,11 @@ class ModelComponentTest(unittest.TestCase):
 
     # insert prefilled cache entry
     cache_decode.cache_k._elem = cache_decode.cache_k._elem.at[
-        :, :, :pos, :
+        ..., :pos, :
     ].set(cache.cache_k._elem)
 
     cache_decode.cache_v._elem = cache_decode.cache_v._elem.at[
-        :, :, :pos, :
+        ..., :pos, :
     ].set(cache.cache_v._elem)
 
     # self._compare_cache(attention_orig.cache_k, cache_decode.cache_k)
@@ -301,10 +302,10 @@ class ModelComponentTest(unittest.TestCase):
 
     # insert prefilled cache entry
     cache_decode.cache_k._elem = cache_decode.cache_k._elem.at[
-        :, :, :pos, :
+        ..., :pos, :
     ].set(cache.cache_k._elem)
     cache_decode.cache_v._elem = cache_decode.cache_v._elem.at[
-        :, :, :pos, :
+        ..., :pos, :
     ].set(cache.cache_v._elem)
 
     # Now do one with decode

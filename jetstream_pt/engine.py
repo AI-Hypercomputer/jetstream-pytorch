@@ -331,7 +331,7 @@ class PyTorchEngine(engine_api.Engine):
     tokens = decode_state.tokens.at[slot].set(prefix.token)
 
     x = jnp.arange(0, self.env.cache_sequence_length)
-    cond = jnp.logical_and(x < decode_state.current_position, x >= pos)
+    cond = jnp.logical_and(x < current_pos, x >= pos)
     mask_insert = jnp.where(cond, 0, float("-inf"))
     mask = decode_state.mask.at[slot].set(mask_insert)
     start = decode_state.start.at[slot].set(
@@ -861,6 +861,8 @@ def create_pytorch_engine(
     nucleus_topp=None,
     topk=None,
     ring_buffer=True,
+    flash_attention=False,
+    generate_cache_stacked=False,
 ) -> PyTorchEngine:
   """Returns: The pytorch engine."""
 

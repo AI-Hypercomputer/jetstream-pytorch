@@ -120,8 +120,9 @@ class KVCacheGenerate:
       self.cache_v._elem = self.cache_v._elem.at[:, :, :, self.pos].set(self.new_vs._elem)
     else:
       batch = jnp.arange(self.env.batch_size)
-      self.cache_k._elem = self.cache_k._elem.at[:, batch, :, self.pos].set(self.new_ks._elem)
-      self.cache_v._elem = self.cache_v._elem.at[:, batch, :, self.pos].set(self.new_vs._elem)
+      layer, batch, head, len, dim = self.cache_k.shape
+      self.cache_k._elem = self.cache_k._elem.at[:, batch, :, self.pos].set(self.new_ks._elem.reshape(batch, layer, head, dim))
+      self.cache_v._elem = self.cache_v._elem.at[:, batch, :, self.pos].set(self.new_vs._elem.reshape(batch, layer, head, dim))
 
   def update(self, key, value, layer_id:int):
     """Update kv cache"""

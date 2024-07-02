@@ -94,15 +94,11 @@ class JetEngineEnvironmentData:
   starting_position: int = 512
 
   # Ring buffer
-  ring_buffer: bool = True
+  ring_buffer: bool = False
 
-  # Ring buffer
-  ring_buffer: bool = True
-
-  #
   flash_attention: bool = True
 
-  generate_cache_stacked: bool = False
+  generate_cache_stacked: bool = True
   # Variables used in token sampling
   # sampling algorithm to use ("greedy", "weighted", "neucleus", "topk")
   sampling_algorithm: str = "greedy"
@@ -133,6 +129,12 @@ class JetEngineEnvironment:
     self.generate_cache_stacked = self._data.generate_cache_stacked
     self.num_layers = self._data.num_layers
     self.ring_buffer = self._data.ring_buffer
+
+    if self.generate_cache_stacked:
+      self.cache_shape = (self.num_layers, *self._data.cache_shape)
+    else:
+      self.cache_shape = self._data.cache_shape
+
     P = jax.sharding.PartitionSpec
 
     num_of_partitions = jax.device_count()
@@ -215,26 +217,20 @@ class JetEngineEnvironment:
   def make_caches_generate(self):
     """Create kv caches for inference generation"""
     caches = []
-    shape = self._data.cache_shape
 
-    if self.generate_cache_stacked:
-      cache_shape = (self.num_layers, *shape)
-      layered_cache_count = 1
-    else:
-      cache_shape = shape
-      layered_cache_count = self.num_layers
+    layered_cache_count = 1 if self.generate_cache_stacked else self.num_layers
 
     for _ in range(layered_cache_count):
       if self._data.quant_config.enable_kv_quantization:
         caches.append(
             cache_manager.Int8KVCacheGenerate.empty(
-                cache_shape, self.cache_sharding, self, env=self
+                self.cache_shape, self.cache_sharding, env=self
             )
         )
       else:
         caches.append(
             cache_manager.KVCacheGenerate.empty(
-                cache_shape, self.cache_sharding, self, env=self
+                self.cache_shape, self.cache_sharding, env=self
             )
         )
     return caches
