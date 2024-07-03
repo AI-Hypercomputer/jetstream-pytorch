@@ -99,6 +99,8 @@ class JetEngineEnvironmentData:
   flash_attention: bool = True
 
   generate_cache_stacked: bool = True
+
+  lazy_cache_update: bool = True
   # Variables used in token sampling
   # sampling algorithm to use ("greedy", "weighted", "neucleus", "topk")
   sampling_algorithm: str = "greedy"
@@ -111,6 +113,8 @@ class JetEngineEnvironmentData:
 
   # temperature parameter for scaling probability
   temperature: float = 1.0
+
+  testing: bool = False
 
 
 # pylint: disable-next=all
@@ -129,6 +133,11 @@ class JetEngineEnvironment:
     self.generate_cache_stacked = self._data.generate_cache_stacked
     self.num_layers = self._data.num_layers
     self.ring_buffer = self._data.ring_buffer
+    self.lazy_cache_update = self._data.lazy_cache_update
+    self.testing = self._data.testing
+
+    if self.lazy_cache_update:
+      self.flash_attention = True
 
     if self.generate_cache_stacked:
       self.cache_shape = (self.num_layers, *self._data.cache_shape)
@@ -149,14 +158,13 @@ class JetEngineEnvironment:
     self.replicated = jsharding.NamedSharding(self.mesh, P())
 
     if self.generate_cache_stacked:
-      
       self.attention_kv_axis_names = (
-      "layer",
-      "batch",
-      "num_attn_heads",
-      "sequence_length",
-      "head_dim",
-    )
+        "layer",
+        "batch",
+        "num_attn_heads",
+        "sequence_length",
+        "head_dim",
+      )
     if data.shard_on_batch:
       self.kv_cache_shard_axis = "batch"
     else:
