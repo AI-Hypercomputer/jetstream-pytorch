@@ -102,6 +102,12 @@ flags.DEFINE_bool(
     "Whether to stack the generate cache to the layer dimension",
     required=False,
 )
+flags.DEFINE_bool(
+    "lazy_cache_update",
+    True,
+    "Whether to update the cache during attention or delayed until all the layers are done",
+    required=False,
+)
 flags.DEFINE_float(
     "temperature",
     1.0,
@@ -198,6 +204,7 @@ def create_engine_from_config_flags():
       ring_buffer=FLAGS.ring_buffer,
       flash_attention=FLAGS.flash_attention,
       generate_cache_stacked=FLAGS.generate_cache_stacked,
+      create_pytorch_engine=FLAGS.create_pytorch_engine,
   )
 
   print("Initialize engine", time.perf_counter() - start)

@@ -863,6 +863,7 @@ def create_pytorch_engine(
     ring_buffer=True,
     flash_attention=False,
     generate_cache_stacked=False,
+    lazy_cache_update=False,
 ) -> PyTorchEngine:
   """Returns: The pytorch engine."""
 
