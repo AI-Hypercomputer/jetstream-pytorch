@@ -1,13 +1,13 @@
 FROM rayproject/ray:2.22.0-py310
 
 RUN pip install flax==0.8.3
-RUN pip install jax[tpu]==0.4.28 -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+RUN pip install jax[tpu]==0.4.30 -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
 RUN pip install tensorflow-text
 RUN pip install tensorflow
 
 #pip install ray[default]==2.22.0
 # torch cpu
-RUN pip install torch==2.2.1+cpu --index-url https://download.pytorch.org/whl/cpu
+RUN pip install torch==2.3.1+cpu --index-url https://download.pytorch.org/whl/cpu
 RUN pip install tensorflow flatbuffers absl-py sentencepiece seqio google-cloud-storage
 RUN pip install safetensors colorama coverage humanize
 
