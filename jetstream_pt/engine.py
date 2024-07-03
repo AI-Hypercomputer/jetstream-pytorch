@@ -934,6 +934,9 @@ def create_pytorch_engine(
       nucleus_topp=nucleus_topp,
       topk=topk,
       ring_buffer=ring_buffer,
+      flash_attention=flash_attention,
+      generate_cache_stacked=generate_cache_stacked,
+      lazy_cache_update=lazy_cache_update,
   )
 
   if shard_on_batch and sharding_config:
