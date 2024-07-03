@@ -116,6 +116,8 @@ class JetEngineEnvironmentData:
 
   testing: bool = False
 
+  testing_seed: int = 0
+
 
 # pylint: disable-next=all
 class JetEngineEnvironment:
@@ -135,6 +137,7 @@ class JetEngineEnvironment:
     self.ring_buffer = self._data.ring_buffer
     self.lazy_cache_update = self._data.lazy_cache_update
     self.testing = self._data.testing
+    self.testing_seed = self._data.testing_seed
 
     if self.lazy_cache_update:
       self.flash_attention = True

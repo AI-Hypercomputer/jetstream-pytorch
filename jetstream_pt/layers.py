@@ -717,7 +717,7 @@ class Attention(ModuleBase):
     xv = xv.transpose(1, 2)
     xq = xq.transpose(1, 2)
 
-    if cache is not None and cache.cache_k is not None:
+    # if cache is not None and cache.cache_k is not None:
       # print(f"xq {xq.shape} xk {xk.shape} cache shape {cache.cache_k.shape}")
     output = self.attention_kernel(
         xq,

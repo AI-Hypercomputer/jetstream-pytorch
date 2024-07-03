@@ -185,10 +185,10 @@ class KVCacheGenerate:
     default_dtype = jnp.bfloat16 if env.bf16_enable else jnp.float32
     in_shape = shape
     if env.testing:
-      key = jax.random.key(env.seed)
+      key = jax.random.key(env.testing_seed)
       k_key, v_key = jax.random.split(key)
-      k = jnp.random.uniform(k_key, shape=in_shape, dtype=default_dtype)
-      v = jnp.random.uniform(v_key, shape=in_shape, dtype=default_dtype)
+      k = jax.random.uniform(k_key, shape=in_shape, dtype=default_dtype)
+      v = jax.random.uniform(v_key, shape=in_shape, dtype=default_dtype)
     else:
       k = jnp.zeros(in_shape, device=device, dtype=default_dtype)
       v = jnp.zeros(in_shape, device=device, dtype=default_dtype)
