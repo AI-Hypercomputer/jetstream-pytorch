@@ -204,7 +204,7 @@ def create_engine_from_config_flags():
       ring_buffer=FLAGS.ring_buffer,
       flash_attention=FLAGS.flash_attention,
       generate_cache_stacked=FLAGS.generate_cache_stacked,
-      create_pytorch_engine=FLAGS.create_pytorch_engine,
+      lazy_cache_update=FLAGS.lazy_cache_update,
   )
 
   print("Initialize engine", time.perf_counter() - start)

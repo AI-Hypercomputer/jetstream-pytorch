@@ -450,9 +450,9 @@ class AttentionKernel:
         if local_denom is not None:
           local_denom = local_denom[:, :, 0:1, :]
 
-      print(f"attention kernel local_output {local_output.shape} seqlen {seqlen}")
-      if local_max is not None and local_denom is not None:
-        print(f"local_max {local_max.shape} local_denom {local_denom.shape}")
+      # print(f"attention kernel local_output {local_output.shape} seqlen {seqlen}")
+      # if local_max is not None and local_denom is not None:
+      #   print(f"local_max {local_max.shape} local_denom {local_denom.shape}")
       self.env.apply_sharding(local_output, axis=self.shard_axis)
       return local_output, (local_max, local_denom)
     
@@ -463,7 +463,7 @@ class AttentionKernel:
       keys = repeat_kv(keys, n_rep)
       values = repeat_kv(values, n_rep)
 
-    print(f"attention kernel xq {xq.shape} seqlen {seqlen} keys {keys.shape} mask {mask.shape}")
+    # print(f"attention kernel xq {xq.shape} seqlen {seqlen} keys {keys.shape} mask {mask.shape}")
     with jax.named_scope("attn_qkv"):
       existing_output, (existing_max, existing_denom) = attend(xq_expanded, keys, values, mask)
 
@@ -480,8 +480,8 @@ class AttentionKernel:
       #   return new_output
 
     with jax.named_scope("attn_global"):
-      print(f"existing_output {existing_output} existing_max {existing_max} existing_denom {existing_denom}")
-      print(f"new_output {new_output} new_max {new_max} new_denom {new_denom}")
+      # print(f"existing_output {existing_output} existing_max {existing_max} existing_denom {existing_denom}")
+      # print(f"new_output {new_output} new_max {new_max} new_denom {new_denom}")
 
       global_sum = existing_denom * torch.exp(existing_max) + new_denom * torch.exp(new_max)
       existing_output = existing_output * existing_denom * torch.exp(existing_max) / global_sum
@@ -566,9 +566,9 @@ class Int8KVAttentionKernel:
           local_max = local_max[:, :, 0:1, :]
           local_denom = local_denom[:, :, 0:1, :]
 
-      print(f"attention kernel local_output {local_output.shape} seqlen {seqlen}")
-      if local_max is not None and local_denom is not None:
-        print(f"local_max {local_max.shape} local_denom {local_denom.shape}")
+      # print(f"attention kernel local_output {local_output.shape} seqlen {seqlen}")
+      # if local_max is not None and local_denom is not None:
+      #   print(f"local_max {local_max.shape} local_denom {local_denom.shape}")
       self.env.apply_sharding(local_output, axis=self.shard_axis)
       return local_output, (local_max, local_denom)
     
@@ -577,7 +577,7 @@ class Int8KVAttentionKernel:
       keys = repeat_kv(keys, n_rep)
       values = repeat_kv(values, n_rep)
 
-    print(f"attention kernel xq {xq.shape} seqlen {seqlen} keys {keys.shape} mask {mask.shape}")
+    # print(f"attention kernel xq {xq.shape} seqlen {seqlen} keys {keys.shape} mask {mask.shape}")
     with jax.named_scope("attn_qkv"):
       existing_output, (existing_max, existing_denom) = attend(xq_expanded, keys, values, k_scaler, v_scaler, mask)
 
@@ -594,8 +594,8 @@ class Int8KVAttentionKernel:
       #   return new_output
 
     with jax.named_scope("attn_global"):
-      print(f"existing_output {existing_output} existing_max {existing_max} existing_denom {existing_denom}")
-      print(f"new_output {new_output} new_max {new_max} new_denom {new_denom}")
+      # print(f"existing_output {existing_output} existing_max {existing_max} existing_denom {existing_denom}")
+      # print(f"new_output {new_output} new_max {new_max} new_denom {new_denom}")
 
       global_sum = existing_denom * torch.exp(existing_max) + new_denom * torch.exp(new_max)
       existing_output = existing_output * existing_denom * torch.exp(existing_max) / global_sum
@@ -717,7 +717,7 @@ class Attention(ModuleBase):
     xq = xq.transpose(1, 2)
 
     if cache is not None and cache.cache_k is not None:
-      print(f"xq {xq.shape} xk {xk.shape} cache shape {cache.cache_k.shape}")
+      # print(f"xq {xq.shape} xk {xk.shape} cache shape {cache.cache_k.shape}")
     output = self.attention_kernel(
         xq,
         xk,
@@ -730,6 +730,6 @@ class Attention(ModuleBase):
         ragged_batch_index,
         ragged_block_index,
     ).type_as(xq)
-    print(f"output {output.shape}")
+    # print(f"output {output.shape}")
     output = output.transpose(-3, -2).contiguous().view(bsz, seqlen, -1)
     return self.wo(output)

@@ -447,7 +447,7 @@ class PyTorchEngine(engine_api.Engine):
     old_scales = decode_state.cache_scales
     cache_inserts = prefix.caches
 
-    print(f"YY old_caches: {len(decode_state.caches)} cache_inserts: {len(cache_inserts)}")
+    # print(f"YY old_caches: {len(decode_state.caches)} cache_inserts: {len(cache_inserts)}")
     scales = []
     caches = []
     if not self.env.quant_config.enable_kv_quantization:
@@ -677,11 +677,11 @@ class PyTorchEngine(engine_api.Engine):
         input_pos,
         mask,
     )
-    print(
-        "new_pos",
-        (decode_state.current_position + 1) % self.env.cache_sequence_length,
-    )
-    print(f"new_token: {jnp.squeeze(next_token)}")
+    # print(
+    #     "new_pos",
+    #     (decode_state.current_position + 1) % self.env.cache_sequence_length,
+    # )
+    # print(f"new_token: {jnp.squeeze(next_token)}")
     return new_decode_state, result_tokens
 
   # pylint: disable-next=all
