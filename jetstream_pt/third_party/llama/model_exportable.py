@@ -282,6 +282,7 @@ class Transformer(ModuleBase):
             ragged_batch_index,
             ragged_block_index,
         )
+        cache.finalize()
 
     with jax.named_scope("transformer_norm"):
       h = self.norm(h)

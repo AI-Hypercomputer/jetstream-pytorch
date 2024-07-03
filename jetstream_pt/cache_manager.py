@@ -59,6 +59,9 @@ class KVCachePrefill:
     """Get prefill cache state"""
     return self.cache_k, self.cache_v
 
+  # Placeholder, to match with GenerateCache
+  def finalize(self):
+    return
 
 # pylint: disable-next=all
 def KVCachePrefill_flatten(cache):
@@ -106,48 +109,67 @@ class KVCacheGenerate:
     self.env = env
     self.stacked = env.generate_cache_stacked
     # The other way is to store the list and loop over to insert in finalize()
-    if self.stacked:
-      layer, batch, heads, time, dim = self.cache_k.shape
-      self.new_ks, self.new_vs = torchjax.to_torch((jnp.zeros((layer, batch, heads, 1, dim)), jnp.zeros((layer, batch, heads, 1, dim))))
+    if self.env.lazy_cache_update:
+      if self.stacked:
+        layer, batch, heads, time, dim = self.cache_k.shape
+        new_dim = (layer, batch, heads, 1, dim)
+      else:
+        batch, heads, time, dim = self.cache_k.shape
+        new_dim = (batch, heads, 1, dim)
+      self.new_ks, self.new_vs = torchjax.to_torch((jnp.zeros(new_dim), jnp.zeros(new_dim)))
+
 
   def finalize(self):
-    if not self.stacked:
+    if not self.env.lazy_cache_update:
       return
       # self.cache_k._elem = self.cache_k._elem.at[:, :, :, self.pos].set(jnp.squeeze(self.new_ks._elem, -2))
       # self.cache_v._elem = self.cache_v._elem.at[:, :, :, self.pos].set(jnp.squeeze(self.new_vs._elem, -2))
     if self.env.ring_buffer:
-      self.cache_k._elem = self.cache_k._elem.at[:, :, :, self.pos].set(self.new_ks._elem)
-      self.cache_v._elem = self.cache_v._elem.at[:, :, :, self.pos].set(self.new_vs._elem)
+      self.cache_k._elem = self.cache_k._elem.at[..., self.pos, :].set(self.new_ks._elem)
+      self.cache_v._elem = self.cache_v._elem.at[..., self.pos, :].set(self.new_vs._elem)
     else:
-      batch = jnp.arange(self.env.batch_size)
-      layer, batch, head, len, dim = self.cache_k.shape
-      self.cache_k._elem = self.cache_k._elem.at[:, batch, :, self.pos].set(self.new_ks._elem.reshape(batch, layer, head, dim))
-      self.cache_v._elem = self.cache_v._elem.at[:, batch, :, self.pos].set(self.new_vs._elem.reshape(batch, layer, head, dim))
+      if self.env.generate_cache_stacked:
+        layer, batch, head, len, dim = self.cache_k.shape
+        self.cache_k._elem = self.cache_k._elem.at[:, batch, :, self.pos, :].set(self.new_ks._elem.reshape(batch, layer, head, dim))
+        self.cache_v._elem = self.cache_v._elem.at[:, batch, :, self.pos, :].set(self.new_vs._elem.reshape(batch, layer, head, dim))
+      else:
+        batch, head, len, dim = self.cache_k.shape
+        self.cache_k._elem = self.cache_k._elem.at[batch, :, self.pos, :].set(self.new_ks._elem.reshape(batch, layer, head, dim))
+        self.cache_v._elem = self.cache_v._elem.at[batch, :, self.pos, :].set(self.new_vs._elem.reshape(batch, layer, head, dim))
 
   def update(self, key, value, layer_id:int):
     """Update kv cache"""
     # Will process in insert() at the end of the transformer forward pass
     keyj, valuej = torchjax.to_torch((key, value))
-    if self.stacked:
-      self.new_ks[layer_id, :, :, :, :] = keyj
-      self.new_vs[layer_id, :, :, :, :] = valuej
+    if self.env.lazy_cache_update:
+      self.new_ks[layer_id, ...] = keyj
+      self.new_vs[layer_id, ...] = valuej
       # self.new_ks.append(value)
       # self.new_vs.append(value)
       return self.cache_k[layer_id], self.cache_v[layer_id]
+
+    if self.env.ring_buffer:
+      # pylint: disable-next=all
+      self.cache_k._elem = self.cache_k._elem.at[..., self.pos, :].set(keyj)
+      # pylint: disable-next=all
+      self.cache_v._elem = self.cache_v._elem.at[..., self.pos, :].set(valuej)
     else:
-      if self.env.ring_buffer:
-        # pylint: disable-next=all
-        self.cache_k._elem = self.cache_k._elem.at[:, :, self.pos].set(keyj)
-        # pylint: disable-next=all
-        self.cache_v._elem = self.cache_v._elem.at[:, :, self.pos].set(valuej)
-      else:
-        batch = jnp.arange(self.env.batch_size)
-        # pylint: disable-next=all
-        self.cache_k._elem = self.cache_k._elem.at[batch, :, self.pos].set(
+      batch = jnp.arange(self.env.batch_size)
+      # pylint: disable-next=all
+      if self.env.generate_cache_stacked:
+        self.cache_k._elem = self.cache_k._elem.at[:, batch, :, self.pos, :].set(
             keyj.squeeze(2)
         )
         # pylint: disable-next=all
-        self.cache_v._elem = self.cache_v._elem.at[batch, :, self.pos].set(
+        self.cache_v._elem = self.cache_v._elem.at[:, batch, :, self.pos, :].set(
+            valuej.squeeze(2)
+        )
+      else:
+        self.cache_k._elem = self.cache_k._elem.at[batch, :, self.pos, :].set(
+            keyj.squeeze(2)
+        )
+        # pylint: disable-next=all
+        self.cache_v._elem = self.cache_v._elem.at[batch, :, self.pos, :].set(
             valuej.squeeze(2)
         )
     return self.cache_k, self.cache_v
@@ -162,8 +184,14 @@ class KVCacheGenerate:
     """Create empty kv caches"""
     default_dtype = jnp.bfloat16 if env.bf16_enable else jnp.float32
     in_shape = shape
-    k = jnp.zeros(in_shape, device=device, dtype=default_dtype)
-    v = jnp.zeros(in_shape, device=device, dtype=default_dtype)
+    if env.testing:
+      key = jax.random.key(env.seed)
+      k_key, v_key = jax.random.split(key)
+      k = jnp.random.uniform(k_key, shape=in_shape, dtype=default_dtype)
+      v = jnp.random.uniform(v_key, shape=in_shape, dtype=default_dtype)
+    else:
+      k = jnp.zeros(in_shape, device=device, dtype=default_dtype)
+      v = jnp.zeros(in_shape, device=device, dtype=default_dtype)
     k, v = torchjax.to_torch((k, v))
     return cls(k, v, 0, device, env=env)
 
@@ -211,9 +239,8 @@ class Int8KVCacheGenerate:
     self.input_pos = input_pos
     self.sharding = sharding
     self.env = env
-    self.stacked = env.generate_cache_stacked
 
-    if self.stacked:
+    if self.env.generate_cache_stacked:
       layer, batch, heads, len, dim = self.cache_k.shape
       self.new_ks, self.new_vs, self.new_k_scalers, self.new_v_scalers = torchjax.to_torch((jnp.zeros((layer, batch, heads, 1, dim)), jnp.zeros((layer, batch, heads, 1, dim)), jnp.zeros((layer, batch, 1, 1, 1)), jnp.zeros((layer, batch, 1, 1, 1))))
 
