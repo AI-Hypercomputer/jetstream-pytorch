@@ -100,6 +100,8 @@ class JetEngineEnvironmentData:
 
   generate_cache_stacked: bool = True
 
+  new_cache_stacked: bool = True
+
   lazy_cache_update: bool = True
   # Variables used in token sampling
   # sampling algorithm to use ("greedy", "weighted", "neucleus", "topk")
@@ -133,6 +135,7 @@ class JetEngineEnvironment:
     self.starting_position = self._data.starting_position
     self.flash_attention = self._data.flash_attention
     self.generate_cache_stacked = self._data.generate_cache_stacked
+    self.new_cache_stacked = self._data.new_cache_stacked
     self.num_layers = self._data.num_layers
     self.ring_buffer = self._data.ring_buffer
     self.lazy_cache_update = self._data.lazy_cache_update

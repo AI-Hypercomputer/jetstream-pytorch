@@ -103,6 +103,12 @@ flags.DEFINE_bool(
     required=False,
 )
 flags.DEFINE_bool(
+    "new_cache_stacked",
+    True,
+    "Whether to stack the generate cache to the layer dimension",
+    required=False,
+)
+flags.DEFINE_bool(
     "lazy_cache_update",
     True,
     "Whether to update the cache during attention or delayed until all the layers are done",
@@ -204,6 +210,7 @@ def create_engine_from_config_flags():
       ring_buffer=FLAGS.ring_buffer,
       flash_attention=FLAGS.flash_attention,
       generate_cache_stacked=FLAGS.generate_cache_stacked,
+      new_cache_stacked=FLAGS.new_cache_stacked,
       lazy_cache_update=FLAGS.lazy_cache_update,
   )
 
