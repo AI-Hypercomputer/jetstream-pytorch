@@ -157,8 +157,12 @@ class KVCacheGenerate:
         self.new_ks[layer_id, ...] = keyj
         self.new_vs[layer_id, ...] = valuej
       else:
-        self.new_ks.append(keyj)
-        self.new_vs.append(valuej)
+        if self.env.generate_cache_stacked:
+          self.new_ks.append(keyj)
+          self.new_vs.append(valuej)
+        else:
+          self.new_ks = keyj
+          self.new_vs = valuej
       return self.cache_k[layer_id], self.cache_v[layer_id]
 
     if self.env.ring_buffer:
