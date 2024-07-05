@@ -83,6 +83,12 @@ flags.DEFINE_integer(
     "for performance tuning and debugging only",
     required=False,
 )
+flags.DEFINE_bool(
+    "ring_buffer",
+    True,
+    "Whether to enable ring buffer",
+    required=False,
+)
 flags.DEFINE_float(
     "temperature",
     1.0,
@@ -175,6 +181,7 @@ def create_engine_from_config_flags():
       sampling_algorithm=FLAGS.sampling_algorithm,
       nucleus_topp=FLAGS.nucleus_topp,
       topk=FLAGS.topk,
+      ring_buffer=FLAGS.ring_buffer,
   )
 
   print("Initialize engine", time.perf_counter() - start)

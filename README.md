@@ -84,6 +84,8 @@ huggingface-cli download mistralai/Mixtral-8x7B-v0.1 --local-dir $input_ckpt_dir
 
 ## Run weight safetensor convert
 
+There are limited support (only Llama models as of now) for accessing checkpoints on GCS. Accessing GCS takes a long time and therefore storing checkpoints to local is recommended.
+
 ```bash
 export input_ckpt_dir=Original llama weights directory
 export output_ckpt_dir=The output directory
@@ -192,7 +194,7 @@ Start the server and then go to the deps/JetStream folder (downloaded during `in
 cd deps/JetStream
 wget https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/ShareGPT_V3_unfiltered_cleaned_split.json
 export dataset_path=ShareGPT_V3_unfiltered_cleaned_split.json
-python benchmarks/benchmark_serving.py --tokenizer $tokenizer_path --num-prompts 2000  --dataset-path  $dataset_path --dataset sharegpt --save-request-outputs --warmup-first=True
+python benchmarks/benchmark_serving.py --tokenizer $tokenizer_path --num-prompts 2000  --dataset-path  $dataset_path --dataset sharegpt --save-request-outputs --warmup-mode=sampled --model=$model_name
 ```
 Please look at `deps/JetStream/benchmarks/README.md` for more information.
 
