@@ -97,7 +97,7 @@ class ServerRunTest(unittest.TestCase):
     self.assertEqual(FLAGS.sampling_algorithm, "greedy")
     self.assertEqual(FLAGS.nucleus_topp, 0.0)
     self.assertEqual(FLAGS.topk, 0)
-    # self.assertEqual(FLAGS.ring_buffer, True)
+    self.assertEqual(FLAGS.ring_buffer, True)
 
     # profiling configs
     self.assertEqual(FLAGS.profiling_prefill, False)
