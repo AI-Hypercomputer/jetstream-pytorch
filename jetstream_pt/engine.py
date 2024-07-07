@@ -616,7 +616,7 @@ class PyTorchEngine(engine_api.Engine):
 
     mask = decode_state.mask
     if not self.env.flash_attention:
-      mask = update_mask(mask, decode_state.current_position)
+      mask = update_mask()
     logits, new_caches, new_scales = self._call_model_generate(
         params,
         decode_state.tokens,
