@@ -130,6 +130,7 @@ class KVCacheGenerate:
       # self.cache_k._elem = self.cache_k._elem.at[:, :, :, self.pos].set(jnp.squeeze(self.new_ks._elem, -2))
       # self.cache_v._elem = self.cache_v._elem.at[:, :, :, self.pos].set(jnp.squeeze(self.new_vs._elem, -2))
     if self.env.ring_buffer:
+      # Assume no cache stack for ring buffer
       self.cache_k._elem = self.cache_k._elem.at[..., self.pos, :].set(self.new_ks._elem)
       self.cache_v._elem = self.cache_v._elem.at[..., self.pos, :].set(self.new_vs._elem)
     else:
@@ -139,10 +140,10 @@ class KVCacheGenerate:
           self.cache_k._elem = self.cache_k._elem.at[:, self.batch, :, self.pos, :].set(self.new_ks._elem.reshape(b, layer, head, dim))
           self.cache_v._elem = self.cache_v._elem.at[:, self.batch, :, self.pos, :].set(self.new_vs._elem.reshape(b, layer, head, dim))
         else:
-          def body_func(i):
+          def body_func(i:int, _):
             self.cache_k._elem = self.cache_k._elem.at[i, self.batch, :, self.pos, :].set(self.new_ks[i]._elem.reshape(b, head, dim))
             self.cache_v._elem = self.cache_v._elem.at[i, self.batch, :, self.pos, :].set(self.new_vs[i]._elem.reshape(b, head, dim))
-          _ = jax.lax.fori_loop(0, self.env.num_layers, body_func)
+          _ = jax.lax.fori_loop(0, self.env.num_layers, body_func, init_val=jnp.zeros((self.env.num_layers,)))
       else:
         b, head, len, dim = self.cache_k.shape
         self.cache_k._elem = self.cache_k._elem.at[self.batch, :, self.pos, :].set(self.new_ks._elem.reshape(b, head, dim))
@@ -156,31 +157,37 @@ class KVCacheGenerate:
       if self.env.new_cache_stacked:
         self.new_ks[layer_id, ...] = keyj
         self.new_vs[layer_id, ...] = valuej
+        return self.cache_k[layer_id], self.cache_v[layer_id]
       else:
         if self.env.generate_cache_stacked:
           self.new_ks.append(keyj)
           self.new_vs.append(valuej)
+          return self.cache_k[layer_id], self.cache_v[layer_id]
         else:
           self.new_ks = keyj
           self.new_vs = valuej
-      return self.cache_k[layer_id], self.cache_v[layer_id]
+          return self.cache_k, self.cache_v
+      
 
     if self.env.ring_buffer:
+      # Assume no cache stack for ring buffer
       # pylint: disable-next=all
       self.cache_k._elem = self.cache_k._elem.at[..., self.pos, :].set(keyj)
-      # pylint: disable-next=all
       self.cache_v._elem = self.cache_v._elem.at[..., self.pos, :].set(valuej)
+      return self.cache_k, self.cache_v
     else:
-      # pylint: disable-next=all
       if self.env.generate_cache_stacked:
-        self.cache_k._elem = self.cache_k._elem.at[:, self.batch, :, self.pos, :].set(
+              # pylint: disable-next=all
+        self.cache_k._elem = self.cache_k._elem.at[layer_id, self.batch, :, self.pos, :].set(
             keyj.squeeze(2)
         )
         # pylint: disable-next=all
-        self.cache_v._elem = self.cache_v._elem.at[:, self.batch, :, self.pos, :].set(
+        self.cache_v._elem = self.cache_v._elem.at[layer_id, self.batch, :, self.pos, :].set(
             valuej.squeeze(2)
         )
+        return self.cache_k[layer_id], self.cache_v[layer_id]
       else:
+        # pylint: disable-next=all
         self.cache_k._elem = self.cache_k._elem.at[self.batch, :, self.pos, :].set(
             keyj.squeeze(2)
         )
@@ -188,7 +195,7 @@ class KVCacheGenerate:
         self.cache_v._elem = self.cache_v._elem.at[self.batch, :, self.pos, :].set(
             valuej.squeeze(2)
         )
-    return self.cache_k, self.cache_v
+        return self.cache_k, self.cache_v
 
   def state(self):
     """Get kv cache state"""

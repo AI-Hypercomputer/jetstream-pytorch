@@ -223,6 +223,135 @@ class LlamaE2ETest(unittest.TestCase):
     out_tokens, expected_output_tokens = self._llama_e2e(env, model_arg)
     self.assertEqual(out_tokens, expected_output_tokens)
 
+  def test_llama_e2e_float32_left_aligned_cache(self):
+    """end to end jetstream llama test with float32"""
+    jax.config.update("jax_platform_name", "cpu")
+    print(f"---------> {jax.devices()}")
+
+    def update_env_data(env_data):
+      env_data.ring_buffer=False
+      env_data.flash_attention=False
+      env_data.generate_cache_stacked=False
+      env_data.new_cache_stacked=False
+      env_data.lazy_cache_update=False
+    env, model_arg = helpers.make_env_tiny(False, update_env_data)
+
+    out_tokens, expected_output_tokens = self._llama_e2e(env, model_arg)
+    self.assertEqual(out_tokens, expected_output_tokens)
+
+
+  def test_llama_e2e_float32_left_aligned_generate_cache_stacked(self):
+    """end to end jetstream llama test with float32"""
+    jax.config.update("jax_platform_name", "cpu")
+    print(f"---------> {jax.devices()}")
+
+    def update_env_data(env_data):
+      env_data.ring_buffer=False
+      env_data.flash_attention=False
+      env_data.generate_cache_stacked=True
+      env_data.new_cache_stacked=False
+      env_data.lazy_cache_update=False
+    env, model_arg = helpers.make_env_tiny(False, update_env_data)
+    out_tokens, expected_output_tokens = self._llama_e2e(env, model_arg)
+    self.assertEqual(out_tokens, expected_output_tokens)
+
+  def test_llama_e2e_float32_left_aligned_new_cache_stacked(self):
+    """end to end jetstream llama test with float32"""
+    jax.config.update("jax_platform_name", "cpu")
+    print(f"---------> {jax.devices()}")
+
+    def update_env_data(env_data):
+      env_data.ring_buffer=False
+      env_data.flash_attention=False
+      env_data.generate_cache_stacked=False
+      env_data.new_cache_stacked=True
+      env_data.lazy_cache_update=False
+    env, model_arg = helpers.make_env_tiny(False, update_env_data)
+    out_tokens, expected_output_tokens = self._llama_e2e(env, model_arg)
+    self.assertEqual(out_tokens, expected_output_tokens)
+
+  def test_llama_e2e_float32_left_aligned_all_cache_stacked(self):
+    """end to end jetstream llama test with float32"""
+    jax.config.update("jax_platform_name", "cpu")
+    print(f"---------> {jax.devices()}")
+
+    def update_env_data(env_data):
+      env_data.ring_buffer=False
+      env_data.flash_attention=False
+      env_data.generate_cache_stacked=True
+      env_data.new_cache_stacked=True
+      env_data.lazy_cache_update=False
+    env, model_arg = helpers.make_env_tiny(False, update_env_data)
+    out_tokens, expected_output_tokens = self._llama_e2e(env, model_arg)
+    self.assertEqual(out_tokens, expected_output_tokens)
+
+
+  def test_llama_e2e_float32_left_aligned_lazy_cache_update(self):
+    """end to end jetstream llama test with float32"""
+    jax.config.update("jax_platform_name", "cpu")
+    print(f"---------> {jax.devices()}")
+
+    def update_env_data(env_data):
+      env_data.ring_buffer=False
+      env_data.flash_attention=True
+      env_data.generate_cache_stacked=False
+      env_data.new_cache_stacked=False
+      env_data.lazy_cache_update=True
+    env, model_arg = helpers.make_env_tiny(False, update_env_data)
+    out_tokens, expected_output_tokens = self._llama_e2e(env, model_arg)
+    self.assertEqual(out_tokens, expected_output_tokens)
+
+
+  # Foriloop has issue
+  def test_llama_e2e_float32_left_aligned_lazy_cache_update_generate_cache_stacked(self):
+    """end to end jetstream llama test with float32"""
+    jax.config.update("jax_platform_name", "cpu")
+    print(f"---------> {jax.devices()}")
+
+    def update_env_data(env_data):
+      env_data.ring_buffer=False
+      env_data.flash_attention=True
+      env_data.generate_cache_stacked=True
+      env_data.new_cache_stacked=False
+      env_data.lazy_cache_update=True
+    env, model_arg = helpers.make_env_tiny(False, update_env_data)
+    out_tokens, expected_output_tokens = self._llama_e2e(env, model_arg)
+    self.assertEqual(out_tokens, expected_output_tokens)
+
+
+  @unittest.skip("When generate cache is not stacked, new cache cannot stack")
+  def test_llama_e2e_float32_left_aligned_lazy_cache_update_new_cache_stacked(self):
+    """end to end jetstream llama test with float32"""
+    jax.config.update("jax_platform_name", "cpu")
+    print(f"---------> {jax.devices()}")
+
+    def update_env_data(env_data):
+      env_data.ring_buffer=False
+      env_data.flash_attention=True
+      env_data.generate_cache_stacked=False
+      env_data.new_cache_stacked=True
+      env_data.lazy_cache_update=True
+    env, model_arg = helpers.make_env_tiny(False, update_env_data)
+    out_tokens, expected_output_tokens = self._llama_e2e(env, model_arg)
+    self.assertEqual(out_tokens, expected_output_tokens)
+
+
+  def test_llama_e2e_float32_left_aligned_lazy_cache_update_all_cache_stacked(self):
+    """end to end jetstream llama test with float32"""
+    jax.config.update("jax_platform_name", "cpu")
+    print(f"---------> {jax.devices()}")
+
+    def update_env_data(env_data):
+      env_data.ring_buffer=False
+      env_data.flash_attention=True
+      env_data.generate_cache_stacked=True
+      env_data.new_cache_stacked=True
+      env_data.lazy_cache_update=True
+    env, model_arg = helpers.make_env_tiny(False, update_env_data)
+    out_tokens, expected_output_tokens = self._llama_e2e(env, model_arg)
+    self.assertEqual(out_tokens, expected_output_tokens)
+
+
   def test_llama_e2e_bfloat16(self):
     "end to end jetstream llama test with bfloat16"
     jax.config.update("jax_platform_name", "cpu")
