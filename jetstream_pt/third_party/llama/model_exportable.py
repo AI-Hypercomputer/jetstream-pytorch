@@ -162,7 +162,7 @@ class TransformerBlock(ModuleBase):
 
     with jax.named_scope("ffn"):
       out = h + self.feed_forward.forward(ffns)
-      return out
+      return out, cache
 
 
 def precompute_freqs_cis(
@@ -263,16 +263,17 @@ class Transformer(ModuleBase):
     # Should check more thoroughly, as of now, when prefill, it's always not stacked. When generate, it's controlled by the parameter.
     # target_cache_layers = 1 if self.env.generate_cache_stacked else len(self.layers)
     # assert len(caches) == target_cache_layers, f"Number of caches ({len(caches)}) and layers ({target_cache_layers}) dont match"
-  
+
     end = None if start is None else (start + input_pos) % self.env.cache_len
+    # For stacked case, cannot get cache inside the loop which will cause cache copy
+    cache = caches[0]
     for layer_id, layer in enumerate(self.layers):
       if not caches[0].stacked:
         cache = caches[layer_id]
-      else:  # For stacked case, there is only 1 layer of kv cache
-        cache = caches[0]
+      # else:  # For stacked case, there is only 1 layer of kv cache
 
       with jax.named_scope("TransformerBlock_Layer_" + str(layer_id)):
-        h = layer(
+        h, cache = layer(
             h,
             freqs_cis,
             mask,
@@ -282,7 +283,7 @@ class Transformer(ModuleBase):
             ragged_batch_index,
             ragged_block_index,
         )
-        cache.finalize()
+    cache.finalize()
 
     with jax.named_scope("transformer_norm"):
       h = self.norm(h)
