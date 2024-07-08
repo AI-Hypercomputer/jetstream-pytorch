@@ -161,7 +161,7 @@ def main(argv):
     print(
         f"---- Do prefill in prefill engine pod_slice_name: {prefill_engine.pod_slice_name}"
     )
-    prefill_result = prefill_engine.prefill(
+    prefill_result, _ = prefill_engine.prefill(
         params=None, padded_tokens=tokens, true_length=true_length
     )
     print(

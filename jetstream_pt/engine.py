@@ -97,7 +97,7 @@ class PyTorchEngine(engine_api.Engine):
     jax.config.update("jax_enable_x64", False)
 
     self.prefill = jax.jit(
-        self.prefill, out_shardings=self.get_prefix_destination_sharding()
+        self.prefill, out_shardings=(self.get_prefix_destination_sharding(), None), 
     )
     self.insert = jax.jit(
         self.insert,
@@ -260,7 +260,6 @@ class PyTorchEngine(engine_api.Engine):
     )
     if len(logits.shape) == 3:  # b, seqlen, num words
       logits = logits[0]  # seqlen, num words
-
     token = sampling_utils.sampling(
         logits[true_length - 1],
         self.rng,
@@ -269,7 +268,22 @@ class PyTorchEngine(engine_api.Engine):
         self.env.nucleus_topp,
         self.env.temperature,
     )
-
+    token_out = jnp.reshape(token, (1, 1))
+    data = jnp.concatenate(
+        [
+            token_out, #First token
+            jnp.ones_like(token_out), #validity of first token
+            jnp.zeros((1, 1), dtype=jnp.int32), #length = 0
+        ],
+        axis=-1,
+    )
+    result = engine_api.ResultTokens(
+        data = data,
+        tokens_idx = (0, 1),
+        valid_idx = (1, 2),
+        length_idx = (2, 3),
+        samples_per_slot = 1,
+    )
     # truncate to true_length didnt work need to be out side of jit
     # caches = [
     #   (jax.lax.dynamic_slice_in_dim(
@@ -278,7 +292,7 @@ class PyTorchEngine(engine_api.Engine):
     #       v, seq_len - true_length, true_length, axis=2))
     #   for k, v in updated_caches
     # ]
-    return Prefix(token, updated_caches, true_length)
+    return Prefix(token, updated_caches, true_length), result
 
   def shrink_prefix(
       self,

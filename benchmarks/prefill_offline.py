@@ -82,7 +82,7 @@ def prefill_benchmark(tokens_list, engine, params, warmup):
     # pylint: disable-next=all
     warmup_text = "warmup" if warmup else "execute"
     it = time.time()
-    prefill_result = engine.prefill(
+    prefill_result, _ = engine.prefill(
         params=params,
         padded_tokens=prefill_tokens,
         true_length=len(prefill_tokens),
