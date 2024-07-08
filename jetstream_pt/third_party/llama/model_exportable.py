@@ -250,7 +250,6 @@ class Transformer(ModuleBase):
     ragged_batch_index: precomputed batch index for ragged attention
     ragged_block_index: precomputed block index for ragged attention
     """
-
     with jax.named_scope("transformer_tok"):
       seqlen = tokens.shape[-1]
       h = self.tok_embeddings(tokens)
