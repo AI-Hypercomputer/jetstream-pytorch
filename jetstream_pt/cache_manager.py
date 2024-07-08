@@ -163,8 +163,6 @@ class KVCacheGenerate:
         # Try to use shard_map to get rid of the data copy
         b, head, _, dim = self.cache_k.shape
         self.cache_k._elem, self.cache_v._elem = torch_xla2.interop.call_jax(self.update_single_cache_line, self.cache_k._elem, self.cache_v._elem, self.new_ks._elem, self.new_vs._elem)
-        # self.cache_k._elem = self.cache_k._elem.at[self.batch, :, self.pos, :].set(self.new_ks._elem.reshape(b, head, dim))
-        # self.cache_v._elem = self.cache_v._elem.at[self.batch, :, self.pos, :].set(self.new_vs._elem.reshape(b, head, dim))
 
   def update(self, key, value, layer_id:int):
     """Update kv cache"""
@@ -277,13 +275,29 @@ class Int8KVCacheGenerate:
     self.cache_v = cache_v
     self.k_scaler = cache_k_scaler
     self.v_scaler = cache_v_scaler
+    self.new_ks = None
+    self.new_vs = None
+    self.new_k_scaler = None
+    self.new_v_scaler = None
+
+    self.batch = jnp.arange(self.env.batch_size)
     self.input_pos = input_pos
     self.sharding = sharding
     self.env = env
 
-    if self.env.generate_cache_stacked:
-      layer, batch, heads, len, dim = self.cache_k.shape
-      self.new_ks, self.new_vs, self.new_k_scalers, self.new_v_scalers = torchjax.to_torch((jnp.zeros((layer, batch, heads, 1, dim)), jnp.zeros((layer, batch, heads, 1, dim)), jnp.zeros((layer, batch, 1, 1, 1)), jnp.zeros((layer, batch, 1, 1, 1))))
+    cache_pspec = self.env.partition_by_axis(self.env.cache_sharding_axis)  # Number of heads
+    none_pspec = self.env.partition_by_axis()
+    in_specs = (cache_pspec, cache_pspec, cache_pspec, cache_pspec)
+    out_specs = (cache_pspec, cache_pspec)
+    self.update_single_cache_line = jax.jit(shard_map(self.update_single_cache_line, self.env.mesh, in_specs, out_specs, check_rep=False))
+
+  def update_single_cache_line(self, cache_k, cache_v, new_ks, new_vs):
+    b, head, _, dim = cache_k.shape
+    for bb, pp in enumerate(self.pos.reshape(b)):
+        new_ks_slice = jax.lax.dynamic_slice_in_dim(new_ks, bb, 1, 0)
+        new_vs_slice = jax.lax.dynamic_slice_in_dim(new_vs, bb, 1, 0)
+        cache_k = jax.lax.dynamic_update_slice(cache_k, new_ks_slice, (bb, 0, pp, 0))
+        cache_v = jax.lax.dynamic_update_slice(cache_v, new_vs_slice, (bb, 0, pp, 0))
 
   def state(self):
     """Get kv cache state"""
@@ -300,12 +314,8 @@ class Int8KVCacheGenerate:
     cache_k = jnp.zeros(shape, device=device, dtype=jnp.int8)
     cache_v = jnp.zeros(shape, device=device, dtype=jnp.int8)
 
-    if env.generate_cache_stacked:
-      kscaler = jnp.ones((shape[0], shape[1], 1, shape[2], 1), dtype=jnp.bfloat16)
-      vscaler = jnp.ones((shape[0], shape[1], 1, shape[2], 1), dtype=jnp.bfloat16)
-    else:
-      kscaler = jnp.ones((shape[0], 1, shape[2], 1), dtype=jnp.bfloat16)
-      vscaler = jnp.ones((shape[0], 1, shape[2], 1), dtype=jnp.bfloat16)
+    kscaler = jnp.ones((shape[0], 1, shape[2], 1), dtype=jnp.bfloat16)
+    vscaler = jnp.ones((shape[0], 1, shape[2], 1), dtype=jnp.bfloat16)
 
     cache_k, cache_v, kscaler, vscaler = torchjax.to_torch(
         (cache_k, cache_v, kscaler, vscaler)
@@ -324,40 +334,33 @@ class Int8KVCacheGenerate:
     k_quant, kscale = self.quantize(xk)
     v_quant, vscale = self.quantize(xv)
 
-    if self.stacked:
-      self.new_ks[layer_id, ...] = k_quant
-      self.new_vs[layer_id, ...] = v_quant
-      self.new_k_scalers[layer_id, ...] = kscale
-      self.new_v_scalers[layer_id, ...] = vscale
-
-      return self.cache_k[layer_id], self.cache_v[layer_id], k_quant, v_quant, self.k_scaler[layer_id], self.v_scaler[layer_id], kscale, vscale
-
+    if self.env.lazy_cache_update:
+      self.new_ks = k_quant
+      self.new_vs = v_quant
+      self.new_k_scaler = kscale
+      self.new_v_scaler = vscale
+    
     if self.env.ring_buffer:
       self.cache_k[:, :, self.input_pos, :] = k_quant
       self.cache_v[:, :, self.input_pos, :] = v_quant
       self.k_scaler[:, :, self.input_pos, :] = kscale
       self.v_scaler[:, :, self.input_pos, :] = vscale
     else:
-      batch = jnp.arange(self.env.batch_size)
-      self.cache_k[batch, :, self.input_pos, :] = k_quant.squeeze(2)
-      self.cache_v[batch, :, self.input_pos, :] = v_quant.squeeze(2)
-      self.k_scaler[batch, :, self.input_pos, :] = kscale.squeeze(2)
-      self.v_scaler[batch, :, self.input_pos, :] = vscale.squeeze(2)
+      self.cache_k[self.batch, :, self.input_pos, :] = k_quant.squeeze(2)
+      self.cache_v[self.batch, :, self.input_pos, :] = v_quant.squeeze(2)
+      self.k_scaler[self.batch, :, self.input_pos, :] = kscale.squeeze(2)
+      self.v_scaler[self.batch, :, self.input_pos, :] = vscale.squeeze(2)
     return self.cache_k, self.cache_v, k_quant, v_quant, self.k_scaler, self.v_scaler, kscale, vscale
 
   def finalize(self):
-    if not self.stacked:
+    if not self.env.lazy_cache_update:
       return
-      # self.cache_k._elem = self.cache_k._elem.at[:, :, :, self.pos].set(jnp.squeeze(self.new_ks._elem, -2))
-      # self.cache_v._elem = self.cache_v._elem.at[:, :, :, self.pos].set(jnp.squeeze(self.new_vs._elem, -2))
     if self.env.ring_buffer:
-      self.cache_k._elem = self.cache_k._elem.at[:, :, :, self.pos].set(self.new_ks._elem)
-      self.cache_v._elem = self.cache_v._elem.at[:, :, :, self.pos].set(self.new_vs._elem)
-      self.k_scaler._elem = self.k_scaler._elem.at[:, :, :, self.pos].set(self.new_k_scalers._elem)
-      self.v_scaler._elem = self.v_scaler._elem.at[:, :, :, self.pos].set(self.new_v_scalers._elem)
+      # Assume no cache stack for ring buffer
+      self.cache_k._elem = self.cache_k._elem.at[..., self.pos, :].set(self.new_ks._elem)
+      self.cache_v._elem = self.cache_v._elem.at[..., self.pos, :].set(self.new_vs._elem)
     else:
-      batch = jnp.arange(self.env.batch_size)
-      self.cache_k._elem = self.cache_k._elem.at[:, batch, :, self.pos].set(self.new_ks._elem)
-      self.cache_v._elem = self.cache_v._elem.at[:, batch, :, self.pos].set(self.new_vs._elem)
-      self.k_scaler._elem = self.k_scaler._elem.at[:, batch, :, self.pos].set(self.new_k_scalers._elem)
-      self.v_scaler._elem = self.v_scaler._elem.at[:, batch, :, self.pos].set(self.new_v_scalers._elem)
+        self.k_scaler[self.batch, :, self.input_pos, :] = self.new_k_scaler.squeeze(2)
+        self.v_scaler[self.batch, :, self.input_pos, :] = self.new_v_scaler.squeeze(2)
+        # Try to use shard_map to get rid of the data copy
+        self.cache_k._elem, self.cache_v._elem = torch_xla2.interop.call_jax(self.update_single_cache_line, self.cache_k._elem, self.cache_v._elem, self.new_ks._elem, self.new_vs._elem)
