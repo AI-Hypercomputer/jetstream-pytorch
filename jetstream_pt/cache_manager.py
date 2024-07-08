@@ -140,10 +140,9 @@ class KVCacheGenerate:
           self.cache_k._elem = self.cache_k._elem.at[:, self.batch, :, self.pos, :].set(self.new_ks._elem.reshape(b, layer, head, dim))
           self.cache_v._elem = self.cache_v._elem.at[:, self.batch, :, self.pos, :].set(self.new_vs._elem.reshape(b, layer, head, dim))
         else:
-          def body_func(i:int, _):
+          for i in range(self.env.num_layers):
             self.cache_k._elem = self.cache_k._elem.at[i, self.batch, :, self.pos, :].set(self.new_ks[i]._elem.reshape(b, head, dim))
             self.cache_v._elem = self.cache_v._elem.at[i, self.batch, :, self.pos, :].set(self.new_vs[i]._elem.reshape(b, head, dim))
-          _ = jax.lax.fori_loop(0, self.env.num_layers, body_func, init_val=jnp.zeros((self.env.num_layers,)))
       else:
         b, head, len, dim = self.cache_k.shape
         self.cache_k._elem = self.cache_k._elem.at[self.batch, :, self.pos, :].set(self.new_ks._elem.reshape(b, head, dim))
@@ -154,6 +153,7 @@ class KVCacheGenerate:
     # Will process in insert() at the end of the transformer forward pass
     keyj, valuej = torchjax.to_torch((key, value))
     if self.env.lazy_cache_update:
+      # When new cache stacked, must have generate_cache_stacked
       if self.env.new_cache_stacked:
         self.new_ks[layer_id, ...] = keyj
         self.new_vs[layer_id, ...] = valuej

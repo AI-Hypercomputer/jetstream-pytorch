@@ -162,7 +162,7 @@ class TransformerBlock(ModuleBase):
 
     with jax.named_scope("ffn"):
       out = h + self.feed_forward.forward(ffns)
-      return out, cache
+      return out
 
 
 def precompute_freqs_cis(
@@ -273,7 +273,7 @@ class Transformer(ModuleBase):
       # else:  # For stacked case, there is only 1 layer of kv cache
 
       with jax.named_scope("TransformerBlock_Layer_" + str(layer_id)):
-        h, cache = layer(
+        h = layer(
             h,
             freqs_cis,
             mask,
@@ -283,7 +283,7 @@ class Transformer(ModuleBase):
             ragged_batch_index,
             ragged_block_index,
         )
-    cache.finalize()
+    # cache.finalize()
 
     with jax.named_scope("transformer_norm"):
       h = self.norm(h)

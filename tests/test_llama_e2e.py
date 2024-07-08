@@ -302,7 +302,7 @@ class LlamaE2ETest(unittest.TestCase):
     self.assertEqual(out_tokens, expected_output_tokens)
 
 
-  # Foriloop has issue
+  # Won't work after removed the cache.finalize() in the Transformer
   def test_llama_e2e_float32_left_aligned_lazy_cache_update_generate_cache_stacked(self):
     """end to end jetstream llama test with float32"""
     jax.config.update("jax_platform_name", "cpu")
