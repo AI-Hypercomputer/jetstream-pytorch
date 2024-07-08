@@ -16,6 +16,7 @@ import jax
 import jax.numpy as jnp
 import torch
 from jetstream_pt import torchjax
+from jax.experimental.shard_map import shard_map
 
 
 # pylint: disable-next=all
@@ -123,6 +124,16 @@ class KVCacheGenerate:
       else:  # when generate cache is not stacked, new cache cannot stack
         assert not self.env.new_cache_stacked
 
+    cache_pspec = self.env.partition_by_axis(self.cache_sharding_axis)  # Number of heads
+    in_specs = (cache_pspec, cache_pspec)
+    out_specs = (cache_pspec, cache_pspec)
+    self.update_single_cache_line = shard_map(self.update_single_cache_line, self.env.mesh, in_specs, out_specs)
+
+  def update_single_cache_line(self, cache_k, cache_v):
+    b, head, len, dim = cache_k.shape
+    cache_k._elem = cache_k._elem.at[self.batch, :, self.pos, :].set(self.new_ks._elem.reshape(b, head, dim))
+    cache_v._elem = cache_v._elem.at[self.batch, :, self.pos, :].set(self.new_vs._elem.reshape(b, head, dim))
+    return cache_k, cache_v
 
   def finalize(self):
     if not self.env.lazy_cache_update:
@@ -144,9 +155,11 @@ class KVCacheGenerate:
             self.cache_k._elem = self.cache_k._elem.at[i, self.batch, :, self.pos, :].set(self.new_ks[i]._elem.reshape(b, head, dim))
             self.cache_v._elem = self.cache_v._elem.at[i, self.batch, :, self.pos, :].set(self.new_vs[i]._elem.reshape(b, head, dim))
       else:
+        # Try to use shard_map to get rid of the data copy
         b, head, len, dim = self.cache_k.shape
-        self.cache_k._elem = self.cache_k._elem.at[self.batch, :, self.pos, :].set(self.new_ks._elem.reshape(b, head, dim))
-        self.cache_v._elem = self.cache_v._elem.at[self.batch, :, self.pos, :].set(self.new_vs._elem.reshape(b, head, dim))
+        self.cache_k, self.cache_v = self.update_single_cache_line(self.cache_k, self.cache_v)
+        # self.cache_k._elem = self.cache_k._elem.at[self.batch, :, self.pos, :].set(self.new_ks._elem.reshape(b, head, dim))
+        # self.cache_v._elem = self.cache_v._elem.at[self.batch, :, self.pos, :].set(self.new_vs._elem.reshape(b, head, dim))
 
   def update(self, key, value, layer_id:int):
     """Update kv cache"""
