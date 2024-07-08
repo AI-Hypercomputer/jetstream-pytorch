@@ -574,13 +574,16 @@ class Int8KVAttentionKernel:
       return local_output, (local_max, local_denom)
     
     with jax.named_scope("attn_insert_cache"):
-      keys, values, new_key, new_value, k_scaler, v_scaler, new_k_scaler, new_v_scaler  = cache.update(xk, xv, self.layer_id)
-      keys = repeat_kv(keys, n_rep)
-      values = repeat_kv(values, n_rep)
+      orig_keys, orig_values, new_key, new_value, k_scaler, v_scaler, new_k_scaler, new_v_scaler  = cache.update(xk, xv, self.layer_id)
+      keys = repeat_kv(orig_keys, n_rep)
+      values = repeat_kv(orig_values, n_rep)
 
     # print(f"attention kernel xq {xq.shape} seqlen {seqlen} keys {keys.shape} mask {mask.shape}")
     with jax.named_scope("attn_qkv"):
       existing_output, (existing_max, existing_denom) = attend(xq_expanded, keys, values, k_scaler, v_scaler, mask)
+
+    with jax.named_scope("attn_cache_lazy_update"):
+      cache.finalize()
 
     # For non flash attention or prefill, existing output contains everything
     if not self.env.flash_attention or seqlen > 1:
