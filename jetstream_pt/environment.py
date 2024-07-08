@@ -176,16 +176,16 @@ class JetEngineEnvironment:
     else:
       self.kv_cache_shard_axis = "num_attn_heads"
 
-    cache_sharding_axis = self.attention_kv_axis_names.index(
+    self.cache_sharding_axis = self.attention_kv_axis_names.index(
         self.kv_cache_shard_axis
     )
 
-    if self.cache_shape[cache_sharding_axis] == 1:
+    if self.cache_shape[self.cache_sharding_axis] == 1:
       # cannot shard on an axis that is 1
       # default to last
-      cache_sharding_axis = len(self.cache_shape) - 1
+      self.cache_sharding_axis = len(self.cache_shape) - 1
 
-    self.cache_sharding = self.sharding_by_axis(cache_sharding_axis)
+    self.cache_sharding = self.sharding_by_axis(self.cache_sharding_axis)
     self._load_sharding_config()
 
   def _load_sharding_config(self):
