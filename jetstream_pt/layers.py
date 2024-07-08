@@ -466,7 +466,8 @@ class AttentionKernel:
     # print(f"attention kernel xq {xq.shape} seqlen {seqlen} keys {keys.shape} mask {mask.shape}")
     with jax.named_scope("attn_qkv"):
       existing_output, (existing_max, existing_denom) = attend(xq_expanded, keys, values, mask)
-
+    with jax.named_scope("attn_cache_lazy_update"):
+      cache.finalize()
     # For non flash attention or prefill, existing output contains everything
     if not self.env.flash_attention or seqlen > 1:
       return existing_output
