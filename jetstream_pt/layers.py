@@ -458,11 +458,11 @@ class AttentionKernel:
       return local_output, (local_max, local_denom)
     
 
-    
+    #import pdb; pdb.set_trace()
     with jax.named_scope("attn_insert_cache"):
-      keys, values = cache.update(xk, xv, self.layer_id)
-      keys = repeat_kv(keys, n_rep)
-      values = repeat_kv(values, n_rep)
+      orig_keys, orig_values = cache.update(xk, xv, self.layer_id)
+      keys = repeat_kv(orig_keys, n_rep)
+      values = repeat_kv(orig_values, n_rep)
 
     # print(f"attention kernel xq {xq.shape} seqlen {seqlen} keys {keys.shape} mask {mask.shape}")
     with jax.named_scope("attn_qkv"):

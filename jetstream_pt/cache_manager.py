@@ -17,7 +17,7 @@ import jax.numpy as jnp
 import torch
 from jetstream_pt import torchjax
 from jax.experimental.shard_map import shard_map
-
+import torch_xla2
 
 # pylint: disable-next=all
 class CacheInterface:
@@ -124,15 +124,20 @@ class KVCacheGenerate:
       else:  # when generate cache is not stacked, new cache cannot stack
         assert not self.env.new_cache_stacked
 
-    cache_pspec = self.env.partition_by_axis(self.cache_sharding_axis)  # Number of heads
-    in_specs = (cache_pspec, cache_pspec)
+    cache_pspec = self.env.partition_by_axis(self.env.cache_sharding_axis)  # Number of heads
+    none_pspec = self.env.partition_by_axis()
+    in_specs = (cache_pspec, cache_pspec, cache_pspec, cache_pspec)
     out_specs = (cache_pspec, cache_pspec)
-    self.update_single_cache_line = shard_map(self.update_single_cache_line, self.env.mesh, in_specs, out_specs)
+    self.update_single_cache_line = jax.jit(shard_map(self.update_single_cache_line, self.env.mesh, in_specs, out_specs, check_rep=False))
 
-  def update_single_cache_line(self, cache_k, cache_v):
-    b, head, len, dim = cache_k.shape
-    cache_k._elem = cache_k._elem.at[self.batch, :, self.pos, :].set(self.new_ks._elem.reshape(b, head, dim))
-    cache_v._elem = cache_v._elem.at[self.batch, :, self.pos, :].set(self.new_vs._elem.reshape(b, head, dim))
+  def update_single_cache_line(self, cache_k, cache_v, new_ks, new_vs):
+    b, head, _, dim = cache_k.shape
+    for bb, pp in enumerate(self.pos.reshape(b)):
+        new_ks_slice = jax.lax.dynamic_slice_in_dim(new_ks, bb, 1, 0)
+        new_vs_slice = jax.lax.dynamic_slice_in_dim(new_vs, bb, 1, 0)
+        cache_k = jax.lax.dynamic_update_slice(cache_k, new_ks_slice, (bb, 0, pp, 0))
+        cache_v = jax.lax.dynamic_update_slice(cache_v, new_vs_slice, (bb, 0, pp, 0))
+
     return cache_k, cache_v
 
   def finalize(self):
@@ -156,8 +161,8 @@ class KVCacheGenerate:
             self.cache_v._elem = self.cache_v._elem.at[i, self.batch, :, self.pos, :].set(self.new_vs[i]._elem.reshape(b, head, dim))
       else:
         # Try to use shard_map to get rid of the data copy
-        b, head, len, dim = self.cache_k.shape
-        self.cache_k, self.cache_v = self.update_single_cache_line(self.cache_k, self.cache_v)
+        b, head, _, dim = self.cache_k.shape
+        self.cache_k._elem, self.cache_v._elem = torch_xla2.interop.call_jax(self.update_single_cache_line, self.cache_k._elem, self.cache_v._elem, self.new_ks._elem, self.new_vs._elem)
         # self.cache_k._elem = self.cache_k._elem.at[self.batch, :, self.pos, :].set(self.new_ks._elem.reshape(b, head, dim))
         # self.cache_v._elem = self.cache_v._elem.at[self.batch, :, self.pos, :].set(self.new_vs._elem.reshape(b, head, dim))
 
