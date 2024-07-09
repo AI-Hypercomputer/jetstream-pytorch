@@ -13,8 +13,12 @@ spec:
       spec:
         imagePullSecrets:
           []
+        serviceAccountName: ray-ksa
         containers:
           - volumeMounts:
+            - name: gcs-fuse-checkpoint
+              mountPath: /llama
+              readOnly: true
             - mountPath: /tmp/ray
               name: ray-logs
             name: ray-head
@@ -23,15 +27,17 @@ spec:
             resources:
               limits:
                 cpu: "4"
-                ephemeral-storage: 20Gi
+                ephemeral-storage: 30Gi
                 memory: 40G
               requests:
                 cpu: "4"
-                ephemeral-storage: 10Gi
+                ephemeral-storage: 30Gi
                 memory: 40G
             securityContext:
               {}
             env:
+              - name: JAX_PLATFORMS
+                value: "cpu"
               - name: RAY_memory_monitor_refresh_ms
                 value: "0"
               - name: RAY_GRAFANA_IFRAME_HOST
@@ -54,7 +60,16 @@ spec:
         volumes:
           - emptyDir: {}
             name: ray-logs
+          - name: gcs-fuse-checkpoint
+            csi:
+              driver: gcsfuse.csi.storage.gke.io
+              readOnly: true
+              volumeAttributes:
+                bucketName: ricliu-llama2
+                mountOptions: "implicit-dirs"
       metadata:
+        annotations:
+          gke-gcsfuse/volumes: "true"
         labels:
           cloud.google.com/gke-ray-node-type: head
           app.kubernetes.io/name: kuberay
@@ -72,36 +87,52 @@ spec:
       spec:
         imagePullSecrets:
           []
+        serviceAccountName: ray-ksa
         containers:
           - volumeMounts:
             - mountPath: /tmp/ray
               name: ray-logs
+            - name: gcs-fuse-checkpoint
+              mountPath: /llama
+              readOnly: true
             name: ray-worker
             image: gcr.io/tpu-vm-gke-testing/ricliu-jetstream:20240702
             imagePullPolicy: IfNotPresent
             resources:
               limits:
                 cpu: "8"
-                ephemeral-storage: 20Gi
+                ephemeral-storage: 30Gi
                 google.com/tpu: "4"
-                memory: 40G
+                memory: 200G
               requests:
                 cpu: "8"
-                ephemeral-storage: 10Gi
+                ephemeral-storage: 30Gi
                 google.com/tpu: "4"
-                memory: 40G
+                memory: 200G
             securityContext:
               {}
             env:
+            - name: JAX_PLATFORMS
+              value: "cpu"
             ports:
               null
         volumes:
           - emptyDir: {}
             name: ray-logs
+          - name: gcs-fuse-checkpoint
+            csi:
+              driver: gcsfuse.csi.storage.gke.io
+              readOnly: true
+              volumeAttributes:
+                bucketName: ricliu-llama2 
+                mountOptions: "implicit-dirs"
         nodeSelector:
           cloud.google.com/gke-tpu-accelerator: tpu-v4-podslice
           cloud.google.com/gke-tpu-topology: 2x2x1
+          iam.gke.io/gke-metadata-server-enabled: "true"
       metadata:
+        annotations:
+          gke-gcsfuse/volumes: "true"
         labels:
           cloud.google.com/gke-ray-node-type: worker
           app.kubernetes.io/name: kuberay

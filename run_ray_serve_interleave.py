@@ -19,7 +19,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 import json
 
-import jax
+#import jax
 from jetstream.core import server_lib
 from jetstream.core import config_lib
 from jetstream.core import orchestrator
@@ -61,7 +61,7 @@ flags.DEFINE_string("decode_pod_slice_name", "", "Decode pod slice name")
 
 def create_engine(**kwargs):
   """create a pytorch engine"""
-  jax.config.update("jax_default_prng_impl", "unsafe_rbg")
+  #jax.config.update("jax_default_prng_impl", "unsafe_rbg")
   os.environ["TF_CPP_MIN_LOG_LEVEL"] = "0"
 
   start = time.perf_counter()
@@ -87,7 +87,7 @@ def create_engine(**kwargs):
 
 def create_disaggregated_engine():
   """create a pytorch engine"""
-  jax.config.update("jax_default_prng_impl", "unsafe_rbg")
+  #jax.config.update("jax_default_prng_impl", "unsafe_rbg")
   os.environ["TF_CPP_MIN_LOG_LEVEL"] = "0"
 
   start = time.perf_counter()
