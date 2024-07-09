@@ -350,7 +350,9 @@ class PyTorchRayWorker:
     new_mask = mask.at[:, current_position].set(0)
     if self.env.quant_config.enable_kv_quantization:
       caches_obj = [
-          cache_manager.Int8KVCacheGenerate(k, v, ks, vs, input_indexes)
+          cache_manager.Int8KVCacheGenerate(
+              k, v, ks, vs, input_indexes, env=self.env
+          )
           for (k, v), (ks, vs) in torchjax.to_torch(
               list(zip(caches, cache_scales))
           )
@@ -358,7 +360,7 @@ class PyTorchRayWorker:
     else:
       caches_obj = [
           cache_manager.KVCacheGenerate(
-              k, v, input_indexes, self.cache_sharding
+              k, v, input_indexes, self.cache_sharding, env=self.env
           )
           for k, v in torchjax.to_torch(caches)
       ]
