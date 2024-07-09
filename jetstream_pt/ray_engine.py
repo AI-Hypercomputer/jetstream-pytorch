@@ -4,6 +4,7 @@ from typing import Any, Iterable, Optional, Union, Tuple, List
 
 import numpy as np
 import ray
+from ray.runtime_env import RuntimeEnv
 from ray.util.accelerators import tpu
 from ray.runtime_env import RuntimeEnv
 
