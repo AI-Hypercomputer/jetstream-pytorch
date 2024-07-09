@@ -390,7 +390,7 @@ class AttentionKernel:
     self.ragged_attention = ak.RaggedAttentionKernel(
         env,
         input_specs=(*([qkv_pspec] * 3), *([others_pspec] * 4)),
-        output_specs=(qkv_pspec, (others_pspec, others_pspec)),
+        output_specs=(qkv_pspec, (qkv_pspec, qkv_pspec)),
         sharding_axis=self.shard_axis,
     )
     self.layer_id = layer_id
@@ -425,7 +425,7 @@ class AttentionKernel:
       xq_expanded = xq
 
     def attend(xq, keys, values, local_mask=None):
-      if self.env.ragged_mha and seqlen == 1:
+      if self.env.ragged_mha and seqlen == 1 and keys.shape[-2] != 1:
         local_output, (local_max, local_denom) = torch_xla2.interop.call_jax(
             self.ragged_attention,
             xq,
@@ -436,7 +436,7 @@ class AttentionKernel:
             ragged_batch_index,
             ragged_block_index,
         )
-      elif self.env.flash_attention:
+      elif self.env.flash_attention or keys.shape[-2] == 1:
         with torch_xla2.default_env():
           local_output, (local_max, local_denom) = self.flash_attention(xq, keys, values, mask=local_mask)
       else:
@@ -458,7 +458,6 @@ class AttentionKernel:
       return local_output, (local_max, local_denom)
     
 
-    #import pdb; pdb.set_trace()
     with jax.named_scope("attn_insert_cache"):
       orig_keys, orig_values = cache.update(xk, xv, self.layer_id)
       keys = repeat_kv(orig_keys, n_rep)
@@ -467,10 +466,10 @@ class AttentionKernel:
     # print(f"attention kernel xq {xq.shape} seqlen {seqlen} keys {keys.shape} mask {mask.shape}")
     with jax.named_scope("attn_qkv"):
       existing_output, (existing_max, existing_denom) = attend(xq_expanded, keys, values, mask)
-    with jax.named_scope("attn_cache_lazy_update"):
-      cache.finalize()
+    
+    # Updating cache during each step still has very large impact on latency.
     # For non flash attention or prefill, existing output contains everything
-    if not self.env.flash_attention or seqlen > 1:
+    if not self.env.lazy_cache_update or seqlen > 1:
       return existing_output
 
     # For flash attention, existing output contains the existing kv cache generated logits
@@ -541,7 +540,7 @@ class Int8KVAttentionKernel:
       xq_expanded = xq
 
     def attend(xq, keys, values, k_scaler, v_scaler, local_mask=None):
-      if self.env.ragged_mha and seqlen == 1:
+      if self.env.ragged_mha and seqlen == 1 and keys.shape[-2] != 1:
         local_output, (local_max, local_denom) = torch_xla2.interop.call_jax(
             self.ragged_attention,
             xq,
@@ -554,9 +553,11 @@ class Int8KVAttentionKernel:
             k_scaler,
             v_scaler,
         )
-      elif self.env.flash_attention:
+        local_max = local_max.reshape(*local_max.shape, 1)
+        local_denom = local_denom.reshape(*local_denom.shape, 1)
+      elif self.env.flash_attention or keys.shape[-2] == 1:
         with torch_xla2.default_env():
-          local_output, (local_max, local_denom) = self.flash_attention(xq, keys, values, mask=local_mask)
+          local_output, (local_max, local_denom) = self.flash_attention(xq, keys, values, k_scaler, v_scaler, mask=local_mask)
       else:
         local_output = self.dense_attention(xq, keys, values, k_scaler, v_scaler, local_mask)
         local_max = None
@@ -578,16 +579,11 @@ class Int8KVAttentionKernel:
       orig_keys, orig_values, new_key, new_value, k_scaler, v_scaler, new_k_scaler, new_v_scaler  = cache.update(xk, xv, self.layer_id)
       keys = repeat_kv(orig_keys, n_rep)
       values = repeat_kv(orig_values, n_rep)
-
-    # print(f"attention kernel xq {xq.shape} seqlen {seqlen} keys {keys.shape} mask {mask.shape}")
     with jax.named_scope("attn_qkv"):
       existing_output, (existing_max, existing_denom) = attend(xq_expanded, keys, values, k_scaler, v_scaler, mask)
 
-    with jax.named_scope("attn_cache_lazy_update"):
-      cache.finalize()
-
     # For non flash attention or prefill, existing output contains everything
-    if not self.env.flash_attention or seqlen > 1:
+    if not self.env.lazy_cache_update or seqlen > 1:
       return existing_output
 
     # For flash attention, existing output contains the existing kv cache generated logits
@@ -599,10 +595,10 @@ class Int8KVAttentionKernel:
       #   return new_output
 
     with jax.named_scope("attn_global"):
-      # print(f"existing_output {existing_output} existing_max {existing_max} existing_denom {existing_denom}")
-      # print(f"new_output {new_output} new_max {new_max} new_denom {new_denom}")
-
+      existing_denom = existing_denom[:, 0:1]
+      existing_max = existing_max[:, 0:1]
       global_sum = existing_denom * torch.exp(existing_max) + new_denom * torch.exp(new_max)
+      
       existing_output = existing_output * existing_denom * torch.exp(existing_max) / global_sum
       new_output = new_output * new_denom * torch.exp(new_max) / global_sum
       attn_out = existing_output + new_output

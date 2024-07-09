@@ -142,9 +142,6 @@ class JetEngineEnvironment:
     self.testing = self._data.testing
     self.testing_seed = self._data.testing_seed
 
-    if self.lazy_cache_update:
-      self.flash_attention = True
-
     if self.generate_cache_stacked:
       self.cache_shape = (self.num_layers, *self._data.cache_shape)
     else:

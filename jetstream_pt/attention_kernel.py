@@ -198,6 +198,8 @@ def ragged_mqa(
             grid=(batch_size, seq_len // bk),
         ),
         compiler_params={"dimension_semantics": ("parallel", "arbitrary")},
+        #interpret=True,
+        #debug=True,
         out_shape=[
             q,
             jax.ShapeDtypeStruct(
@@ -278,7 +280,7 @@ def ragged_mha(
             shard_axis,
             *([None] * replicated_in_axes),
         ),
-        out_axes=shard_axis,
+        out_axes=(shard_axis,(shard_axis, shard_axis))
     )(q, k, v, start, end, *replicated_inputs)
   return out, (m, l)
 
@@ -311,7 +313,6 @@ def dense_attention(xq, keys, values, k_scaler=None, v_scaler=None, mask=None):
 
 def flash_attention(xq, keys, values, mask=None, normalize_var=True):
   """The vanilla attention kernel implementation."""
-  # import pdb; pdb.set_trace()
   # mask_value: float = DEFAULT_MASK_VALUE
   logits = torch.einsum(
       "bhqd,bhkd->bhqk", xq.type(torch.float32), keys.type(torch.float32)
@@ -343,25 +344,26 @@ def flash_attention_quantized(xq, keys, values, k_scaler, v_scaler, mask=None, n
   )
 
   if normalize_var:
-    logits = logits / torch.sqrt(keys.shape[-1]) # Align with meta llama
+    logits = logits / math.sqrt(keys.shape[-1]) # Align with meta llama
   # Quantized
-  logits = logits * k_scaler
+  bs, hs, ls, ds = k_scaler.shape
+  logits = logits * k_scaler.reshape(k_scaler.shape[0], 1, 1, k_scaler.shape[2])
 
   # mask = jnp.arange(keys.shape[1])[None] < lengths[:, None]
   if mask is not None:
     # logits = logits + jnp.where(mask, 0.0, DEFAULT_MASK_VALUE)[:, None]
     logits = logits + mask
 
-  logits_max = torch.max(axis=-1, keepdim=True)
+  logits_max, _ = torch.max(logits, axis=-1, keepdim=True)
   unnormalized = torch.exp(logits - logits_max)
   #Quantized, should not put here, otherwise sum will have this too, which cancels with denominator
   # unnormalized = unnormalized * v_scaler
 
   denominator = unnormalized.sum(axis=-1, keepdim=True)
-  unnormalized = unnormalized * v_scaler
+  unnormalized = unnormalized * v_scaler.reshape(v_scaler.shape[0], 1, 1, v_scaler.shape[2])
 
   o = (
-      jnp.einsum("bhqk,bhkd->bhqd", unnormalized.type_as(values), values)
+      torch.einsum("bhqk,bhkd->bhqd", unnormalized.type_as(values), values)
       / denominator
   )
 
