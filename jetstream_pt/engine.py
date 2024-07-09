@@ -19,6 +19,7 @@ import threading
 import functools
 import os
 
+import glob
 from etils import epath
 from flax import struct
 import jax
@@ -40,6 +41,9 @@ from jetstream_pt.third_party.llama import model_exportable as llama_model, mode
 from jetstream_pt.third_party.gemma import config as gemma_config, model as gemma_model
 from jetstream_pt.third_party.mixtral import config as mixtral_config, model as mixtral_model
 
+from absl import flags
+
+FLAGS = flags.FLAGS
 
 Mesh = jax.sharding.Mesh
 P = jax.sharding.PartitionSpec
@@ -82,11 +86,13 @@ class PyTorchEngine(engine_api.Engine):
       self,
       pt_model: torch.nn.Module,
       env: JetEngineEnvironment,
+      weights=None,
   ):
     self.pt_model = pt_model
     self.env = env
     self.default_dtype = jnp.bfloat16 if env.bf16_enable else jnp.float32
     self.rng = jax.random.PRNGKey(0)
+    self.weights = weights
 
     self.y_sharding = env.sharding_by_axis(1)
     self.x_sharding = env.sharding_by_axis(0)
@@ -682,18 +688,27 @@ class PyTorchEngine(engine_api.Engine):
 
     return pytree.tree_map_only(torch.Tensor, make_array, model_args_meta)
 
-  def _load_from_safetensors(self, path):
+  def _load_from_safetensors(self, dir_path):
     weights = {}
-    with safe_open(path, framework="flax", device="cpu") as f:
-      for key, model_weights in self.pt_model.state_dict().items():
-        if key == "freqs_cis":
-          continue
-        weights[key] = f.get_tensor(key)
-        assert tuple(model_weights.shape) == tuple(
-            weights[key].shape
-        ), f"key: {key} error: {model_weights.shape} != {weights[key].shape}"
-    weights["freqs_cis"] = torch_xla2.tensor.t2j(self.pt_model.freqs_cis)
-    return weights
+    if os.path.isdir(dir_path):
+      pathes = glob.glob(os.path.join(dir_path, "*.safetensors"))
+    else:
+      # dir_path is a single file
+      pathes = [dir_path]
+    for path in pathes:
+      with safe_open(path, framework="flax", device="cpu") as f:
+        for key in f.keys():
+          weights[key] = f.get_tensor(key).astype(jnp.dtype("bfloat16"))
+
+    # optionally change the names from hf names -> orig name
+    updated = {}
+    weight_map = self.pt_model.get_hf_names_to_real_name()
+    for key, val in weights.items():
+      if key in weight_map:
+        updated[weight_map[key]] = val
+
+    updated["freqs_cis"] = torch_xla2.tensor.t2j(self.pt_model.freqs_cis)
+    return updated
 
   def _load_from_state_dict(self, path):
     state_dict = torch.load(path, map_location=torch.device("cpu"))
@@ -713,6 +728,8 @@ class PyTorchEngine(engine_api.Engine):
 
   # pylint: disable-next=all
   def load_params(self) -> Params:
+    if self.weights is not None:
+      return self.weights
     # We want to fix this: load from files
     with jax.default_device(self.colocated_cpus):
       if self.env.checkpoint_path:

@@ -6,6 +6,8 @@ from typing import Any, List, Optional
 import jax
 import torch
 import torch.nn.functional as F
+import functools
+from jetstream_pt.model_base import ModuleBase
 from jetstream_pt.layers import (
     Attention,
     Int8Embedding,
@@ -20,7 +22,7 @@ from torch import nn
 from . import model_args
 
 
-class FeedForward(nn.Module):
+class FeedForward(ModuleBase):
   """Feed-forward module."""
 
   def __init__(
@@ -66,13 +68,20 @@ class FeedForward(nn.Module):
         device=device,
         **linear_kwargs,
     )
+    self.hf_name("w1", "gate_proj")
+    self.hf_name("w2", "down_proj")
+    self.hf_name("w3", "up_proj")
+
+    self.annotate_sharding("w1.weight", 0)
+    self.annotate_sharding("w2.weight", 1)
+    self.annotate_sharding("w3.weight", 0)
 
   def forward(self, x):
     result = self.w2(F.silu(self.w1(x)) * self.w3(x))
     return result
 
 
-class TransformerBlock(nn.Module):
+class TransformerBlock(ModuleBase):
   """Transformer block."""
 
   def __init__(
@@ -108,6 +117,21 @@ class TransformerBlock(nn.Module):
         args.dim, eps=args.norm_eps, device=args.device
     )
     self.ffn_norm = RMSNorm(args.dim, eps=args.norm_eps, device=args.device)
+
+    self.hf_name("attention", "self_attn")
+    self.attention.hf_name("wq", "q_proj")
+    self.attention.hf_name("wk", "k_proj")
+    self.attention.hf_name("wv", "v_proj")
+    self.attention.hf_name("wo", "o_proj")
+
+    self.attention.annotate_sharding("wq.weight", 0)
+    self.attention.annotate_sharding("wk.weight", 0)
+    self.attention.annotate_sharding("wv.weight", 0)
+    self.attention.annotate_sharding("wo.weight", 1)
+
+    self.hf_name("feed_forward", "mlp")
+    self.hf_name("attention_norm", "input_layernorm")
+    self.hf_name("ffn_norm", "post_attention_layernorm")
 
   def forward(
       self,
@@ -150,7 +174,7 @@ def precompute_freqs_cis(
   return freqs_cis
 
 
-class Transformer(nn.Module):
+class Transformer(ModuleBase):
   """Transformer module."""
 
   def __init__(
@@ -196,6 +220,14 @@ class Transformer(nn.Module):
     )
 
     self.register_buffer("freqs_cis", freqs_cis)
+
+    self.hf_name("output", "lm_head")
+    self.hf_name("norm", "model.norm")
+    self.hf_name("layers", "model.layers")
+    self.hf_name("tok_embeddings", "model.embed_tokens")
+
+    self.annotate_sharding("tok_embeddings.weight", 1)
+    self.annotate_sharding("output.weight", 0)
 
   @torch.no_grad()
   def forward(
@@ -298,3 +330,30 @@ class Transformer(nn.Module):
     elif model_name == "llama-3":
       sharding_dict["tok_embeddings.weight"] = "VocabParallelEmbedding"
     return sharding_dict
+
+  @classmethod
+  def from_hf_model_id(cls, model_id, env):
+    name = {
+        "meta-llama/Llama-2-7b-chat-hf": "llama-2-7b",
+        "meta-llama/Llama-2-7b-hf": "llama-2-7b",
+        "meta-llama/Llama-2-13b-chat-hf": "llama-2-13b",
+        "meta-llama/Llama-2-13b-hf": "llama-2-13b",
+        "meta-llama/Meta-Llama-3-8B": "llama-3-8b",
+        "meta-llama/Meta-Llama-3-8B-Instruct": "llama-3-8b",
+    }.get(model_id)
+    assert name
+    args = model_args.get_model_args(
+        name, env.cache_len, env.batch_size, env.bf16_enable
+    )
+    args.device = "meta"
+    model = cls(args, env)
+    return model
+
+  def drop_weight(self, key):
+    return key.startswith("model")
+
+  def shard_weights(self, weights_dict):
+    """Shards the weights
+
+    Assumes the weights_dict is a list of XLATensor2
+    """

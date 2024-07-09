@@ -269,13 +269,6 @@ class PyTorchRayWorker:
   # pylint: disable-next=all
   def sharding_by_name(self, name):
 
-    # This allows easier way to edit shardings
-    """
-    for key, val in self.env._data.experimental_sharding_axis_override.items():
-      if name.endswith(key):
-        return self.env.sharding_by_axis(val)
-    """
-
     if "weight_scaler" in name:
       return self.x_sharding
     if "tok_embeddings." in name:

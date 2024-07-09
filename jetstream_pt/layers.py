@@ -26,6 +26,7 @@ import torch_xla2
 from jax import lax
 from jetstream_pt import torchjax
 from jetstream_pt.environment import QuantizationConfig
+from jetstream_pt.model_base import ModuleBase
 from jetstream_pt.quantize import (
     dequantize_tensor,
     load_q_weight_helper,
@@ -36,6 +37,8 @@ from jetstream_pt.quantize import (
 )
 from torch import nn
 from . import attention_kernel as ak
+
+from absl import flags
 
 
 def _calc_cosine_dist(x, y):
@@ -294,6 +297,21 @@ def get_quantized_linear_layer(config: "QuantizationConfig"):
     return WeightOnlyPerChannelQuantizedLinear
 
 
+def create_quantized_from_nn_linear(
+    float_linear: nn.Linear, config: "QuantizationConfig"
+):
+  clazz_ = get_quantized_linear_layer(config)
+  obj = clazz_(
+      float_linear.in_features,
+      float_linear.out_features,
+      float_linear.bias is not None,
+      "meta",
+      config,
+  )
+  obj.quantize_weight_from_nn_linear(float_linear.weight)
+  return obj
+
+
 def get_quantized_enbedding_layer(config: "QuantizationConfig"):
   if not config.enable_weight_quantization:
     return nn.Embedding
@@ -501,7 +519,7 @@ class Int8KVAttentionKernel:
       return output
 
 
-class Attention(nn.Module):
+class Attention(ModuleBase):
   """Attention module."""
 
   def __init__(self, n_heads, n_kv_heads, head_dim, hidden_size, device, env):

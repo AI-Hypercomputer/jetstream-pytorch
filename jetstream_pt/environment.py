@@ -12,18 +12,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Tuple, Dict
-
 import dataclasses
-import yaml
+from typing import Tuple
 
+from absl import flags
 import jax
 import jax.sharding as jsharding
 from jax.experimental import mesh_utils
 import torch_xla2
+import yaml
 
 
 from jetstream_pt import cache_manager
+
+
+FLAGS = flags.FLAGS
+flags.DEFINE_integer(
+    "internal_starting_position", 512, "Starting position in kv cache"
+)
 
 
 @dataclasses.dataclass
@@ -36,7 +42,6 @@ class QuantizationConfig:
   is_symmetric_weight: bool = True
 
   enable_activation_quantization: bool = False
-
   enable_kv_quantization: bool = False
 
 
@@ -74,11 +79,6 @@ class JetEngineEnvironmentData:
   # This is the axis to shard among the number of available devices
   # This string must be one of the values of attention_kv_axis_names above
   kv_cache_shard_axis: str = "num_attn_heads"
-
-  # Override sharding axis of a weight by name
-  experimental_sharding_axis_override: Dict[str, int] = dataclasses.field(
-      default_factory=dict
-  )
 
   # QKV fusion has negative performance on TPU, slicing takes longer
   qkv_fusion: bool = False
