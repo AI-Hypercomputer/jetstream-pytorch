@@ -52,7 +52,7 @@ class KVCachePrefill:
     if self.kv_quantize:  # pretend to be quantized
       bsz, _, seq, _ = key.shape
       ones = torchjax.to_torch(jnp.ones((bsz, 1, seq, 1), dtype=jnp.bfloat16))
-      return key, value, ones, ones
+      return key, value, None, None, ones, ones, None, None
 
     return key, value
 
@@ -185,7 +185,7 @@ class KVCacheGenerate:
           return self.cache_k, self.cache_v
       
 
-    if self.env.ring_buffer:
+    elif self.env.ring_buffer:
       # Assume no cache stack for ring buffer
       # pylint: disable-next=all
       self.cache_k._elem = self.cache_k._elem.at[..., self.pos, :].set(keyj)
@@ -280,7 +280,7 @@ class Int8KVCacheGenerate:
     self.new_k_scaler = None
     self.new_v_scaler = None
 
-    self.batch = jnp.arange(self.env.batch_size)
+    self.batch = jnp.arange(env.batch_size)
     self.input_pos = input_pos
     self.sharding = sharding
     self.env = env
@@ -293,11 +293,12 @@ class Int8KVCacheGenerate:
 
   def update_single_cache_line(self, cache_k, cache_v, new_ks, new_vs):
     b, head, _, dim = cache_k.shape
-    for bb, pp in enumerate(self.pos.reshape(b)):
+    for bb, pp in enumerate(self.input_pos.reshape(b)):
         new_ks_slice = jax.lax.dynamic_slice_in_dim(new_ks, bb, 1, 0)
         new_vs_slice = jax.lax.dynamic_slice_in_dim(new_vs, bb, 1, 0)
         cache_k = jax.lax.dynamic_update_slice(cache_k, new_ks_slice, (bb, 0, pp, 0))
         cache_v = jax.lax.dynamic_update_slice(cache_v, new_vs_slice, (bb, 0, pp, 0))
+    return cache_k, cache_v
 
   def state(self):
     """Get kv cache state"""
@@ -340,7 +341,7 @@ class Int8KVCacheGenerate:
       self.new_k_scaler = kscale
       self.new_v_scaler = vscale
     
-    if self.env.ring_buffer:
+    elif self.env.ring_buffer:
       self.cache_k[:, :, self.input_pos, :] = k_quant
       self.cache_v[:, :, self.input_pos, :] = v_quant
       self.k_scaler[:, :, self.input_pos, :] = kscale
@@ -357,8 +358,8 @@ class Int8KVCacheGenerate:
       return
     if self.env.ring_buffer:
       # Assume no cache stack for ring buffer
-      self.cache_k._elem = self.cache_k._elem.at[..., self.pos, :].set(self.new_ks._elem)
-      self.cache_v._elem = self.cache_v._elem.at[..., self.pos, :].set(self.new_vs._elem)
+      self.cache_k._elem = self.cache_k._elem.at[..., self.input_pos, :].set(self.new_ks._elem)
+      self.cache_v._elem = self.cache_v._elem.at[..., self.input_pos, :].set(self.new_vs._elem)
     else:
         self.k_scaler[self.batch, :, self.input_pos, :] = self.new_k_scaler.squeeze(2)
         self.v_scaler[self.batch, :, self.input_pos, :] = self.new_v_scaler.squeeze(2)
