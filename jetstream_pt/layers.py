@@ -389,7 +389,7 @@ class AttentionKernel:
     self.flash_attention = ak.flash_attention
     self.ragged_attention = ak.RaggedAttentionKernel(
         env,
-        input_specs=(*([qkv_pspec] * 3), *([others_pspec] * 4)),
+        input_specs=(*([qkv_pspec] * 3), *([others_pspec] * 6)),
         output_specs=(qkv_pspec, (qkv_pspec, qkv_pspec)),
         sharding_axis=self.shard_axis,
     )
@@ -419,12 +419,13 @@ class AttentionKernel:
     _, num_kv_heads, _, kv_head_dim = xk.shape
     n_rep = num_heads // num_kv_heads
 
-    if not self.env.ragged_mha and seqlen == 1:
-      xq_expanded = torch.broadcast_to(xq, (xq.shape[0], xq.shape[1], 2, xq.shape[3]))
-    else:
-      xq_expanded = xq
+    # if not self.env.ragged_mha and seqlen == 1:
+    #   xq_expanded = torch.broadcast_to(xq, (xq.shape[0], xq.shape[1], 2, xq.shape[3]))
+    # else:
+    #   xq_expanded = xq
 
     def attend(xq, keys, values, local_mask=None):
+      # As of right now, ragged attention doesn't support attention calculation with prefill and new cache line
       if self.env.ragged_mha and seqlen == 1 and keys.shape[-2] != 1:
         local_output, (local_max, local_denom) = torch_xla2.interop.call_jax(
             self.ragged_attention,
@@ -436,20 +437,22 @@ class AttentionKernel:
             ragged_batch_index,
             ragged_block_index,
         )
-      elif self.env.flash_attention or keys.shape[-2] == 1:
+      elif self.env.flash_attention:
         with torch_xla2.default_env():
           local_output, (local_max, local_denom) = self.flash_attention(xq, keys, values, mask=local_mask)
       else:
+        if seqlen == 1:
+           xq = torch.broadcast_to(xq, (xq.shape[0], xq.shape[1], 2, xq.shape[3]))
         local_output = self.dense_attention(xq, keys, values, None, None, local_mask)
         local_max = None
         local_denom = None
 
-      if not self.env.ragged_mha and seqlen == 1:
-        local_output = local_output[:, :, 0:1, :]
-        if local_max is not None:
-          local_max = local_max[:, :, 0:1, :]
-        if local_denom is not None:
-          local_denom = local_denom[:, :, 0:1, :]
+        if seqlen == 1:
+          local_output = local_output[:, :, 0:1, :]
+          if local_max is not None:
+            local_max = local_max[:, :, 0:1, :]
+          if local_denom is not None:
+            local_denom = local_denom[:, :, 0:1, :]
 
       # print(f"attention kernel local_output {local_output.shape} seqlen {seqlen}")
       # if local_max is not None and local_denom is not None:
@@ -465,7 +468,7 @@ class AttentionKernel:
 
     # print(f"attention kernel xq {xq.shape} seqlen {seqlen} keys {keys.shape} mask {mask.shape}")
     with jax.named_scope("attn_qkv"):
-      existing_output, (existing_max, existing_denom) = attend(xq_expanded, keys, values, mask)
+      existing_output, (existing_max, existing_denom) = attend(xq, keys, values, mask)
     
     # Updating cache during each step still has very large impact on latency.
     # For non flash attention or prefill, existing output contains everything

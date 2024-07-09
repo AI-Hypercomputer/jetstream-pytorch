@@ -264,7 +264,8 @@ def ragged_mha(
         ragged_batch_index,
         ragged_block_index,
     )
-
+  # New cache has t=1
+  bk = min(bk, k.shape[-2])
   with jax.named_scope("ragged_mha_vmap"):
     out, (m, l) = jax.vmap(
         functools.partial(
