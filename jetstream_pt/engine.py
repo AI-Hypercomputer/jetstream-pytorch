@@ -97,7 +97,8 @@ class PyTorchEngine(engine_api.Engine):
     jax.config.update("jax_enable_x64", False)
 
     self.prefill = jax.jit(
-        self.prefill, out_shardings=(self.get_prefix_destination_sharding(), None), 
+        self.prefill,
+        out_shardings=(self.get_prefix_destination_sharding(), None),
     )
     self.insert = jax.jit(
         self.insert,
@@ -243,7 +244,7 @@ class PyTorchEngine(engine_api.Engine):
       existing_prefix: Optional[Prefix] = None,
       padded_tokens: PrefillInputs,  # PrefillInputs[jax.Array],
       true_length: int,
-  ) -> Prefix:
+  ) -> Tuple[Prefix, engine_api.ResultTokens]:
     if isinstance(padded_tokens, jax.Array):
       batched_token = padded_tokens.reshape(1, -1)
     else:
@@ -271,18 +272,19 @@ class PyTorchEngine(engine_api.Engine):
     token_out = jnp.reshape(token, (1, 1))
     data = jnp.concatenate(
         [
-            token_out, #First token
-            jnp.ones_like(token_out), #validity of first token
-            jnp.zeros((1, 1), dtype=jnp.int32), #length = 0
+            token_out,  # First token
+            jnp.ones_like(token_out),  # validity of first token
+            jnp.zeros((1, 1), dtype=jnp.int32),  # length = 0
         ],
         axis=-1,
     )
+    length = token_out.shape[1]
     result = engine_api.ResultTokens(
-        data = data,
-        tokens_idx = (0, 1),
-        valid_idx = (1, 2),
-        length_idx = (2, 3),
-        samples_per_slot = 1,
+        data=data,
+        tokens_idx=(0, length),
+        valid_idx=(length, 2 * length),
+        length_idx=(2 * length, 2 * length + 1),
+        samples_per_slot=1,
     )
     # truncate to true_length didnt work need to be out side of jit
     # caches = [
