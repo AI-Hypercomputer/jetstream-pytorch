@@ -127,7 +127,7 @@ class LlamaE2ETest(unittest.TestCase):
       decode_state = engine.init_decode_state()
       slot = 0
       # pylint: disable-next=all
-      prefill_result = engine.prefill(
+      prefill_result, _ = engine.prefill(
           params=params, padded_tokens=padded_tokens, true_length=true_length
       )
 
@@ -193,7 +193,7 @@ class LlamaE2ETest(unittest.TestCase):
     decode_state = engine.init_decode_state()
     slot = 0
     # pylint: disable-next=all
-    prefill_result = engine.prefill(
+    prefill_result, _ = engine.prefill(
         params=params, padded_tokens=padded_tokens, true_length=true_length
     )
 
@@ -278,7 +278,7 @@ class LlamaE2ETest(unittest.TestCase):
     slot = 0
 
     # pylint: disable-next=all
-    prefill_result = engine.prefill(
+    prefill_result, _ = engine.prefill(
         params=params, padded_tokens=padded_tokens, true_length=true_length
     )
 
@@ -350,7 +350,7 @@ class LlamaE2ETest(unittest.TestCase):
     slot = 0
 
     # pylint: disable-next=all
-    prefill_result = engine.prefill(
+    prefill_result, _ = engine.prefill(
         params=params, padded_tokens=padded_tokens, true_length=true_length
     )
 
@@ -416,7 +416,7 @@ class LlamaE2ETest(unittest.TestCase):
     # pylint: disable-next=all
     decode_state = engine.init_decode_state()
     # pylint: disable-next=all
-    prefill_result = engine.prefill(
+    prefill_result, _ = engine.prefill(
         params=params, padded_tokens=padded_tokens, true_length=true_length
     )
     out_tokens = prefill_result.token
@@ -491,7 +491,7 @@ class LlamaE2ETest(unittest.TestCase):
     # pylint: disable-next=all
     decode_state = engine.init_decode_state()
     # pylint: disable-next=all
-    prefill_result = engine.prefill(
+    prefill_result, _ = engine.prefill(
         params=params, padded_tokens=padded_tokens, true_length=true_length
     )
     out_tokens = prefill_result.token
