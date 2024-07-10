@@ -43,7 +43,7 @@ def run_prefill_time(engine, params, decode_state, seqlen):
   )
 
   for _ in range(3):
-    prefill_result = engine.prefill(
+    prefill_result, _ = engine.prefill(
         params=params, padded_tokens=tokens, true_length=true_length
     )
     decode_state = engine.insert(
@@ -53,7 +53,7 @@ def run_prefill_time(engine, params, decode_state, seqlen):
   nums = 5
   start = time.perf_counter()
   for i in range(nums):
-    prefill_result = engine.prefill(
+    prefill_result, _ = engine.prefill(
         params=params, padded_tokens=tokens, true_length=true_length
     )
     decode_state = engine.insert(

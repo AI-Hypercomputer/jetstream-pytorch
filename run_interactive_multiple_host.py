@@ -88,7 +88,7 @@ def main(argv):
     print(f"---- Encoded tokens are: {tokens}")
 
     # pylint: disable-next=all
-    prefill_result = engine.prefill(
+    prefill_result, _ = engine.prefill(
         params=None, padded_tokens=tokens, true_length=true_length
     )
     # pylint: disable-next=all

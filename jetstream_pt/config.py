@@ -31,6 +31,7 @@ flags.DEFINE_integer("batch_size", 32, "The batch size")
 flags.DEFINE_string("size", "tiny", "size of model")
 flags.DEFINE_bool("quantize_kv_cache", False, "kv_cache_quantize")
 flags.DEFINE_integer("max_cache_length", 1024, "kv_cache_quantize")
+flags.DEFINE_integer("max_decode_length", 1024, "max length of generated text")
 flags.DEFINE_string("sharding_config", "", "config file for sharding")
 flags.DEFINE_bool(
     "shard_on_batch",
@@ -173,6 +174,7 @@ def create_engine_from_config_flags():
       batch_size=FLAGS.batch_size,
       quant_config=quant_config,
       max_cache_length=FLAGS.max_cache_length,
+      max_decode_length=FLAGS.max_decode_length,
       sharding_config=sharding_file_name,
       shard_on_batch=FLAGS.shard_on_batch,
       ragged_mha=FLAGS.ragged_mha,
