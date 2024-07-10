@@ -218,7 +218,7 @@ kubectl apply -f kuberay/manifests/ray-cluster.tpu-v4-singlehost.yaml
 or
 ```bash
 kubectl apply -f kuberay/manifests/ray-cluster.tpu-v4-multihost.yaml
-
+```
 
 
 ### Start a Ray Serve deployment
