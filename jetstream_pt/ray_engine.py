@@ -6,7 +6,6 @@ import numpy as np
 import ray
 from ray.runtime_env import RuntimeEnv
 from ray.util.accelerators import tpu
-from ray.runtime_env import RuntimeEnv
 
 from jetstream.engine import engine_api, tokenizer_pb2
 from jetstream_pt.ray_worker import PyTorchRayWorker
@@ -229,8 +228,7 @@ def create_pytorch_ray_engine(
     raise NotImplementedError(
         f"Model name should be one of{','.join(supported_models)}"
     )
-  # This is not the Ray head anymore
-  ##ray.init(ignore_reinit_error=True)
+  ray.init(ignore_reinit_error=True)
   pod_name = tpu.get_current_pod_name()
   num_hosts = (
       num_hosts if is_disaggregated else tpu.get_current_pod_worker_count()
