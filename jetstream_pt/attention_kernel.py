@@ -213,6 +213,180 @@ def ragged_mqa(
   return out, (m[..., 0], l[..., 0])
 
 
+def ragged_mqa_kernel_reference(
+    start_ref,
+    end_ref,
+    line_end_ref,
+    pre_b_ref,
+    pre_i_ref,
+    q_ref,
+    k_ref,
+    v_ref,
+    k_scaler_ref,
+    v_scaler_ref,
+    o_ref,
+    m_ref,
+    l_ref,
+    *,
+    bk: int,
+    mask_value: float,
+    normalize_var: bool,
+    quantized: bool,
+):
+  """Pallas kernel for flash attention."""
+  b, i = pl.program_id(0), pl.program_id(1)
+
+  @pl.when(i == 0)
+  def init():
+    m_ref[...] = jnp.full_like(m_ref, -jnp.inf)
+    l_ref[...] = jnp.zeros_like(l_ref)
+    o_ref[...] = jnp.zeros_like(o_ref)
+
+  # length = lengths_ref[b]
+  # Always start from 0, left aligned
+  length = end_ref[b]
+
+  @pl.when(i * bk < length)
+  def run():
+    q = q_ref[...].astype(jnp.float32)
+    k = k_ref[...].astype(jnp.float32)
+    v = v_ref[...].astype(jnp.float32)
+    m_prev, l_prev = m_ref[...], l_ref[...]
+
+    qk = jax.lax.dot_general(
+        q, k, (((1,), (1,)), ((), ())), preferred_element_type=jnp.float32
+    )
+
+    if normalize_var:
+      qk = qk / math.sqrt(k.shape[-1]) # Align with meta llama
+    # Quantized
+    if quantized:
+      qk = qk * k_scaler_ref[...]
+
+    mask = i * bk + jax.lax.broadcasted_iota(jnp.int32, qk.shape, 1) < length
+    qk = qk + jnp.where(mask, 0.0, mask_value)
+    m_curr = qk.max(axis=-1)
+
+    s_curr = jnp.exp(qk - m_curr[..., None])
+
+
+    l_curr = jax.lax.broadcast_in_dim(s_curr.sum(axis=-1), l_prev.shape, (0,))
+    # Quantized
+    if quantized:
+      s_curr = s_curr * v_scaler_ref[...]
+
+    o_curr_times_l_curr = jnp.dot(s_curr, v)
+
+    m_curr = jax.lax.broadcast_in_dim(m_curr, m_prev.shape, (0,))
+    m_next = jnp.maximum(m_prev, m_curr)
+    alpha = jnp.exp(m_prev - m_next)
+    beta = jnp.exp(m_curr - m_next)
+    l_next = alpha * l_prev + beta * l_curr
+    l_next_safe = jnp.where(l_next == 0.0, 1.0, l_next)
+
+    m_ref[...], l_ref[...] = m_next, l_next_safe
+    o_ref[...] = (
+        (l_prev * alpha * o_ref[...] + beta * o_curr_times_l_curr) / l_next_safe
+    ).astype(o_ref.dtype)
+
+@functools.partial(jax.jit, static_argnames=["bk", "mask_value"])
+def ragged_mqa_reference(
+    q: jax.Array,
+    k: jax.Array,
+    v: jax.Array,
+    start: jax.Array,
+    end: jax.Array,
+    k_scaler: jax.Array | None = None,
+    v_scaler: jax.Array | None = None,
+    ragged_batch_index=None,
+    ragged_block_index=None,
+    bk: int = 512,
+    mask_value: float = DEFAULT_MASK_VALUE,
+    normalize_var: bool = True,
+) -> tuple[jax.Array, tuple[jax.Array, jax.Array]]:
+  """Ragged multi query attention."""
+  batch_size, num_heads, head_dim = q.shape
+  assert end.shape == (batch_size,)
+  assert end.dtype == jnp.int32
+  seq_len = k.shape[1]
+
+  def _compute_ragged_block_indices(b, i, lengths_ref):
+    length = lengths_ref[b]
+    not_done = i * bk < length
+    am_last_batch = b == batch_size - 1
+    # if length < bk, then it's -1, should be 0?
+    last_good_block = jax.lax.div(length, bk) - 1
+
+    # if not done, then still work on b, otherwise next batch
+    b_next = jnp.where(not_done, b, jnp.where(am_last_batch, b, b + 1))
+    # if not done, i next = i
+    # if done
+      #if last batch, previous good block
+      #if not last batch, i next = 0
+    i_next = jnp.where(
+        not_done, i, jnp.where(am_last_batch, last_good_block, 0)
+    )
+    return b_next, i_next
+
+  def kv_index_map(b, i, lengths_ref):
+    b_next, i_next = _compute_ragged_block_indices(b, i, lengths_ref)
+    return b_next, i_next, 0
+
+  in_specs = [
+        pl.BlockSpec(kv_index_map, (None, num_heads, head_dim)),
+        pl.BlockSpec(kv_index_map, (None, bk, head_dim)),
+        pl.BlockSpec(kv_index_map, (None, bk, head_dim)),
+    ]
+  inputs = (
+      start,
+      end,
+      end, # line_end, not actually used
+      ragged_batch_index,
+      ragged_block_index,
+      q,
+      k,
+      v,
+  )
+  quantized = False
+  if k_scaler is not None:
+    in_specs = in_specs + [
+        pl.BlockSpec(kv_index_map, (None, 1, bk)),
+        pl.BlockSpec(kv_index_map, (None, 1, bk)),
+    ]
+    inputs = inputs + (k_scaler, v_scaler)
+    quantized = True
+
+  out, m, l = pl.pallas_call(
+      functools.partial(
+          ragged_flash_attention_kernel,
+          bk=bk,
+          mask_value=mask_value,
+          normalize_var=normalize_var,
+          quantized=quantized,
+      ),
+      grid_spec=pltpu.PrefetchScalarGridSpec(
+          num_scalar_prefetch=5,
+          in_specs=in_specs,
+          out_specs=[
+              pl.BlockSpec(lambda b, i, _: (b, 0, 0), (None, num_heads, head_dim)),
+              pl.BlockSpec(lambda b, i, _: (b, 0, 0), (None, num_heads, head_dim)),
+              pl.BlockSpec(lambda b, i, _: (b, 0, 0), (None, num_heads, head_dim)),
+          ],
+          grid=(batch_size, seq_len // bk),
+      ),
+      compiler_params={"dimension_semantics": ("parallel", "arbitrary")},
+      out_shape=[
+          q,
+          jax.ShapeDtypeStruct(
+              (batch_size, num_heads, head_dim), jnp.float32
+          ),
+          jax.ShapeDtypeStruct(
+              (batch_size, num_heads, head_dim), jnp.float32
+          ),
+      ],
+  )(*inputs)
+  return out, (m[..., 0], l[..., 0])
+
 @functools.partial(
     jax.jit, static_argnames=["bk", "mask_value", "normalize_var", "shard_axis"]
 )
@@ -269,7 +443,8 @@ def ragged_mha(
   with jax.named_scope("ragged_mha_vmap"):
     out, (m, l) = jax.vmap(
         functools.partial(
-            ragged_mqa,
+            # ragged_mqa,
+            ragged_mqa_reference,
             bk=bk,
             mask_value=mask_value,
             normalize_var=normalize_var,
