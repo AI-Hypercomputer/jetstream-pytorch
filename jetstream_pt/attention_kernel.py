@@ -113,10 +113,10 @@ def ragged_mqa(
     v: jax.Array,
     start: jax.Array,
     end: jax.Array,
-    k_scaler: jax.Array | None = None,
-    v_scaler: jax.Array | None = None,
     ragged_batch_index=None,
     ragged_block_index=None,
+    k_scaler: jax.Array | None = None,
+    v_scaler: jax.Array | None = None,
     bk: int = 512,
     mask_value: float = DEFAULT_MASK_VALUE,
     normalize_var: bool = True,
@@ -227,7 +227,6 @@ def ragged_mqa_kernel_reference(
     o_ref,
     m_ref,
     l_ref,
-    *,
     bk: int,
     mask_value: float,
     normalize_var: bool,
@@ -289,17 +288,17 @@ def ragged_mqa_kernel_reference(
         (l_prev * alpha * o_ref[...] + beta * o_curr_times_l_curr) / l_next_safe
     ).astype(o_ref.dtype)
 
-@functools.partial(jax.jit, static_argnames=["bk", "mask_value"])
+@functools.partial(jax.jit, static_argnames=["bk", "mask_value", "normalize_var"])
 def ragged_mqa_reference(
     q: jax.Array,
     k: jax.Array,
     v: jax.Array,
     start: jax.Array,
     end: jax.Array,
-    k_scaler: jax.Array | None = None,
-    v_scaler: jax.Array | None = None,
     ragged_batch_index=None,
     ragged_block_index=None,
+    k_scaler: jax.Array | None = None,
+    v_scaler: jax.Array | None = None,
     bk: int = 512,
     mask_value: float = DEFAULT_MASK_VALUE,
     normalize_var: bool = True,
@@ -328,8 +327,12 @@ def ragged_mqa_reference(
     )
     return b_next, i_next
 
-  def kv_index_map(b, i, lengths_ref):
-    b_next, i_next = _compute_ragged_block_indices(b, i, lengths_ref)
+  def kv_index_map(b, i, start_ref,
+        end_ref,
+        line_end_ref,
+        ragged_batch_index_ref,
+        ragged_block_index_ref):
+    b_next, i_next = _compute_ragged_block_indices(b, i, end_ref)
     return b_next, i_next, 0
 
   in_specs = [
@@ -368,9 +371,9 @@ def ragged_mqa_reference(
           num_scalar_prefetch=5,
           in_specs=in_specs,
           out_specs=[
-              pl.BlockSpec(lambda b, i, _: (b, 0, 0), (None, num_heads, head_dim)),
-              pl.BlockSpec(lambda b, i, _: (b, 0, 0), (None, num_heads, head_dim)),
-              pl.BlockSpec(lambda b, i, _: (b, 0, 0), (None, num_heads, head_dim)),
+              pl.BlockSpec(lambda b, i, *_: (b, 0, 0), (None, num_heads, head_dim)),
+              pl.BlockSpec(lambda b, i, *_: (b, 0, 0), (None, num_heads, head_dim)),
+              pl.BlockSpec(lambda b, i, *_: (b, 0, 0), (None, num_heads, head_dim)),
           ],
           grid=(batch_size, seq_len // bk),
       ),
@@ -433,18 +436,18 @@ def ragged_mha(
   else:
     replicated_in_axes = 6
     replicated_inputs = (
-        jnp.squeeze(k_scaler, -1),
-        jnp.squeeze(v_scaler, -1),
         ragged_batch_index,
         ragged_block_index,
+        jnp.squeeze(k_scaler, -1),
+        jnp.squeeze(v_scaler, -1),
     )
   # New cache has t=1
   bk = min(bk, k.shape[-2])
   with jax.named_scope("ragged_mha_vmap"):
     out, (m, l) = jax.vmap(
         functools.partial(
-            # ragged_mqa,
-            ragged_mqa_reference,
+            ragged_mqa,
+            #ragged_mqa_reference,
             bk=bk,
             mask_value=mask_value,
             normalize_var=normalize_var,
@@ -456,7 +459,7 @@ def ragged_mha(
             shard_axis,
             *([None] * replicated_in_axes),
         ),
-        out_axes=(shard_axis,(shard_axis, shard_axis))
+        out_axes=shard_axis
     )(q, k, v, start, end, *replicated_inputs)
   return out, (m, l)
 
