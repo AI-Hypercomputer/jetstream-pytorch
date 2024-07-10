@@ -69,7 +69,7 @@ spec:
               driver: gcsfuse.csi.storage.gke.io
               readOnly: true
               volumeAttributes:
-                bucketName: ricliu-llama2-70b
+                bucketName: ricliu-llama2-70b-chat
                 mountOptions: "implicit-dirs"
       metadata:
         annotations:
@@ -128,7 +128,7 @@ spec:
               driver: gcsfuse.csi.storage.gke.io
               readOnly: true
               volumeAttributes:
-                bucketName: ricliu-llama2-70b
+                bucketName: ricliu-llama2-70b-chat
                 mountOptions: "implicit-dirs"
         nodeSelector:
           cloud.google.com/gke-tpu-accelerator: tpu-v4-podslice

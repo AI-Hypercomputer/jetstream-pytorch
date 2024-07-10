@@ -19,10 +19,18 @@ from jetstream_pt import ray_engine
 from jetstream_pt.config import FLAGS
 
 
+flags.DEFINE_string("tpu_generation", "v4", "TPU generation")
 flags.DEFINE_integer("tpu_chips", 16, "device tpu_chips")
 flags.DEFINE_bool("enable_jax_profiler", False, "enable jax profiler")
 flags.DEFINE_integer("jax_profiler_port", 9999, "port of JAX profiler server")
 flags.DEFINE_integer("num_hosts", 4, "Number of TPU host", required=False)
+
+
+def create_head_resource_name(generation, tpu_chips):
+  # TODO: Make this work for special cases like v5e-8
+  num_cores = 2 * tpu_chips
+
+  return f"TPU-{generation}-{num_cores}-head"
 
 
 def create_engine(**kwargs):
@@ -50,10 +58,7 @@ def create_engine(**kwargs):
   return engine
 
 
-@serve.deployment(
-   ray_actor_options={
-      "resources": {"TPU-v4-8-head": 1},
-   })
+@serve.deployment
 class JetStreamDeployment:
   def __init__(self, **kwargs):
     os.environ["XLA_FLAGS"] = "--xla_dump_to=/tmp/xla_logs --xla_dump_hlo_as_text"
@@ -62,7 +67,6 @@ class JetStreamDeployment:
       devices.append(i)
 
     print(f"devices: {devices}")
-
 
     self.engine = create_engine(**kwargs)
     server_config = ServerConfig(
@@ -100,10 +104,12 @@ class JetStreamDeployment:
 
 
 def main(_argv):
-  deployment = JetStreamDeployment.bind(
+  resource_name = create_head_resource_name(FLAGS.tpu_generation, FLAGS.tpu_chips)
+  print(f"Using head resource {resource_name}")
+  deployment = JetStreamDeployment.options(
+      ray_actor_options={"resources": {resource_name: 1}}
+  ).bind(
     tpu_chips=FLAGS.tpu_chips,
-    threads=FLAGS.threads,
-    port=FLAGS.port,
     model_name=FLAGS.model_name,
     tokenizer_path=FLAGS.tokenizer_path,
     ckpt_path=FLAGS.checkpoint_path,
