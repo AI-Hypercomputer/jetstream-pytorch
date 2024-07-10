@@ -366,15 +366,18 @@ class PyTorchEngine(engine_api.Engine):
     else:
 
       @functools.partial(jax.jit, donate_argnums=(0, 1), inline=True)
-      def insert(cache, scaler, new_entry):
+      def insert(cache, scaler, new_entry, update_index):
         reduce_axis = (1, 3)
         vals, scales, _ = torchjax.call_torch(
             quantize.quantize_tensor, new_entry, reduce_axis
         )
+        if self.env.generate_cache_stacked:
+            vals = jnp.expand_dims(vals, 0)
+            scales = jnp.expand_dims(scales, 0)
         new_scaler = jax.lax.dynamic_update_slice(
             scaler,
             scales,
-            [slot, 0, pos, 0],
+            update_index,
         )
         new_scaler = jax.lax.with_sharding_constraint(
             new_scaler, self.replicated
@@ -382,19 +385,29 @@ class PyTorchEngine(engine_api.Engine):
         res = jax.lax.dynamic_update_slice(
             cache,
             vals,
-            [slot, 0, pos, 0],
+            update_index,
         )
         res = jax.lax.with_sharding_constraint(res, self.cache_sharding)
         return res, new_scaler
 
-      for (k, v), (kscaler, vscaler), (newk, newv) in zip(
-          decode_state.caches, decode_state.cache_scales, prefix.caches
-      ):
-        kcache, kscale = insert(k, kscaler, newk)
-        vcache, vscale = insert(v, vscaler, newv)
-        caches.append((kcache, vcache))
-        scales.append((kscale, vscale))
-
+      if self.env.generate_cache_stacked:
+          for idx, (newk, newv) in enumerate(prefix.caches):
+            update_index = [idx, slot, 0, pos, 0]
+            #newk = jnp.expand_dims(newk, 0)
+            #newv = jnp.expand_dims(newv, 0)
+            cache_k, k_scale = insert(decode_state.caches[0][0], decode_state.cache_scales[0][0], newk, update_index)
+            cache_v, v_scale = insert(decode_state.caches[0][1], decode_state.cache_scales[0][1], newv, update_index)
+            caches = [(cache_k, cache_v)]
+            scales = [(k_scale, v_scale)]
+      else:
+        update_index = [slot, 0, pos, 0]
+        for (k, v), (kscaler, vscaler), (newk, newv) in zip(
+            decode_state.caches, decode_state.cache_scales, prefix.caches
+        ):
+            kcache, kscale = insert(k, kscaler, newk, update_index)
+            vcache, vscale = insert(v, vscaler, newv, update_index)
+            caches.append((kcache, vcache))
+            scales.append((kscale, vscale))
     lens = decode_state.lens.at[slot].set(1)
     return DecodeState(
         tokens,
