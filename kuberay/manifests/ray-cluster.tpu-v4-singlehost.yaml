@@ -22,7 +22,7 @@ spec:
             - mountPath: /tmp/ray
               name: ray-logs
             name: ray-head
-            image: gcr.io/tpu-vm-gke-testing/ricliu-jetstream:20240702
+            image: gcr.io/tpu-vm-gke-testing/ricliu-jetstream:20240709
             imagePullPolicy: IfNotPresent
             resources:
               limits:
@@ -96,7 +96,7 @@ spec:
               mountPath: /llama
               readOnly: true
             name: ray-worker
-            image: gcr.io/tpu-vm-gke-testing/ricliu-jetstream:20240702
+            image: gcr.io/tpu-vm-gke-testing/ricliu-jetstream:20240709
             imagePullPolicy: IfNotPresent
             resources:
               limits:

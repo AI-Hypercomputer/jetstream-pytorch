@@ -5,8 +5,7 @@ import grpc
 from jetstream.core.proto import jetstream_pb2
 from jetstream.core.proto import jetstream_pb2_grpc
 
-prompt = "who is going to win Euro 2024?"
-prompt = "how do I cook fried rice?"
+prompt = "What are the top 5 languages?"
 
 channel = grpc.insecure_channel("localhost:8888")
 stub = jetstream_pb2_grpc.OrchestratorStub(channel)
@@ -16,7 +15,7 @@ request = jetstream_pb2.DecodeRequest(
         text=prompt
     ),
     priority=0,
-    max_tokens=4,
+    max_tokens=2000,
 )
 
 response = stub.Decode(request)
