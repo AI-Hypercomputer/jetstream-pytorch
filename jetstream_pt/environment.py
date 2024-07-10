@@ -16,6 +16,7 @@ import dataclasses
 from typing import Tuple
 
 import jax
+import jax.numpy as jnp
 import jax.sharding as jsharding
 from jax.experimental import mesh_utils
 import torch_xla2
@@ -141,7 +142,7 @@ class JetEngineEnvironment:
     self.lazy_cache_update = self._data.lazy_cache_update
     self.testing = self._data.testing
     self.testing_seed = self._data.testing_seed
-
+    self.default_type = jnp.bfloat16 if self._data.bf16_enable else jnp.float32
     if self.generate_cache_stacked:
       self.cache_shape = (self.num_layers, *self._data.cache_shape)
     else:
