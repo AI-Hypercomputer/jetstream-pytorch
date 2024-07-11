@@ -507,7 +507,7 @@ class Int8KVAttentionKernel:
     self.ragged_attention = ak.RaggedAttentionKernel(
         env,
         input_specs=(*([qkv_pspec] * 3), *([others_pspec] * 6)),
-        output_specs=(qkv_pspec, (others_pspec, others_pspec)),
+        output_specs=(qkv_pspec, (qkv_pspec, qkv_pspec)),
         sharding_axis=self.shard_axis,
     )
     self.layer_id = layer_id
