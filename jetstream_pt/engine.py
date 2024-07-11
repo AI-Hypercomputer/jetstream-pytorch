@@ -628,7 +628,7 @@ class PyTorchEngine(engine_api.Engine):
       return decode_state.mask.at[batch, decode_state.input_pos].set(0)
 
     mask = decode_state.mask
-    if not self.env.flash_attention:
+    if not self.env.lazy_cache_update:
       mask = update_mask()
     logits, new_caches, new_scales = self._call_model_generate(
         params,
@@ -643,7 +643,7 @@ class PyTorchEngine(engine_api.Engine):
         ragged_block_index,
     )
 
-    if self.env.flash_attention:
+    if self.env.lazy_cache_update:
       # fill mask later, now use flash attention
       mask = update_mask()
 

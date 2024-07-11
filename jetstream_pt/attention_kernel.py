@@ -446,8 +446,8 @@ def ragged_mha(
   with jax.named_scope("ragged_mha_vmap"):
     out, (m, l) = jax.vmap(
         functools.partial(
-            ragged_mqa,
-            #ragged_mqa_reference,
+            # ragged_mqa,
+            ragged_mqa_reference,
             bk=bk,
             mask_value=mask_value,
             normalize_var=normalize_var,
@@ -509,7 +509,7 @@ def flash_attention(xq, keys, values, mask=None, normalize_var=True):
   denominator = unnormalized.sum(axis=-1, keepdim=True)
   # print(f"logits {logits.shape} logits_max {logits_max.shape} denominator {denominator}")
   o = (
-      torch.einsum("bhqk,bhkd->bhqd", unnormalized.type_as(values), values)
+      torch.einsum("bhqk,bhkd->bhqd", unnormalized.type_as(xq), values)
       # / denominator[..., None]
       / denominator
   )
@@ -542,7 +542,7 @@ def flash_attention_quantized(xq, keys, values, k_scaler, v_scaler, mask=None, n
   unnormalized = unnormalized * v_scaler.reshape(v_scaler.shape[0], 1, 1, v_scaler.shape[2])
 
   o = (
-      torch.einsum("bhqk,bhkd->bhqd", unnormalized.type_as(values), values)
+      torch.einsum("bhqk,bhkd->bhqd", unnormalized.type_as(xq), values)
       / denominator
   )
 
