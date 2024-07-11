@@ -443,6 +443,12 @@ def ragged_mha(
     )
   # New cache has t=1
   bk = min(bk, k.shape[-2])
+  bq, hq, tq, dq = q.shape
+  hkv = k.shape[1]
+  rep = hq // hkv
+  if rep > 1:
+    q = q.reshape(bq, hkv, rep * tq, dq)
+
   with jax.named_scope("ragged_mha_vmap"):
     out, (m, l) = jax.vmap(
         functools.partial(
