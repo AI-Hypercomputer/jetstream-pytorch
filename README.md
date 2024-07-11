@@ -199,6 +199,92 @@ python benchmarks/benchmark_serving.py --tokenizer $tokenizer_path --num-prompts
 Please look at `deps/JetStream/benchmarks/README.md` for more information.
 
 
+
+## Run server with Ray Serve
+
+### Prerequisites
+
+If running on GKE:
+
+1. Follow instructions on [this link](https://github.com/GoogleCloudPlatform/ai-on-gke/tree/main/ray-on-gke/guides/tpu) to setup a GKE cluster and the TPU webhook.
+2. Follow instructions
+   [here](https://cloud.google.com/kubernetes-engine/docs/how-to/persistent-volumes/cloud-storage-fuse-csi-driver)
+   to enable GCSFuse for your cluster. This will be needed to store the
+   converted weights.
+3. Deploy one of the sample Kuberay cluster configurations:
+```bash
+kubectl apply -f kuberay/manifests/ray-cluster.tpu-v4-singlehost.yaml
+```
+or
+```bash
+kubectl apply -f kuberay/manifests/ray-cluster.tpu-v4-multihost.yaml
+```
+
+
+### Start a Ray Serve deployment
+
+Single-host (Llama2 7B):
+
+```bash
+export RAY_ADDRESS=http://localhost:8265
+
+kubectl port-forward svc/example-cluster-kuberay-head-svc 8265:8265 &
+
+ray job submit --runtime-env-json='{"working_dir": "."}' -- python run_ray_serve_interleave.py  --tpu_chips=4 --num_hosts=1 --size=7b --model_name=llama-2 --batch_size=32 --max_cache_length=2048 --tokenizer_path=/llama/tokenizer.model --checkpoint_path=/llama/ckpt --quantize_weights=True --quantize_type="int8_per_channel" --quantize_kv_cache=True --sharding_config="default_shardings/llama.yaml"
+```
+
+Multi-host (Llama2 70B):
+
+```bash
+export RAY_ADDRESS=http://localhost:8265
+
+kubectl port-forward svc/example-cluster-kuberay-head-svc 8265:8265 &
+
+ray job submit --runtime-env-json='{"working_dir": "."}' -- python run_ray_serve_interleave.py  --tpu_chips=8 --num_hosts=2 --size=70b --model_name=llama-2 --batch_size=8 --max_cache_length=2048 --tokenizer_path=/llama/tokenizer.model --checkpoint_path=/llama/ckpt --quantize_weights=True --quantize_type="int8_per_channel" --quantize_kv_cache=True --sharding_config="default_shardings/llama.yaml"
+```
+
+### Sending an inference request
+
+Port-forward to port 8888 for gRPC:
+```
+kubectl port-forward svc/example-cluster-kuberay-head-svc 8888:8888 &
+```
+
+Sample python script:
+
+```python
+import requests
+import os
+import grpc
+
+from jetstream.core.proto import jetstream_pb2
+from jetstream.core.proto import jetstream_pb2_grpc
+
+prompt = "What are the top 5 languages?"
+
+channel = grpc.insecure_channel("localhost:8888")
+stub = jetstream_pb2_grpc.OrchestratorStub(channel)
+
+request = jetstream_pb2.DecodeRequest(
+    text_content=jetstream_pb2.DecodeRequest.TextContent(
+        text=prompt
+    ),
+    priority=0,
+    max_tokens=2000,
+)
+
+response = stub.Decode(request)
+output = []
+for resp in response:
+  output.extend(resp.stream_content.samples[0].text)
+
+text_output = "".join(output)
+print(f"Prompt: {prompt}")
+print(f"Response: {text_output}")
+```
+
+
+
 # Typical Errors
 
 ## Unexpected keyword argument 'device'

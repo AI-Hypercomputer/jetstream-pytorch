@@ -1,0 +1,144 @@
+# This template contains a Kuberay cluster using a 2x2x2 TPU v4 PodSlice.
+# To get access to TPU resources, please follow instructions in this link:
+# https://cloud.google.com/kubernetes-engine/docs/how-to/tpus
+apiVersion: ray.io/v1
+kind: RayCluster
+metadata:
+  name: example-cluster-kuberay
+spec:
+  headGroupSpec:
+    rayStartParams:
+      {}
+    template:
+      spec:
+        imagePullSecrets:
+          []
+        serviceAccountName: ray-ksa
+        containers:
+          - volumeMounts:
+            - name: gcs-fuse-checkpoint
+              mountPath: /llama
+              readOnly: true
+            - mountPath: /tmp/ray
+              name: ray-logs
+            name: ray-head
+            image: gcr.io/tpu-vm-gke-testing/ricliu-jetstream:20240709
+            imagePullPolicy: IfNotPresent
+            resources:
+              limits:
+                cpu: "4"
+                ephemeral-storage: 30Gi
+                memory: 40G
+              requests:
+                cpu: "4"
+                ephemeral-storage: 30Gi
+                memory: 40G
+            securityContext:
+              {}
+            env:
+              - name: JAX_PLATFORMS
+                value: "cpu"
+              - name: RAY_memory_monitor_refresh_ms
+                value: "0"
+              - name: RAY_GRAFANA_IFRAME_HOST
+                value: http://${grafana_host}
+              - name: RAY_GRAFANA_HOST
+                value: http://grafana:80
+              - name: RAY_PROMETHEUS_HOST
+                value: http://frontend:9090
+            ports:
+              - containerPort: 6379
+                name: gcs
+              - containerPort: 8265
+                name: dashboard
+              - containerPort: 10001
+                name: client
+              - containerPort: 8000
+                name: serve
+              - containerPort: 8471
+                name: slicebuilder
+              - containerPort: 8081
+                name: mxla
+              - containerPort: 8888
+                name: grpc
+        volumes:
+          - emptyDir: {}
+            name: ray-logs
+          - name: gcs-fuse-checkpoint
+            csi:
+              driver: gcsfuse.csi.storage.gke.io
+              readOnly: true
+              volumeAttributes:
+                bucketName: ricliu-llama2-70b-chat
+                mountOptions: "implicit-dirs"
+      metadata:
+        annotations:
+          gke-gcsfuse/volumes: "true"
+        labels:
+          cloud.google.com/gke-ray-node-type: head
+          app.kubernetes.io/name: kuberay
+          app.kubernetes.io/instance: example-cluster
+
+  workerGroupSpecs:
+  - rayStartParams:
+      {}
+    replicas: 1
+    minReplicas: 1
+    maxReplicas: 1
+    numOfHosts: 2
+    groupName: workergroup
+    template:
+      spec:
+        imagePullSecrets:
+          []
+        serviceAccountName: ray-ksa
+        containers:
+          - volumeMounts:
+            - mountPath: /tmp/ray
+              name: ray-logs
+            - name: gcs-fuse-checkpoint
+              mountPath: /llama
+              readOnly: true
+            name: ray-worker
+            image: gcr.io/tpu-vm-gke-testing/ricliu-jetstream:20240709
+            imagePullPolicy: IfNotPresent
+            resources:
+              limits:
+                cpu: "8"
+                ephemeral-storage: 30Gi
+                google.com/tpu: "4"
+                memory: 200G
+              requests:
+                cpu: "8"
+                ephemeral-storage: 30Gi
+                google.com/tpu: "4"
+                memory: 200G
+            securityContext:
+              {}
+            env:
+            - name: JAX_PLATFORMS
+              value: "cpu"
+            ports:
+              null
+        volumes:
+          - emptyDir: {}
+            name: ray-logs
+          - name: gcs-fuse-checkpoint
+            csi:
+              driver: gcsfuse.csi.storage.gke.io
+              readOnly: true
+              volumeAttributes:
+                bucketName: ricliu-llama2-70b-chat
+                mountOptions: "implicit-dirs"
+        nodeSelector:
+          cloud.google.com/gke-tpu-accelerator: tpu-v4-podslice
+          cloud.google.com/gke-tpu-topology: 2x2x2
+          iam.gke.io/gke-metadata-server-enabled: "true"
+      metadata:
+        annotations:
+          gke-gcsfuse/volumes: "true"
+        labels:
+          cloud.google.com/gke-ray-node-type: worker
+          app.kubernetes.io/name: kuberay
+          app.kubernetes.io/instance: example-cluster
+
