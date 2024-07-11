@@ -462,12 +462,13 @@ class AttentionKernel:
 
     with jax.named_scope("attn_insert_cache"):
       orig_keys, orig_values = cache.update(xk, xv, self.layer_id)
-      keys = repeat_kv(orig_keys, n_rep)
-      values = repeat_kv(orig_values, n_rep)
+      if not self.env.ragged_mha:
+        orig_keys = repeat_kv(orig_keys, n_rep)
+        orig_values = repeat_kv(orig_values, n_rep)
 
     # print(f"attention kernel xq {xq.shape} seqlen {seqlen} keys {keys.shape} mask {mask.shape}")
     with jax.named_scope("attn_qkv"):
-      existing_output, (existing_max, existing_denom) = attend(xq, keys, values, mask)
+      existing_output, (existing_max, existing_denom) = attend(xq, orig_keys, orig_values, mask)
     
     # Updating cache during each step still has very large impact on latency.
     # For non flash attention or prefill, existing output contains everything
@@ -476,9 +477,10 @@ class AttentionKernel:
 
     # For flash attention, existing output contains the existing kv cache generated logits
     with jax.named_scope("attn_new_qkv"):
-      new_keys = repeat_kv(xk, n_rep)
-      new_values = repeat_kv(xv, n_rep)
-      new_output, (new_max, new_denom) = attend(xq, new_keys, new_values, None)
+      if not self.env.ragged_mha:
+        xk = repeat_kv(xk, n_rep)
+        xv = repeat_kv(xv, n_rep)
+      new_output, (new_max, new_denom) = attend(xq, xk, xv, None)
       # if cache.cache_k is None:  # Prefill
       #   return new_output
 
@@ -576,10 +578,11 @@ class Int8KVAttentionKernel:
     
     with jax.named_scope("attn_insert_cache"):
       orig_keys, orig_values, new_key, new_value, k_scaler, v_scaler, new_k_scaler, new_v_scaler  = cache.update(xk, xv, self.layer_id)
-      keys = repeat_kv(orig_keys, n_rep)
-      values = repeat_kv(orig_values, n_rep)
+      if not self.env.ragged_mha:
+        orig_keys = repeat_kv(orig_keys, n_rep)
+        orig_values = repeat_kv(orig_values, n_rep)
     with jax.named_scope("attn_qkv"):
-      existing_output, (existing_max, existing_denom) = attend(xq, keys, values, k_scaler, v_scaler, mask)
+      existing_output, (existing_max, existing_denom) = attend(xq, orig_keys, orig_values, k_scaler, v_scaler, mask)
 
     # For non flash attention or prefill, existing output contains everything
     if not self.env.lazy_cache_update or seqlen > 1:
@@ -587,9 +590,10 @@ class Int8KVAttentionKernel:
 
     # For flash attention, existing output contains the existing kv cache generated logits
     with jax.named_scope("attn_new_qkv"):
-      new_keys = repeat_kv(new_key, n_rep)
-      new_values = repeat_kv(new_value, n_rep)
-      new_output, (new_max, new_denom) = attend(xq, new_keys, new_values, new_k_scaler, new_v_scaler, None)
+      if not self.env.ragged_mha:
+        new_key = repeat_kv(new_key, n_rep)
+        new_value = repeat_kv(new_value, n_rep)
+      new_output, (new_max, new_denom) = attend(xq, new_key, new_value, new_k_scaler, new_v_scaler, None)
       # if cache.cache_k is None:  # Prefill
       #   return new_output
 
