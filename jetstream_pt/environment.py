@@ -86,7 +86,7 @@ class JetEngineEnvironmentData:
   shard_on_batch: bool = False
 
   # Whether to enable ragged multi head attention.
-  ragged_mha: bool = False
+  ragged_mha: bool = True
 
   # The block size for the ragged attention.
   block_size: int = 512
