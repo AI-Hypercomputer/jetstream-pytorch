@@ -537,11 +537,6 @@ class Int8KVAttentionKernel:
     _, num_kv_heads, _, kv_head_dim = xk.shape
     n_rep = num_heads // num_kv_heads
 
-    if not self.env.ragged_mha and seqlen == 1:
-      xq_expanded = torch.broadcast_to(xq, (xq.shape[0], xq.shape[1], 2, xq.shape[3]))
-    else:
-      xq_expanded = xq
-
     def attend(xq, keys, values, k_scaler, v_scaler, local_mask=None):
       if self.env.ragged_mha and seqlen == 1 and keys.shape[-2] != 1:
         local_output, (local_max, local_denom) = torch_xla2.interop.call_jax(
@@ -562,15 +557,17 @@ class Int8KVAttentionKernel:
         with torch_xla2.default_env():
           local_output, (local_max, local_denom) = self.flash_attention(xq, keys, values, k_scaler, v_scaler, mask=local_mask)
       else:
+        if seqlen == 1:
+          xq = torch.broadcast_to(xq, (xq.shape[0], xq.shape[1], 2, xq.shape[3]))
         local_output = self.dense_attention(xq, keys, values, k_scaler, v_scaler, local_mask)
         local_max = None
         local_denom = None
 
-      if not self.env.ragged_mha and seqlen == 1:
-        local_output = local_output[:, :, 0:1, :]
-        if local_max is not None:
-          local_max = local_max[:, :, 0:1, :]
-          local_denom = local_denom[:, :, 0:1, :]
+        if seqlen == 1:
+          local_output = local_output[:, :, 0:1, :]
+          if local_max is not None:
+            local_max = local_max[:, :, 0:1, :]
+            local_denom = local_denom[:, :, 0:1, :]
 
       # print(f"attention kernel local_output {local_output.shape} seqlen {seqlen}")
       # if local_max is not None and local_denom is not None:
@@ -583,7 +580,7 @@ class Int8KVAttentionKernel:
       keys = repeat_kv(orig_keys, n_rep)
       values = repeat_kv(orig_values, n_rep)
     with jax.named_scope("attn_qkv"):
-      existing_output, (existing_max, existing_denom) = attend(xq_expanded, keys, values, k_scaler, v_scaler, mask)
+      existing_output, (existing_max, existing_denom) = attend(xq, keys, values, k_scaler, v_scaler, mask)
 
     # For non flash attention or prefill, existing output contains everything
     if not self.env.lazy_cache_update or seqlen > 1:
@@ -598,14 +595,10 @@ class Int8KVAttentionKernel:
       #   return new_output
 
     with jax.named_scope("attn_global"):
-      existing_denom = existing_denom[:, 0:1]
-      existing_max = existing_max[:, 0:1]
       global_sum = existing_denom * torch.exp(existing_max) + new_denom * torch.exp(new_max)
-      
       existing_output = existing_output * existing_denom * torch.exp(existing_max) / global_sum
       new_output = new_output * new_denom * torch.exp(new_max) / global_sum
       attn_out = existing_output + new_output
-
       
       return attn_out
 
