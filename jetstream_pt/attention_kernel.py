@@ -305,7 +305,7 @@ def ragged_mqa_reference(
 ) -> tuple[jax.Array, tuple[jax.Array, jax.Array]]:
   """Ragged multi query attention."""
   batch_size, num_heads, head_dim = q.shape
-  assert end.shape == (batch_size,)
+  #assert end.shape == (batch_size,)
   assert end.dtype == jnp.int32
   seq_len = k.shape[1]
 
@@ -361,7 +361,7 @@ def ragged_mqa_reference(
 
   out, m, l = pl.pallas_call(
       functools.partial(
-          ragged_flash_attention_kernel,
+          ragged_mqa_kernel_reference,
           bk=bk,
           mask_value=mask_value,
           normalize_var=normalize_var,
@@ -452,7 +452,7 @@ def ragged_mha(
   with jax.named_scope("ragged_mha_vmap"):
     out, (m, l) = jax.vmap(
         functools.partial(
-            # ragged_mqa,
+            #ragged_mqa,
             ragged_mqa_reference,
             bk=bk,
             mask_value=mask_value,
@@ -546,7 +546,7 @@ def flash_attention_quantized(xq, keys, values, k_scaler, v_scaler, mask=None, n
 
   denominator = unnormalized.sum(axis=-1, keepdim=True)
   unnormalized = unnormalized * v_scaler.reshape(v_scaler.shape[0], 1, 1, v_scaler.shape[2])
-
+  #import pdb; pdb.set_trace()
   o = (
       torch.einsum("bhqk,bhkd->bhqd", unnormalized.type_as(xq), values)
       / denominator

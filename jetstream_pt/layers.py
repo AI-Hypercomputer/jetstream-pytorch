@@ -537,9 +537,12 @@ class Int8KVAttentionKernel:
     bsz, num_heads, seqlen, head_dim = xq.shape
     _, num_kv_heads, _, kv_head_dim = xk.shape
     n_rep = num_heads // num_kv_heads
-
+    
     def attend(xq, keys, values, k_scaler, v_scaler, local_mask=None):
-      if self.env.ragged_mha and seqlen == 1 and keys.shape[-2] != 1:
+      if not self.env.ragged_mha and seqlen == 1:
+        xq = torch.broadcast_to(xq, (xq.shape[0], xq.shape[1], 2, xq.shape[3]))
+
+      if self.env.ragged_mha:
         local_output, (local_max, local_denom) = torch_xla2.interop.call_jax(
             self.ragged_attention,
             xq,
@@ -554,28 +557,26 @@ class Int8KVAttentionKernel:
         )
         local_max = local_max.reshape(*local_max.shape, 1)
         local_denom = local_denom.reshape(*local_denom.shape, 1)
-      elif self.env.flash_attention or keys.shape[-2] == 1:
+      elif self.env.flash_attention:
         with torch_xla2.default_env():
           local_output, (local_max, local_denom) = self.flash_attention(xq, keys, values, k_scaler, v_scaler, mask=local_mask)
       else:
-        if seqlen == 1:
-          xq = torch.broadcast_to(xq, (xq.shape[0], xq.shape[1], 2, xq.shape[3]))
         local_output = self.dense_attention(xq, keys, values, k_scaler, v_scaler, local_mask)
         local_max = None
         local_denom = None
 
-        if seqlen == 1:
-          local_output = local_output[:, :, 0:1, :]
-          if local_max is not None:
-            local_max = local_max[:, :, 0:1, :]
-            local_denom = local_denom[:, :, 0:1, :]
+      if local_output.shape[-2] == 2:
+        local_output = local_output[:, :, 0:1, :]
+        if local_max is not None:
+          local_max = local_max[:, :, 0:1, :]
+          local_denom = local_denom[:, :, 0:1, :]
 
       # print(f"attention kernel local_output {local_output.shape} seqlen {seqlen}")
       # if local_max is not None and local_denom is not None:
       #   print(f"local_max {local_max.shape} local_denom {local_denom.shape}")
       self.env.apply_sharding(local_output, axis=self.shard_axis)
       return local_output, (local_max, local_denom)
-    
+    #import pdb; pdb.set_trace()
     with jax.named_scope("attn_insert_cache"):
       orig_keys, orig_values, new_key, new_value, k_scaler, v_scaler, new_k_scaler, new_v_scaler  = cache.update(xk, xv, self.layer_id)
       if not self.env.ragged_mha:
@@ -715,7 +716,8 @@ class Attention(ModuleBase):
     xk = xk.transpose(1, 2)
     xv = xv.transpose(1, 2)
     xq = xq.transpose(1, 2)
-
+    if mask.ndim == 2:
+        mask = mask[:, None, None, :]
     # if cache is not None and cache.cache_k is not None:
       # print(f"xq {xq.shape} xk {xk.shape} cache shape {cache.cache_k.shape}")
     output = self.attention_kernel(
