@@ -551,7 +551,6 @@ class PyTorchRayWorker:
 
     return np_prefix, result
 
-
   def transfer(self, np_prefix: NpPrefix) -> Any:
     """Transfer prefill result from object store to HBM"""
     updated_caches = self._convert_to_jax_caches(np_prefix.caches)
