@@ -461,7 +461,7 @@ class PyTorchRayWorker:
       existing_prefix: Optional[Prefix] = None,
       padded_tokens: PrefillInputs,  # PrefillInputs[np.ndarray],
       true_length: int,
-  ) -> tuple[None, engine_api.ResultTokens]:
+  ) -> tuple[Prefix, engine_api.ResultTokens]:
     """Do prefill in ray worker"""
     logits, updated_caches = self.prefill(
         params=params,
@@ -513,7 +513,7 @@ class PyTorchRayWorker:
       existing_prefix: Optional[Prefix] = None,
       padded_tokens: PrefillInputs,  # PrefillInputs[np.ndarray],
       true_length: int,
-  ) -> tuple[None, engine_api.ResultTokens]:
+  ) -> tuple[NpPrefix, engine_api.ResultTokens]:
     """Do prefill in ray worker"""
     logits, updated_caches = self.prefill(
         params=params,
