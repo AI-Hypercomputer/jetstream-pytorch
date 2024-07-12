@@ -101,7 +101,7 @@ class KVCacheGenerate:
     super().__init__()
     self.cache_k = cache_k
     self.cache_v = cache_v
-    self.pos = position
+    self.input_pos = position
     self.sharding = sharding
     self.env = env
 
@@ -148,24 +148,24 @@ class KVCacheGenerate:
   def finalize(self):
     if not self.env.lazy_cache_update:
       return
-      # self.cache_k._elem = self.cache_k._elem.at[:, :, :, self.pos].set(jnp.squeeze(self.new_ks._elem, -2))
-      # self.cache_v._elem = self.cache_v._elem.at[:, :, :, self.pos].set(jnp.squeeze(self.new_vs._elem, -2))
+      # self.cache_k._elem = self.cache_k._elem.at[:, :, :, self.input_pos].set(jnp.squeeze(self.new_ks._elem, -2))
+      # self.cache_v._elem = self.cache_v._elem.at[:, :, :, self.input_pos].set(jnp.squeeze(self.new_vs._elem, -2))
     if self.env.ring_buffer:
       # Assume no cache stack for ring buffer
-      self.cache_k._elem = self.cache_k._elem.at[..., self.pos, :].set(self.new_ks._elem)
-      self.cache_v._elem = self.cache_v._elem.at[..., self.pos, :].set(self.new_vs._elem)
+      self.cache_k._elem = self.cache_k._elem.at[..., self.input_pos, :].set(self.new_ks._elem)
+      self.cache_v._elem = self.cache_v._elem.at[..., self.input_pos, :].set(self.new_vs._elem)
     else:
       if self.env.generate_cache_stacked:
         layer, b, head, len, dim = self.cache_k.shape
         if self.env.new_cache_stacked:
-          self.cache_k._elem, self.cache_v._elem = torch_xla2.interop.call_jax(self.update_single_cache_line, self.cache_k._elem, self.cache_v._elem, self.new_ks._elem, self.new_vs._elem, self.pos)
+          self.cache_k._elem, self.cache_v._elem = torch_xla2.interop.call_jax(self.update_single_cache_line, self.cache_k._elem, self.cache_v._elem, self.new_ks._elem, self.new_vs._elem, self.input_pos)
         else:
           for i in range(self.env.num_layers):
-            self.cache_k._elem = self.cache_k._elem.at[i, self.batch, :, self.pos, :].set(self.new_ks[i]._elem.reshape(b, head, dim))
-            self.cache_v._elem = self.cache_v._elem.at[i, self.batch, :, self.pos, :].set(self.new_vs[i]._elem.reshape(b, head, dim))
+            self.cache_k._elem = self.cache_k._elem.at[i, self.batch, :, self.input_pos, :].set(self.new_ks[i]._elem.reshape(b, head, dim))
+            self.cache_v._elem = self.cache_v._elem.at[i, self.batch, :, self.input_pos, :].set(self.new_vs[i]._elem.reshape(b, head, dim))
       else:
         # Try to use shard_map to get rid of the data copy
-        self.cache_k._elem, self.cache_v._elem = torch_xla2.interop.call_jax(self.update_single_cache_line, self.cache_k._elem, self.cache_v._elem, self.new_ks._elem, self.new_vs._elem, self.pos)
+        self.cache_k._elem, self.cache_v._elem = torch_xla2.interop.call_jax(self.update_single_cache_line, self.cache_k._elem, self.cache_v._elem, self.new_ks._elem, self.new_vs._elem, self.input_pos)
 
   def update(self, key, value, layer_id:int):
     """Update kv cache"""
@@ -191,27 +191,27 @@ class KVCacheGenerate:
     elif self.env.ring_buffer:
       # Assume no cache stack for ring buffer
       # pylint: disable-next=all
-      self.cache_k._elem = self.cache_k._elem.at[..., self.pos, :].set(keyj)
-      self.cache_v._elem = self.cache_v._elem.at[..., self.pos, :].set(valuej)
+      self.cache_k._elem = self.cache_k._elem.at[..., self.input_pos, :].set(keyj)
+      self.cache_v._elem = self.cache_v._elem.at[..., self.input_pos, :].set(valuej)
       return self.cache_k, self.cache_v
     else:
       if self.env.generate_cache_stacked:
               # pylint: disable-next=all
-        self.cache_k._elem = self.cache_k._elem.at[layer_id, self.batch, :, self.pos, :].set(
+        self.cache_k._elem = self.cache_k._elem.at[layer_id, self.batch, :, self.input_pos, :].set(
             keyj.squeeze(2)
         )
         # pylint: disable-next=all
-        self.cache_v._elem = self.cache_v._elem.at[layer_id, self.batch, :, self.pos, :].set(
+        self.cache_v._elem = self.cache_v._elem.at[layer_id, self.batch, :, self.input_pos, :].set(
             valuej.squeeze(2)
         )
         return self.cache_k[layer_id], self.cache_v[layer_id]
       else:
         # pylint: disable-next=all
-        self.cache_k._elem = self.cache_k._elem.at[self.batch, :, self.pos, :].set(
+        self.cache_k._elem = self.cache_k._elem.at[self.batch, :, self.input_pos, :].set(
             keyj.squeeze(2)
         )
         # pylint: disable-next=all
-        self.cache_v._elem = self.cache_v._elem.at[self.batch, :, self.pos, :].set(
+        self.cache_v._elem = self.cache_v._elem.at[self.batch, :, self.input_pos, :].set(
             valuej.squeeze(2)
         )
         return self.cache_k, self.cache_v

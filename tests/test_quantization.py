@@ -152,10 +152,8 @@ class QuantizationTest(unittest.TestCase):
       
       key = jax.random.PRNGKey(123)
       key2 = jax.random.PRNGKey(456)
-      cache_k_jax = jax.random.normal(key, cache_shape, dtype=env.default_dtype)
-      cache_v_jax = jax.random.normal(key2, cache_shape, dtype=env.default_dtype)
-      # cache_k_jax = jnp.zeros(cache_shape, dtype=env.default_dtype)
-      # cache_v_jax = jnp.zeros(cache_shape, dtype=env.default_dtype)
+      cache_k_jax = jax.random.normal(key, cache_shape, dtype=env.default_type)
+      cache_v_jax = jax.random.normal(key2, cache_shape, dtype=env.default_type)
 
       start = jnp.zeros((batch,), dtype=jnp.int32)
 
@@ -166,15 +164,15 @@ class QuantizationTest(unittest.TestCase):
       cache_v_int, cache_v_scaler, _ = quantize_tensor(cache_v, (-3, -1))
 
       # 1 is seqlen
-      xq = jax.random.normal(key, (batch, 2, 1, 2), dtype=env.default_dtype)
-      xk = jax.random.normal(key, (batch, 2, 1, 2), dtype=env.default_dtype)
-      xv = jax.random.normal(key, (batch, 2, 1, 2), dtype=env.default_dtype)
+      xq = jax.random.normal(key, (batch, 2, 1, 2), dtype=env.default_type)
+      xk = jax.random.normal(key, (batch, 2, 1, 2), dtype=env.default_type)
+      xv = jax.random.normal(key, (batch, 2, 1, 2), dtype=env.default_type)
 
       xq, xk, xv = torchjax.to_torch((xq, xk, xv))
 
       def get_var(position: int):
         pos = [position] if env.ring_buffer else jnp.array([position] * batch, dtype=jnp.int64)
-        mask = jax.lax.broadcast_in_dim(jnp.array([0] * position + [float("-inf")] * (100 - position)), (env.batch_size, 100), (1,))
+        mask = jax.lax.broadcast_in_dim(jnp.array([0] * position + [float("-inf")] * (100 - position)), (env.batch_size, 1, 1, 100), (3,))
         mask = torchjax.to_torch((mask))
         return pos, mask
 
@@ -201,14 +199,14 @@ class QuantizationTest(unittest.TestCase):
       env._data.quant_config.enable_kv_quantization = True
       env = environment.JetEngineEnvironment(env._data)
 
-      cache_int = cache_manager.KVCacheGenerate(
+      cache_int = cache_manager.Int8KVCacheGenerate(
           cache_k_int,
           cache_v_int,
+          cache_k_scaler,
+          cache_v_scaler,
           None,
           None,
           env,
-          cache_k_scaler=cache_k_scaler,
-          cache_v_scaler=cache_v_scaler
       )
       # layer_id doesn't matter, will assign later
       attention_quant = layers.Int8KVAttentionKernel(env, layer_id=0)
