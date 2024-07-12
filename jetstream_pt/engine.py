@@ -221,7 +221,8 @@ class PyTorchEngine(engine_api.Engine):
         dtype=self.default_dtype,
     )
     mask = jnp.triu(mask, k=1)
-    args = (tokens, input_indexes, caches, mask)
+    start = jnp.zeros((tokens.shape[0],), dtype=jnp.int32)
+    args = (tokens, input_indexes, caches, mask, start)
 
     paramst, argst = torchjax.to_torch((weights, args))
     with self._lock:
