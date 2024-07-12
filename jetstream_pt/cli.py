@@ -19,7 +19,6 @@ flags.DEFINE_string("model_id", "", "")
 flags.DEFINE_integer("override_batch_size", 32, "The batch size")
 flags.DEFINE_integer("max_input_length", 1024, "The batch size")
 flags.DEFINE_integer("max_output_length", 1024, "The batch size")
-flags.DEFINE_string("data_type", "bfloat16", "")
 flags.DEFINE_integer("port", 9000, "port to listen on")
 flags.DEFINE_integer("threads", 64, "number of worker threads in thread pool")
 
@@ -41,12 +40,13 @@ def shard_weights(env, weights, weight_shardings):
 def create_engine(devices):
   """Create Pytorch engine from flags"""
   torch.set_default_dtype(torch.bfloat16)
+  quant_config = config.create_quantization_config_from_flags()
   env_data = fetch_models.construct_env_data_from_model_id(
       FLAGS.model_id,
       FLAGS.override_batch_size,
       FLAGS.max_input_length,
       FLAGS.max_output_length,
-      FLAGS.data_type == "int8",
+      quant_config.enable_weight_quantization,
   )
   env = environment.JetEngineEnvironment(env_data)
   model = fetch_models.instantiate_model_from_repo_id(FLAGS.model_id, env)
@@ -54,7 +54,6 @@ def create_engine(devices):
   weight_shardings = model.get_sharding_annotations()
   sharded_weights = shard_weights(env, model.state_dict(), weight_shardings)
 
-  quant_config = config.create_quantization_config_from_flags()
   if quant_config.enable_weight_quantization:
     model.load_state_dict(sharded_weights, assign=True, strict=False)
     quantize_model.quantize_model(model, quant_config)
@@ -123,7 +122,7 @@ def main(argv):
     return
 
   if argv[1] == "interative":
-    list_model()
+    interactive()
     return
 
 

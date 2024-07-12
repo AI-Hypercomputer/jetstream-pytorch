@@ -29,22 +29,6 @@ flags.DEFINE_integer(
 )
 
 
-llama_model_ids = [
-    "meta-llama/Llama-2-7b-chat-hf",
-    "meta-llama/Llama-2-13b-chat-hf",
-    "meta-llama/Llama-2-7b-hf",
-    "meta-llama/Llama-2-13b-hf",
-    "meta-llama/Llama-3-8B",
-    "meta-llama/Llama-3-8B-Instruct",
-    "google/gemma-2b",
-    "google/gemma-2b-it",
-    "google/gemma-7b",
-    "google/gemma-7b-it",
-    "mistralai/Mixtral-8x7B-v0.1",
-    "mistralai/Mixtral-8x7B-Instruct-v0.1",
-]
-
-
 @dataclasses.dataclass
 class ModelInfo:
   """Model information."""

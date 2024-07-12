@@ -15,7 +15,6 @@
 import dataclasses
 from typing import Tuple
 
-from absl import flags
 import jax
 import jax.sharding as jsharding
 from jax.experimental import mesh_utils
@@ -24,12 +23,6 @@ import yaml
 
 
 from jetstream_pt import cache_manager
-
-
-FLAGS = flags.FLAGS
-flags.DEFINE_integer(
-    "internal_starting_position", 512, "Starting position in kv cache"
-)
 
 
 @dataclasses.dataclass
