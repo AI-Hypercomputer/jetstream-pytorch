@@ -156,7 +156,7 @@ class ModelComponentTest(unittest.TestCase):
         None,  # mask is none for decode
     )
     expected_out = attention_orig(*inputs_orig2)
-    cache_decode.pos = [pos]  # next position to update
+    cache_decode.input_pos = [pos]  # next position to update
     mask = self._generate_mask(env.cache_sequence_length, pos, seqlen)
     mask = mask.reshape(1, 1, 1, -1)  # seq dim is the last one
     freqs_cis = freqs_cis.reshape(batch, 1, -1)
@@ -318,7 +318,7 @@ class ModelComponentTest(unittest.TestCase):
         None,  # mask is none for decode
     )
     expected_out = block_orig(*inputs_orig2)
-    cache_decode.pos = [pos]  # next position to update
+    cache_decode.input_pos = [pos]  # next position to update
     mask = self._generate_mask(env.cache_sequence_length, pos, seqlen)
     mask = mask.reshape(1, 1, 1, -1)  # seq dim is the last one
     freqs_cis = freqs_cis.reshape(batch, 1, -1)
