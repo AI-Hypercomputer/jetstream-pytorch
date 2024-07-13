@@ -306,7 +306,8 @@ class Int8KVCacheGenerate:
     none_pspec = self.env.partition_by_axis()
     in_specs = (*([cache_pspec] * 4), *([none_pspec] * 5))
     out_specs = (cache_pspec, cache_pspec, none_pspec, none_pspec)
-    self.update_single_cache_line = jax.jit(shard_map(self.update_single_cache_line, self.env.mesh, in_specs, out_specs, check_rep=False))
+    self.update_single_cache_line = shard_map(self.update_single_cache_line, self.env.mesh, in_specs, out_specs, check_rep=False)
+    self.update_single_cache_line = jax.jit(self.update_single_cache_line)
 
   def update_single_cache_line(self, cache_k, cache_v, new_ks, new_vs, k_scaler, v_scaler, new_k_scaler, new_v_scaler, pos):
     b = cache_k.shape[-4]
@@ -364,7 +365,7 @@ class Int8KVCacheGenerate:
   def quantize(self, val):
     """Quantize value"""
     # val is (batch, heads, seqlen, dim)
-    scale = torch.amax(val.abs(), axis=(1, 3), keepdim=True)
+    scale = torch.amax(val.abs(), axis=(-3, -1), keepdim=True)
     scale = scale / 127
     return (val / scale).to(torch.int8), scale
 
