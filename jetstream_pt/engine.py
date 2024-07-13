@@ -368,7 +368,7 @@ class PyTorchEngine(engine_api.Engine):
 
       @functools.partial(jax.jit, donate_argnums=(0, 1), inline=True)
       def insert(cache, scaler, new_entry, update_index):
-        reduce_axis = (1, 3)
+        reduce_axis = (-3, -1)
         vals, scales, _ = torchjax.call_torch(
             quantize.quantize_tensor, new_entry, reduce_axis
         )
@@ -392,14 +392,16 @@ class PyTorchEngine(engine_api.Engine):
         return res, new_scaler
 
       if self.env.generate_cache_stacked:
+          cache_k, k_scale = decode_state.caches[0][0], decode_state.cache_scales[0][0]
+          cache_v, v_scale = decode_state.caches[0][1], decode_state.cache_scales[0][1]
           for idx, (newk, newv) in enumerate(prefix.caches):
             update_index = [idx, slot, 0, pos, 0]
             #newk = jnp.expand_dims(newk, 0)
             #newv = jnp.expand_dims(newv, 0)
-            cache_k, k_scale = insert(decode_state.caches[0][0], decode_state.cache_scales[0][0], newk, update_index)
-            cache_v, v_scale = insert(decode_state.caches[0][1], decode_state.cache_scales[0][1], newv, update_index)
-            caches = [(cache_k, cache_v)]
-            scales = [(k_scale, v_scale)]
+            cache_k, k_scale = insert(cache_k, k_scale, newk, update_index)
+            cache_v, v_scale = insert(cache_v, v_scale, newv, update_index)
+          caches = [(cache_k, cache_v)]
+          scales = [(k_scale, v_scale)]
       else:
         update_index = [slot, 0, pos, 0]
         for (k, v), (kscaler, vscaler), (newk, newv) in zip(
@@ -649,6 +651,10 @@ class PyTorchEngine(engine_api.Engine):
       mask = update_mask()
 
     next_token = self._sampling(logits, self.env.batch_size)
+    # print(f"current input pos: {decode_state.input_pos} and generated token is {next_token}")
+    # # for layer, (k,v) in enumerate(new_caches[0]):
+    # data = new_caches[0][0] * new_scales[0][0] if self.env.quant_config.enable_kv_quantization else new_caches[0][0]
+    # print(f"layer 0, scaled back k is {data}")
     if self.env.ring_buffer:
       input_pos = decode_state.input_pos + 1
       lens = decode_state.lens + 1
