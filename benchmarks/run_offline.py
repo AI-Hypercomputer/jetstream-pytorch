@@ -127,10 +127,20 @@ def main(argv):
     jax.profiler.stop_trace()
 
   print("prefill ", prefill_times)
-  print("decode", sum(dec_times) / 10)
+  avg_decode_times = sum(dec_times[2:]) / len(dec_times[2:])
+  print("decode", avg_decode_times)
 
   prefill_times_ms = {k: v * 1000 for k, v in prefill_times.items()}
-  decode_time_ms = sum(dec_times) * 1000 / 10 / FLAGS.batch_size
+  decode_time_ms = sum(dec_times[2:]) * 1000 / 8
+
+  largest_prefill = max(prefill_times.items())
+  print("MAX tokens:", FLAGS.batch_size / avg_decode_times)
+
+  time2 = (FLAGS.batch_size * FLAGS.max_decode_length) / (
+      FLAGS.batch_size * largest_prefill[1]
+      + FLAGS.max_decode_length * avg_decode_times
+  )
+  print("MAX tokens 2:", time2)
 
   sharegpt_path = FLAGS.sharegpt_path
   if sharegpt_path:
