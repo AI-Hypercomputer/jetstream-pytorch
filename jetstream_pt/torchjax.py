@@ -11,6 +11,9 @@ It serves 2 purposes:
    how it looks like in torch_xla2.
 """
 
+import torch
+from torch.utils import _pytree as pytree
+
 import torch_xla2
 import torch_xla2.interop
 
@@ -23,6 +26,20 @@ def to_torch(tensors):
   return torch_xla2.default_env().j2t_iso(tensors)
 
 
+def from_torch_with_copy(tensors):
+  """Convert torch tensor to Jax Array."""
+
+  def convert_tensor(t):
+    if isinstance(t, torch_xla2.tensor.XLATensor2):
+      return t.jax()
+    return torch_xla2.tensor.t2j(t)
+
+  return pytree.tree_map_only(torch.Tensor, convert_tensor, tensors)
+
+
 def from_torch(tensors):
-  """Unwrap a XLATensor into jax Array."""
+  """Unwrap a XLATensor into jax Array.
+
+  Will raise if passed in a torch.Tensor that is not XLATensor
+  """
   return torch_xla2.default_env().t2j_iso(tensors)

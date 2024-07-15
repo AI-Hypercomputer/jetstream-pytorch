@@ -27,6 +27,7 @@ pip show torch_xla2 && pip uninstall -y torch_xla2
 pip install flax
 pip install tensorflow-text
 pip install tensorflow
+pip install huggingface_hub
 
 pip install ray[default]==2.22.0
 # torch cpu

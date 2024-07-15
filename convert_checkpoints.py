@@ -357,9 +357,6 @@ def _load_from_local(input_ckpt_dir: epath.Path):
   if not _FROM_HF.value:
     return _load_orig_llama_weight(input_ckpt_dir)
   else:
-    assert (
-        not FLAGS.quantize_weights
-    ), "Quantization not supported for HF checkpoint."
     return _load_hf_llama_weight(input_ckpt_dir)
 
 

@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import copy
 import functools
 import unittest
 
@@ -27,6 +28,7 @@ from jetstream_pt.layers import (
     WeightOnlyBlockwiseQuantizedLinear,
     WeightOnlyPerChannelQuantizedLinear,
 )
+from jetstream_pt.quantize_model import quantize_model
 from jetstream_pt.quantize import dequantize_tensor, quantize_tensor
 from tests import helpers
 from torch.utils import _pytree as pytree
@@ -308,6 +310,55 @@ class QuantizationTest(unittest.TestCase):
     res, torch_res, _ = self._nn_linear_run_and_compare(
         nn_linear, per_channel_q_linear, arg
     )
+    self.assertGreater(self._calc_cosine_dist(res, torch_res), 0.9999)
+
+  def test_quant_creator(self):
+
+    out_features = 8
+    in_features = 4
+    block_size = 128
+
+    arg = torch.randn(2, 1, in_features).to(torch.bfloat16)
+    nn_linear = torch.nn.Linear(
+        in_features, out_features, bias=False, dtype=torch.bfloat16
+    )
+    quant_config = QuantizationConfig(
+        enable_weight_quantization=True,
+        enable_activation_quantization=True,
+    )
+    quantized = layers.create_quantized_from_nn_linear(nn_linear, quant_config)
+    res, torch_res, _ = self._nn_linear_run_and_compare(
+        nn_linear, quantized, arg
+    )
+    self.assertGreater(self._calc_cosine_dist(res, torch_res), 0.9999)
+
+  def test_3_layers(self):
+
+    class Model(torch.nn.Module):
+
+      def __init__(self):
+        super().__init__()
+        self.linear1 = torch.nn.Linear(1024, 2048, bias=False)
+        self.linear2 = torch.nn.Linear(2048, 2048, bias=False)
+        self.linear3 = torch.nn.Linear(2048, 1024, bias=False)
+
+      def forward(self, x):
+        x = self.linear1(x)
+        x = self.linear2(x)
+        x = self.linear3(x)
+        return x
+
+    m = Model()
+    m.to(torch.bfloat16)
+    arg = torch.randn(2, 16, 1024).to(torch.bfloat16)
+    torch_res = m(arg)
+
+    quant_config = QuantizationConfig(
+        enable_weight_quantization=True,
+        enable_activation_quantization=False,
+    )
+    qm = quantize_model(m, quant_config)
+    res = helpers.call_xla_model(qm, qm.state_dict(), arg)
     self.assertGreater(self._calc_cosine_dist(res, torch_res), 0.9999)
 
 

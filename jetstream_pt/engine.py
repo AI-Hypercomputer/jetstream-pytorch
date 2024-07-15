@@ -19,6 +19,7 @@ import threading
 import functools
 import os
 
+import glob
 from etils import epath
 from flax import struct
 import jax
@@ -40,6 +41,9 @@ from jetstream_pt.third_party.llama import model_exportable as llama_model, mode
 from jetstream_pt.third_party.gemma import config as gemma_config, model as gemma_model
 from jetstream_pt.third_party.mixtral import config as mixtral_config, model as mixtral_model
 
+from absl import flags
+
+FLAGS = flags.FLAGS
 
 Mesh = jax.sharding.Mesh
 P = jax.sharding.PartitionSpec
@@ -82,11 +86,13 @@ class PyTorchEngine(engine_api.Engine):
       self,
       pt_model: torch.nn.Module,
       env: JetEngineEnvironment,
+      weights=None,
   ):
     self.pt_model = pt_model
     self.env = env
     self.default_dtype = jnp.bfloat16 if env.bf16_enable else jnp.float32
     self.rng = jax.random.PRNGKey(0)
+    self.weights = weights
 
     self.y_sharding = env.sharding_by_axis(1)
     self.x_sharding = env.sharding_by_axis(0)
@@ -713,6 +719,8 @@ class PyTorchEngine(engine_api.Engine):
 
   # pylint: disable-next=all
   def load_params(self) -> Params:
+    if self.weights is not None:
+      return self.weights
     # We want to fix this: load from files
     with jax.default_device(self.colocated_cpus):
       if self.env.checkpoint_path:
