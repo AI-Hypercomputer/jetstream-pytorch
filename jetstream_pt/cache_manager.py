@@ -303,8 +303,9 @@ class Int8KVCacheGenerate:
         assert not self.env.new_cache_stacked
 
     cache_pspec = self.env.partition_by_axis(self.env.cache_sharding_axis)  # Number of heads
+    new_cache_pspec = self.env.partition_by_axis(2) if self.env.new_cache_stacked else self.env.partition_by_axis(1)
     none_pspec = self.env.partition_by_axis()
-    in_specs = (*([cache_pspec] * 4), *([none_pspec] * 5))
+    in_specs = (*([cache_pspec] * 2), *([new_cache_pspec] * 2), *([none_pspec] * 5))
     out_specs = (cache_pspec, cache_pspec, none_pspec, none_pspec)
     self.update_single_cache_line = shard_map(self.update_single_cache_line, self.env.mesh, in_specs, out_specs, check_rep=False)
     self.update_single_cache_line = jax.jit(self.update_single_cache_line)
