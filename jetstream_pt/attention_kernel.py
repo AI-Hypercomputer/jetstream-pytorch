@@ -16,7 +16,6 @@ DEFAULT_MASK_VALUE = -0.7 * float(np.finfo(np.dtype("float32")).max)
 
 
 def ragged_flash_attention_kernel(
-    layer_ref,
     start_ref,
     end_ref,
     line_end_ref,
@@ -135,7 +134,6 @@ def ragged_mqa(
     def kv_index_map(
         b,
         i,
-        layer_ref,
         start_ref,
         end_ref,
         line_end_ref,
@@ -145,13 +143,12 @@ def ragged_mqa(
       index = b * (seq_len // bk) + i
 
       if stacked:
-        return layer_ref[0], ragged_batch_index_ref[index], ragged_block_index_ref[index], 0
+        return layer, ragged_batch_index_ref[index], ragged_block_index_ref[index], 0
       return ragged_batch_index_ref[index], ragged_block_index_ref[index], 0
 
     def q_index_map(
         b,
         i,
-        layer_ref,
         start_ref,
         end_ref,
         line_end_ref,
@@ -160,12 +157,12 @@ def ragged_mqa(
     ):
       index = b * (seq_len // bk) + i
       if stacked:
-        return layer_ref[0], ragged_batch_index_ref[index], 0, 0
+        return layer, ragged_batch_index_ref[index], 0, 0
       return ragged_batch_index_ref[index], 0, 0
 
-    def scaler_index_map(b, i, layer_ref, *_):
+    def scaler_index_map(b, i, *_):
       if stacked:
-        return layer_ref[0], b, 0, i
+        return layer, b, 0, i
       return b, 0, i
 
     line_end = jnp.where(start < end, end, seq_len - 1)
@@ -175,12 +172,10 @@ def ragged_mqa(
       q_bp = (None, None, time, head_dim)
       kv_bp = (None, None, bk, head_dim)
       ks_bp = (None, None, 1, bk)
-      num_prefetch = 6
     else:
       q_bp = (None, time, head_dim)
       kv_bp = (None, bk, head_dim)
       ks_bp = (None, 1, bk)
-      num_prefetch = 5
 
     in_specs = [
         pl.BlockSpec(q_index_map, q_bp),
@@ -188,7 +183,6 @@ def ragged_mqa(
         pl.BlockSpec(kv_index_map, kv_bp),
     ]
     inputs = (
-        layer,
         start,
         end,
         line_end,
@@ -216,7 +210,7 @@ def ragged_mqa(
             quantized=quantized,
         ),
         grid_spec=pltpu.PrefetchScalarGridSpec(
-            num_scalar_prefetch=num_prefetch,
+            num_scalar_prefetch=5,
             in_specs=in_specs,
             out_specs=[
                 pl.BlockSpec(q_index_map, (None, time, head_dim)),
@@ -263,7 +257,7 @@ def ragged_mqa_kernel_reference(
 ):
   """Pallas kernel for flash attention."""
   b, i = pl.program_id(0), pl.program_id(1)
-
+  del layer_ref
   @pl.when(i == 0)
   def init():
     m_ref[...] = jnp.full_like(m_ref, -jnp.inf)
@@ -340,7 +334,7 @@ def ragged_mqa_reference(
   seq_len = k.shape[-2]
 
   stacked = False
-  if k.ndim == 5:
+  if k.ndim == 4:
     stacked = True
 
   def _compute_ragged_block_indices(b, i, lengths_ref):
@@ -372,24 +366,20 @@ def ragged_mqa_reference(
     return b_next, i_next, 0
 
   if stacked:
-    q_bp = (None, None, time, head_dim)
     kv_bp = (None, None, bk, head_dim)
     ks_bp = (None, None, 1, bk)
-    num_prefetch = 6
   else:
-    q_bp = (None, time, head_dim)
     kv_bp = (None, bk, head_dim)
     ks_bp = (None, 1, bk)
-    num_prefetch = 5
-
+  #import pdb; pdb.set_trace()
   in_specs = [
-        pl.BlockSpec(kv_index_map, q_bp),
+        pl.BlockSpec(lambda b, i, *_: (b, 0, 0), (None, time, head_dim)),
         pl.BlockSpec(kv_index_map, kv_bp),
         pl.BlockSpec(kv_index_map, kv_bp),
     ]
 
   inputs = (
-      layer,
+      jnp.array([layer]),
       start,
       end,
       end, # line_end, not actually used
@@ -417,7 +407,7 @@ def ragged_mqa_reference(
           quantized=quantized,
       ),
       grid_spec=pltpu.PrefetchScalarGridSpec(
-          num_scalar_prefetch=num_prefetch,
+          num_scalar_prefetch=6,
           in_specs=in_specs,
           out_specs=[
               pl.BlockSpec(lambda b, *_: (b, 0, 0), (None, time, head_dim)),
@@ -440,7 +430,7 @@ def ragged_mqa_reference(
   return out, (m[..., 0], l[..., 0])
 
 @functools.partial(
-    jax.jit, static_argnames=["bk", "mask_value", "normalize_var", "shard_axis"]
+    jax.jit, static_argnames=["bk", "mask_value", "normalize_var", "q_shard_axis", "kv_shard_axis"]
 )
 def ragged_mha(
     q: jax.Array,
@@ -456,7 +446,8 @@ def ragged_mha(
     bk: int = 512,
     mask_value: float = DEFAULT_MASK_VALUE,
     normalize_var: bool = True,
-    shard_axis: int = 1,
+    q_shard_axis:int = 0,
+    kv_shard_axis:int = 0,
 ) -> tuple[jax.Array, tuple[jax.Array, jax.Array]]:
   """Ragged multi head attention.
   Args:
@@ -481,10 +472,10 @@ def ragged_mha(
   """
   mask_value = DEFAULT_MASK_VALUE
   if k_scaler is None:
-    replicated_in_axes = 4
+    replicated_in_axes = 5
     replicated_inputs = (ragged_batch_index, ragged_block_index)
   else:
-    replicated_in_axes = 6
+    replicated_in_axes = 7
     replicated_inputs = (
         ragged_batch_index,
         ragged_block_index,
@@ -494,10 +485,11 @@ def ragged_mha(
   # New cache has t=1
   bk = min(bk, k.shape[-2])
   bq, hq, tq, dq = q.shape
-  hkv = k.shape[1]
+  hkv = k.shape[-3]
   rep = hq // hkv
   if rep > 1:
-    q = q.reshape(bq, hkv, rep * tq, dq)
+    #import pdb; pdb.set_trace()
+    q = q.reshape(bq, hkv, rep, tq, dq).reshape(bq, hkv, rep * tq, dq)
 
   with jax.named_scope("ragged_mha_vmap"):
     out, (m, l) = jax.vmap(
@@ -510,12 +502,12 @@ def ragged_mha(
             # out_dtype=out_dtype,
         ),
         in_axes=(
-            shard_axis,
-            shard_axis,
-            shard_axis,
+            q_shard_axis,
+            kv_shard_axis,
+            kv_shard_axis,
             *([None] * replicated_in_axes),
         ),
-        out_axes=shard_axis
+        out_axes=q_shard_axis
     )(q, k, v, layer, start, end, *replicated_inputs)
   return out, (m, l)
 
@@ -607,13 +599,12 @@ def flash_attention_quantized(xq, keys, values, k_scaler, v_scaler, mask=None, n
 
 class RaggedAttentionKernel:
   """Ragged attention kernel."""
-
-  def __init__(self, env, input_specs, output_specs, sharding_axis):
+  def __init__(self, env, input_specs, output_specs, q_shard_axis, kv_shard_axis):
     self.binded_ragged_mha = functools.partial(
-        ragged_mha, bk=env.block_size, shard_axis=sharding_axis
+        ragged_mha, bk=env.block_size, q_shard_axis=q_shard_axis, kv_shard_axis=kv_shard_axis
     )
     self.binded_ragged_mha = shard_map(
-        ragged_mha, env.mesh, input_specs, output_specs, check_rep=False
+        self.binded_ragged_mha, env.mesh, input_specs, output_specs, check_rep=False
     )
     self.binded_ragged_mha = jax.jit(self.binded_ragged_mha)
 
@@ -622,17 +613,20 @@ class RaggedAttentionKernel:
       xq,
       keys,
       values,
+      layer,
       start,
       end,
       ragged_batch_index,
       ragged_block_index,
       k_scaler=None,
       v_scaler=None,
+
   ):
     return self.binded_ragged_mha(
         xq,
         keys,
         values,
+        layer,
         start,
         end,
         ragged_batch_index,

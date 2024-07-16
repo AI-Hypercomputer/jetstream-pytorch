@@ -368,9 +368,20 @@ def apply_rotary_emb(
 def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
   """torch.repeat_interleave(x, dim=2, repeats=n_rep)."""
 
-  bs, n_kv_heads, slen, head_dim = x.shape
+  bs, n_kv_heads, slen, head_dim = x.shape[-4], x.shape[-3], x.shape[-2], x.shape[-1]
+  if x.ndim == 5:
+      stacked = True
+  else:
+      stacked = False
   if n_rep == 1:
     return x
+  if stacked:
+    layer = x.shape[0]
+    return (
+       x[:, :, :, None, :, :]
+      .expand(layer, bs, n_kv_heads, n_rep, slen, head_dim)
+      .reshape(layer, bs, n_kv_heads * n_rep, slen, head_dim)
+    )
   return (
       x[:, :, None, :, :]
       .expand(bs, n_kv_heads, n_rep, slen, head_dim)
@@ -382,16 +393,17 @@ class AttentionKernel:
 
   def __init__(self, env, layer_id):
     self.env = env
-    self.shard_axis = 0 if self.env.shard_on_batch else 1
-    qkv_pspec = self.env.partition_by_axis(self.shard_axis)  # Number of heads
+    self.q_shard_axis = 0 if self.env.shard_on_batch else 1 
+    self.kv_shard_axis = 0 if self.env.shard_on_batch else 2 if self.env.generate_cache_stacked else 1
+    q_pspec = self.env.partition_by_axis(self.q_shard_axis)  # Number of heads
+    kv_pspec = self.env.partition_by_axis(self.kv_shard_axis)  # Number of heads
     others_pspec = self.env.partition_by_axis()
     self.dense_attention = ak.dense_attention
     self.flash_attention = ak.flash_attention
     self.ragged_attention = ak.RaggedAttentionKernel(
         env,
-        input_specs=(*([qkv_pspec] * 3), *([others_pspec] * 6)),
-        output_specs=(qkv_pspec, (qkv_pspec, qkv_pspec)),
-        sharding_axis=self.shard_axis,
+        input_specs=(q_pspec, kv_pspec, kv_pspec, *([others_pspec] * 7)),
+        output_specs=(q_pspec, (q_pspec, q_pspec)),
     )
     self.layer_id = layer_id
 
@@ -416,7 +428,8 @@ class AttentionKernel:
       cache: CacheManagerInterface object
     """
     bsz, num_heads, seqlen, head_dim = xq.shape
-    _, num_kv_heads, _, kv_head_dim = xk.shape
+    num_kv_heads = xk.shape[-3]
+    kv_head_dim = xk.shape[-1]
     n_rep = num_heads // num_kv_heads
 
     # if not self.env.ragged_mha and seqlen == 1:
@@ -427,6 +440,12 @@ class AttentionKernel:
     def attend(xq, keys, values, local_mask=None):
       # As of right now, ragged attention doesn't support attention calculation with prefill and new cache line
       # We are not using ragged attention for prefill yet.
+      kv_shard_axis = self.kv_shard_axis
+      if self.kv_shard_axis > 0:
+          if keys.ndim == 4:
+              kv_shard_axis = 1
+          else:
+              kv_shard_axis = 2
       if self.env.ragged_mha and seqlen == 1:
         local_output, (local_max, local_denom) = torch_xla2.interop.call_jax(
             self.ragged_attention,
@@ -438,6 +457,8 @@ class AttentionKernel:
             end,
             ragged_batch_index,
             ragged_block_index,
+            self.q_shard_axis,
+            kv_shard_axis,
         )
       elif self.env.flash_attention:
         with torch_xla2.default_env():
@@ -459,7 +480,7 @@ class AttentionKernel:
       # print(f"attention kernel local_output {local_output.shape} seqlen {seqlen}")
       # if local_max is not None and local_denom is not None:
       #   print(f"local_max {local_max.shape} local_denom {local_denom.shape}")
-      self.env.apply_sharding(local_output, axis=self.shard_axis)
+      self.env.apply_sharding(local_output, axis=self.q_shard_axis)
       return local_output, (local_max, local_denom)
     
 
@@ -505,16 +526,26 @@ class Int8KVAttentionKernel:
 
   def __init__(self, env, layer_id):
     self.env = env
-    self.shard_axis = 0 if self.env.shard_on_batch else 1
-    qkv_pspec = self.env.partition_by_axis(self.shard_axis)  # Number of heads
+    self.q_shard_axis = 0 if self.env.shard_on_batch else 1
+    self.kv_shard_axis = 0 if self.env.shard_on_batch else 2 if self.env.generate_cache_stacked else 1
+    q_pspec = self.env.partition_by_axis(self.q_shard_axis)  # Number of heads
+    kv_pspec = self.env.partition_by_axis(self.kv_shard_axis)  # Number of heads
     others_pspec = self.env.partition_by_axis()
     self.dense_attention = ak.dense_attention
     self.flash_attention = ak.flash_attention_quantized
-    self.ragged_attention = ak.RaggedAttentionKernel(
+    self.ragged_attention_orig = ak.RaggedAttentionKernel(
         env,
-        input_specs=(*([qkv_pspec] * 3), *([others_pspec] * 6)),
-        output_specs=(qkv_pspec, (qkv_pspec, qkv_pspec)),
-        sharding_axis=self.shard_axis,
+        input_specs=(q_pspec, kv_pspec, kv_pspec, *([others_pspec] * 7)),
+        output_specs=(q_pspec, (q_pspec, q_pspec)),
+        q_shard_axis=self.q_shard_axis,
+        kv_shard_axis=self.kv_shard_axis,
+    )
+    self.ragged_attention_new = ak.RaggedAttentionKernel(
+        env,
+        input_specs=(q_pspec, q_pspec, q_pspec, *([others_pspec] * 7)),
+        output_specs=(q_pspec, (q_pspec, q_pspec)),
+        q_shard_axis=self.q_shard_axis,
+        kv_shard_axis=self.q_shard_axis,
     )
     self.layer_id = layer_id
 
@@ -539,17 +570,22 @@ class Int8KVAttentionKernel:
       cache: CacheManagerInterface object
     """
     bsz, num_heads, seqlen, head_dim = xq.shape
-    _, num_kv_heads, _, kv_head_dim = xk.shape
+    num_kv_heads = xk.shape[-3]
+    kv_head_dim = xk.shape[-1]
     n_rep = num_heads // num_kv_heads
     
     def attend(xq, keys, values, k_scaler, v_scaler, local_mask=None):
+      if keys.ndim == 4:
+              impl = self.ragged_attention_new
+      else:
+              impl = self.ragged_attention_orig
       if not self.env.ragged_mha and seqlen == 1:
         xq = torch.broadcast_to(xq, (xq.shape[0], xq.shape[1], 2, xq.shape[3]))
 
       # We are not using ragged attention for prefill yet.
       if self.env.ragged_mha and seqlen == 1:
         local_output, (local_max, local_denom) = torch_xla2.interop.call_jax(
-            self.ragged_attention,
+            impl,
             xq,
             keys,
             values,
@@ -580,13 +616,14 @@ class Int8KVAttentionKernel:
       # print(f"attention kernel local_output {local_output.shape} seqlen {seqlen}")
       # if local_max is not None and local_denom is not None:
       #   print(f"local_max {local_max.shape} local_denom {local_denom.shape}")
-      self.env.apply_sharding(local_output, axis=self.shard_axis)
+      self.env.apply_sharding(local_output, axis=self.q_shard_axis)
       return local_output, (local_max, local_denom)
     #import pdb; pdb.set_trace()
     with jax.named_scope("attn_insert_cache"):
       orig_keys, orig_values, new_key, new_value, k_scaler, v_scaler, new_k_scaler, new_v_scaler  = cache.update(xk, xv, self.layer_id)
       # We are not using ragged attention for prefill yet.
       if not self.env.ragged_mha or seqlen > 1:
+        #import pdb; pdb.set_trace()
         orig_keys = repeat_kv(orig_keys, n_rep)
         orig_values = repeat_kv(orig_values, n_rep)
     with jax.named_scope("attn_qkv"):
