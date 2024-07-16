@@ -214,6 +214,7 @@ def ragged_mqa(
 
 
 def ragged_mqa_kernel_reference(
+    layer_ref,
     start_ref,
     end_ref,
     line_end_ref,
@@ -293,6 +294,7 @@ def ragged_mqa_reference(
     q: jax.Array,
     k: jax.Array,
     v: jax.Array,
+    layer,
     start: jax.Array,
     end: jax.Array,
     ragged_batch_index=None,
@@ -304,10 +306,14 @@ def ragged_mqa_reference(
     normalize_var: bool = True,
 ) -> tuple[jax.Array, tuple[jax.Array, jax.Array]]:
   """Ragged multi query attention."""
-  batch_size, num_heads, head_dim = q.shape
+  batch_size, time, head_dim = q.shape
   #assert end.shape == (batch_size,)
   assert end.dtype == jnp.int32
-  seq_len = k.shape[1]
+  seq_len = k.shape[-2]
+
+  stacked = False
+  if k.ndim == 5:
+    stacked = True
 
   def _compute_ragged_block_indices(b, i, lengths_ref):
     length = lengths_ref[b]
@@ -327,20 +333,35 @@ def ragged_mqa_reference(
     )
     return b_next, i_next
 
-  def kv_index_map(b, i, start_ref,
+  def kv_index_map(b, i, layer_ref, start_ref,
         end_ref,
         line_end_ref,
         ragged_batch_index_ref,
         ragged_block_index_ref):
     b_next, i_next = _compute_ragged_block_indices(b, i, end_ref)
+    if stacked:
+      return layer_ref[0], b_next, i_next, 0
     return b_next, i_next, 0
 
+  if stacked:
+    q_bp = (None, None, time, head_dim)
+    kv_bp = (None, None, bk, head_dim)
+    ks_bp = (None, None, 1, bk)
+    num_prefetch = 6
+  else:
+    q_bp = (None, time, head_dim)
+    kv_bp = (None, bk, head_dim)
+    ks_bp = (None, 1, bk)
+    num_prefetch = 5
+
   in_specs = [
-        pl.BlockSpec(kv_index_map, (None, num_heads, head_dim)),
-        pl.BlockSpec(kv_index_map, (None, bk, head_dim)),
-        pl.BlockSpec(kv_index_map, (None, bk, head_dim)),
+        pl.BlockSpec(kv_index_map, q_bp),
+        pl.BlockSpec(kv_index_map, kv_bp),
+        pl.BlockSpec(kv_index_map, kv_bp),
     ]
+
   inputs = (
+      layer,
       start,
       end,
       end, # line_end, not actually used
@@ -353,8 +374,8 @@ def ragged_mqa_reference(
   quantized = False
   if k_scaler is not None:
     in_specs = in_specs + [
-        pl.BlockSpec(kv_index_map, (None, 1, bk)),
-        pl.BlockSpec(kv_index_map, (None, 1, bk)),
+        pl.BlockSpec(kv_index_map, ks_bp),
+        pl.BlockSpec(kv_index_map, ks_bp),
     ]
     inputs = inputs + (k_scaler, v_scaler)
     quantized = True
@@ -368,12 +389,12 @@ def ragged_mqa_reference(
           quantized=quantized,
       ),
       grid_spec=pltpu.PrefetchScalarGridSpec(
-          num_scalar_prefetch=5,
+          num_scalar_prefetch=num_prefetch,
           in_specs=in_specs,
           out_specs=[
-              pl.BlockSpec(lambda b, i, *_: (b, 0, 0), (None, num_heads, head_dim)),
-              pl.BlockSpec(lambda b, i, *_: (b, 0, 0), (None, num_heads, head_dim)),
-              pl.BlockSpec(lambda b, i, *_: (b, 0, 0), (None, num_heads, head_dim)),
+              pl.BlockSpec(lambda b, *_: (b, 0, 0), (None, time, head_dim)),
+              pl.BlockSpec(lambda b, *_: (b, 0, 0), (None, time, head_dim)),
+              pl.BlockSpec(lambda b, *_: (b, 0, 0), (None, time, head_dim)),
           ],
           grid=(batch_size, seq_len // bk),
       ),
@@ -381,10 +402,10 @@ def ragged_mqa_reference(
       out_shape=[
           q,
           jax.ShapeDtypeStruct(
-              (batch_size, num_heads, head_dim), jnp.float32
+              (batch_size, time, head_dim), jnp.float32
           ),
           jax.ShapeDtypeStruct(
-              (batch_size, num_heads, head_dim), jnp.float32
+              (batch_size, time, head_dim), jnp.float32
           ),
       ],
   )(*inputs)
@@ -397,6 +418,7 @@ def ragged_mha(
     q: jax.Array,
     k: jax.Array,
     v: jax.Array,
+    layer,
     start: jax.Array,
     end: jax.Array,
     ragged_batch_index: jax.Array,
@@ -466,7 +488,7 @@ def ragged_mha(
             *([None] * replicated_in_axes),
         ),
         out_axes=shard_axis
-    )(q, k, v, start, end, *replicated_inputs)
+    )(q, k, v, layer, start, end, *replicated_inputs)
   return out, (m, l)
 
 
