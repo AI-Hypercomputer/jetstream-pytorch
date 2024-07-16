@@ -16,6 +16,7 @@ DEFAULT_MASK_VALUE = -0.7 * float(np.finfo(np.dtype("float32")).max)
 
 
 def ragged_flash_attention_kernel(
+    layer_ref,
     start_ref,
     end_ref,
     line_end_ref,
@@ -111,6 +112,7 @@ def ragged_mqa(
     q: jax.Array,
     k: jax.Array,
     v: jax.Array,
+    layer,
     start: jax.Array,
     end: jax.Array,
     ragged_batch_index=None,
@@ -123,12 +125,17 @@ def ragged_mqa(
 ) -> tuple[jax.Array, tuple[jax.Array, jax.Array]]:
   """Ragged multi query attention."""
   with jax.named_scope("ragged_mqa"):
-    batch_size, num_heads, head_dim = q.shape
-    seq_len = k.shape[1]
+    batch_size, time, head_dim = q.shape
+    seq_len = k.shape[-2]
+
+    stacked = False
+    if k.ndim == 5:
+      stacked = True
 
     def kv_index_map(
         b,
         i,
+        layer_ref,
         start_ref,
         end_ref,
         line_end_ref,
@@ -136,11 +143,15 @@ def ragged_mqa(
         ragged_block_index_ref,
     ):
       index = b * (seq_len // bk) + i
+
+      if stacked:
+        return layer_ref[0], ragged_batch_index_ref[index], ragged_block_index_ref[index], 0
       return ragged_batch_index_ref[index], ragged_block_index_ref[index], 0
 
     def q_index_map(
         b,
         i,
+        layer_ref,
         start_ref,
         end_ref,
         line_end_ref,
@@ -148,19 +159,36 @@ def ragged_mqa(
         ragged_block_index_ref,
     ):
       index = b * (seq_len // bk) + i
+      if stacked:
+        return layer_ref[0], ragged_batch_index_ref[index], 0, 0
       return ragged_batch_index_ref[index], 0, 0
 
-    def scaler_index_map(b, i, *_):
+    def scaler_index_map(b, i, layer_ref, *_):
+      if stacked:
+        return layer_ref[0], b, 0, i
       return b, 0, i
 
     line_end = jnp.where(start < end, end, seq_len - 1)
 
+
+    if stacked:
+      q_bp = (None, None, time, head_dim)
+      kv_bp = (None, None, bk, head_dim)
+      ks_bp = (None, None, 1, bk)
+      num_prefetch = 6
+    else:
+      q_bp = (None, time, head_dim)
+      kv_bp = (None, bk, head_dim)
+      ks_bp = (None, 1, bk)
+      num_prefetch = 5
+
     in_specs = [
-        pl.BlockSpec(q_index_map, (None, num_heads, head_dim)),
-        pl.BlockSpec(kv_index_map, (None, bk, head_dim)),
-        pl.BlockSpec(kv_index_map, (None, bk, head_dim)),
+        pl.BlockSpec(q_index_map, q_bp),
+        pl.BlockSpec(kv_index_map, kv_bp),
+        pl.BlockSpec(kv_index_map, kv_bp),
     ]
     inputs = (
+        layer,
         start,
         end,
         line_end,
@@ -173,8 +201,8 @@ def ragged_mqa(
     quantized = False
     if k_scaler is not None:
       in_specs = in_specs + [
-          pl.BlockSpec(scaler_index_map, (None, 1, bk)),
-          pl.BlockSpec(scaler_index_map, (None, 1, bk)),
+          pl.BlockSpec(scaler_index_map, ks_bp),
+          pl.BlockSpec(scaler_index_map, ks_bp),
       ]
       inputs = inputs + (k_scaler, v_scaler)
       quantized = True
@@ -188,12 +216,12 @@ def ragged_mqa(
             quantized=quantized,
         ),
         grid_spec=pltpu.PrefetchScalarGridSpec(
-            num_scalar_prefetch=5,
+            num_scalar_prefetch=num_prefetch,
             in_specs=in_specs,
             out_specs=[
-                pl.BlockSpec(q_index_map, (None, num_heads, head_dim)),
-                pl.BlockSpec(q_index_map, (None, num_heads, head_dim)),
-                pl.BlockSpec(q_index_map, (None, num_heads, head_dim)),
+                pl.BlockSpec(q_index_map, (None, time, head_dim)),
+                pl.BlockSpec(q_index_map, (None, time, head_dim)),
+                pl.BlockSpec(q_index_map, (None, time, head_dim)),
             ],
             grid=(batch_size, seq_len // bk),
         ),
@@ -203,10 +231,10 @@ def ragged_mqa(
         out_shape=[
             q,
             jax.ShapeDtypeStruct(
-                (batch_size, num_heads, head_dim), jnp.float32
+                (batch_size, time, head_dim), jnp.float32
             ),
             jax.ShapeDtypeStruct(
-                (batch_size, num_heads, head_dim), jnp.float32
+                (batch_size, time, head_dim), jnp.float32
             ),
         ],
     )(*inputs)
