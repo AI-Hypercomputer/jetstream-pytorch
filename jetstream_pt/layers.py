@@ -72,9 +72,10 @@ class WeightOnlyPerChannelQuantizedLinear(torch.nn.Module):
       out_features,
       bias=False,
       device=None,
-      quant_config=QuantizationConfig(),
+      env=None,
   ):
     super().__init__()
+    quant_config = env.quant_config
     self.in_features = in_features
     self.out_features = out_features
 
@@ -175,11 +176,26 @@ class WeightOnlyBlockwiseQuantizedLinear(torch.nn.Module):
       out_features,
       bias=False,
       device=None,
-      quant_config=QuantizationConfig(),
+      round_out_features=False,
+      env=None,
   ):
     super().__init__()
+    quant_config = env.quant_config
+    assert (
+        not quant_config.enable_activation_quantization
+    ), "Activation quantization not supported for blockwise quantized matmul."
+
+    self.block_size = quant_config.block_size_weight
     self.in_features = in_features
+    num_partitions = env.mesh.size
+    if round_out_features and (out_features % (self.block_size * num_partitions)) != 0:
+      # Make sure out_features is multiple of 128 * num_partitions.
+      out_features = ((out_features // (self.block_size * num_partitions)) + 1) * (num_partitions * self.block_size)
     self.out_features = out_features
+
+    n_blocks = in_features // self.block_size
+    if n_blocks % num_partitions != 0:
+      n_blocks = ((n_blocks // num_partitions) + 1) * num_partitions
 
     # Use dot general instead of einsum
     # Use dot general is slow now.
@@ -187,13 +203,6 @@ class WeightOnlyBlockwiseQuantizedLinear(torch.nn.Module):
     # Flatten einsum operands to 3D. XLA was slow if operands are 4D. But it's fixed now.
     # Same perf as non flattened one now.
     self.flatten = False
-
-    self.block_size = quant_config.block_size_weight
-    n_blocks = in_features // self.block_size
-
-    assert (
-        not quant_config.enable_activation_quantization
-    ), "Activation quantization not supported for blockwise quantized matmul."
 
     if self.use_dot_general:
       weight = torch.ones(
@@ -516,7 +525,7 @@ class Attention(nn.Module):
     LinearLayer = get_quantized_linear_layer(env.quant_config)
     linear_kwargs = {}
     if LinearLayer != torch.nn.Linear:
-      linear_kwargs = {"quant_config": env.quant_config}
+      linear_kwargs = {"env": env}
 
     self.wo = LinearLayer(
         n_heads * self.head_dim,

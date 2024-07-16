@@ -4,6 +4,7 @@
 from typing import Any, List, Optional
 
 import jax
+import jax.numpy as jnp
 import torch
 import torch.nn.functional as F
 from jetstream_pt.layers import (
@@ -41,30 +42,37 @@ class FeedForward(nn.Module):
     hidden_dim = multiple_of * ((hidden_dim + multiple_of - 1) // multiple_of)
 
     LinearLayer = get_quantized_linear_layer(env.quant_config)
-    linear_kwargs = {}
+    w1_w3_linear_kwargs = {}
+    w2_linear_kwargs = {}
     if LinearLayer != torch.nn.Linear:
-      linear_kwargs["quant_config"] = env.quant_config
+      w1_w3_linear_kwargs["env"] = env
+      w2_linear_kwargs["env"] = env
+      if env.quant_config.is_blockwise_weight:
+        # To make w2's n_block is divisible by the number of partitions,
+        # The out_features of w1/w3 need to round up.
+        w1_w3_linear_kwargs["round_out_features"] = True
+
 
     self.w1 = LinearLayer(
         dim,
         hidden_dim,
         bias=False,
         device=device,
-        **linear_kwargs,
+        **w1_w3_linear_kwargs,
     )
     self.w2 = LinearLayer(
         hidden_dim,
         dim,
         bias=False,
         device=device,
-        **linear_kwargs,
+        **w2_linear_kwargs,
     )
     self.w3 = LinearLayer(
         dim,
         hidden_dim,
         bias=False,
         device=device,
-        **linear_kwargs,
+        **w1_w3_linear_kwargs,
     )
 
   def forward(self, x):
@@ -179,7 +187,7 @@ class Transformer(nn.Module):
     LinearLayer = get_quantized_linear_layer(env.quant_config)
     linear_kwargs = {}
     if LinearLayer != torch.nn.Linear:
-      linear_kwargs["quant_config"] = env.quant_config
+      linear_kwargs["env"] = env
 
     self.output = LinearLayer(
         params.dim,
@@ -267,6 +275,35 @@ class Transformer(nn.Module):
     return {
         "tok_embeddings.weight": "tok_embeddings.weight_scaler",
     }
+    
+  @staticmethod
+  def process_weight_hook(jax_weights, env=None):
+    # Right now we only process weights for blockwise quantization.
+    # We pad the weights so that the sharded dimension size is divisible by the number of partitions.
+    quant_config = env.quant_config
+    num_partitions = env.mesh.size
+    if quant_config.enable_weight_quantization and quant_config.is_blockwise_weight:
+      block_size = quant_config.block_size_weight
+      for k, v in jax_weights.items():
+        if "w1" in k or "w3" in k:
+          # Pad w1/w3 to make n_out_channel divisible by num_partitions * block_size.
+          # This is to make w2's n_block is divisible by the number of partitions.
+          n_out_channel = v.shape[-1]
+          multiple_of = block_size * num_partitions
+          if n_out_channel % (multiple_of) != 0:
+            n_pad = multiple_of - n_out_channel % (multiple_of)
+            pad = jnp.zeros(v.shape[:-1] + (n_pad,)).astype(v.dtype)
+            padded = jnp.concatenate([v, pad], axis=-1)
+            jax_weights[k] = padded
+        if "w2" in k:
+          # Pad w2 to make n_block is divisible by the number of partitions.
+          n_blocks = v.shape[0]
+          if n_blocks % num_partitions != 0:
+            n_pad = num_partitions - n_blocks % (num_partitions)
+            pad = jnp.zeros((n_pad,) + v.shape[1:]).astype(v.dtype)
+            padded = jnp.concatenate([v, pad], axis=0)
+            jax_weights[k] = padded
+
 
   @staticmethod
   def get_weight_sharding_type(model_name: str = ""):

@@ -689,9 +689,9 @@ class PyTorchEngine(engine_api.Engine):
         if key == "freqs_cis":
           continue
         weights[key] = f.get_tensor(key)
-        assert tuple(model_weights.shape) == tuple(
-            weights[key].shape
-        ), f"key: {key} error: {model_weights.shape} != {weights[key].shape}"
+        # assert tuple(model_weights.shape) == tuple(
+        #     weights[key].shape
+        # ), f"key: {key} error: {model_weights.shape} != {weights[key].shape}"
     weights["freqs_cis"] = torch_xla2.tensor.t2j(self.pt_model.freqs_cis)
     return weights
 
@@ -730,6 +730,7 @@ class PyTorchEngine(engine_api.Engine):
         quantize_linear_weights_scaler_map = (
             self.pt_model.get_quantized_linear_weight_to_scaler_map()
         )
+        self.pt_model.process_weight_hook(jax_weights, env=self.env)
         with jax.default_device(jax.devices("cpu")[0]):
           for key, val in jax_weights.items():
             for qname in quantize_linear_weights_scaler_map.keys():
