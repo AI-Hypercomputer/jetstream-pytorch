@@ -421,17 +421,7 @@ class Int8KVCacheGenerate:
       self.k_scaler[self.batch, :, self.input_pos, :] = kscale.squeeze(2)
       self.v_scaler[self.batch, :, self.input_pos, :] = vscale.squeeze(2)
 
-    # ret_cache_k = self.cache_k[layer_id] if  self.env.generate_cache_stacked else self.cache_k
-    # ret_cache_v = self.cache_v[layer_id] if  self.env.generate_cache_stacked else self.cache_v
-    # ret_k_scaler = self.k_scaler[layer_id] if  self.env.generate_cache_stacked else self.k_scaler
-    # ret_v_scaler = self.v_scaler[layer_id] if  self.env.generate_cache_stacked else self.v_scaler
-
-    ret_cache_k = torch_xla2.interop.call_jax(jax.lax.dynamic_index_in_dim, self.cache_k, layer_id, 0, False) if  self.env.generate_cache_stacked else self.cache_k
-    ret_cache_v = torch_xla2.interop.call_jax(jax.lax.dynamic_index_in_dim, self.cache_v, layer_id, 0, False) if  self.env.generate_cache_stacked else self.cache_v
-    ret_k_scaler = torch_xla2.interop.call_jax(jax.lax.dynamic_index_in_dim, self.k_scaler, layer_id, 0, False) if  self.env.generate_cache_stacked else self.k_scaler
-    ret_v_scaler = torch_xla2.interop.call_jax(jax.lax.dynamic_index_in_dim, self.v_scaler, layer_id, 0, False) if  self.env.generate_cache_stacked else self.v_scaler
-
-    return ret_cache_k, ret_cache_v, k_quant, v_quant, ret_k_scaler, ret_v_scaler, kscale, vscale
+    return self.cache_k, self.cache_v, k_quant, v_quant, self.k_scaler, self.v_scaler, kscale, vscale
 
   def finalize(self):
     if not self.env.lazy_cache_update:
