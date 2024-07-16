@@ -23,13 +23,12 @@ import torch
 import torch_xla2
 from torch.utils import _pytree as pytree
 
-
 from jetstream_pt.engine import PyTorchEngine
 from jetstream_pt.third_party.llama import model_exportable, model_args
 from jetstream_pt.third_party.llama.generation_original import LlamaOriginal
 from jetstream_pt import environment
 from tests import helpers
-
+from jetstream_pt import torchjax
 
 class LlamaE2ETest(unittest.TestCase):
   """This test class includes all E2E test for llama2"""
@@ -187,6 +186,9 @@ class LlamaE2ETest(unittest.TestCase):
 
     model_ours = model_exportable.Transformer(model_arg, env)
 
+    for k, v in model_ours.state_dict().items():
+      if "scale" in k:
+        state_dict[k] =helpers.to_xla_tensor(v)
     engine = PyTorchEngine(pt_model=model_ours, env=env)
 
     params = self._from_torch(state_dict)
@@ -348,6 +350,43 @@ class LlamaE2ETest(unittest.TestCase):
       env_data.new_cache_stacked=True
       env_data.lazy_cache_update=True
     env, model_arg = helpers.make_env_tiny(False, update_env_data)
+    out_tokens, expected_output_tokens = self._llama_e2e(env, model_arg)
+    self.assertEqual(out_tokens, expected_output_tokens)
+
+  def test_llama_e2e_int8_left_aligned_lazy_cache_update_generate_cache_stacked_new_cache_nonstacked(self):
+    """end to end jetstream llama test with float32"""
+    jax.config.update("jax_platform_name", "cpu")
+    print(f"---------> {jax.devices()}")
+
+    def update_env_data(env_data):
+      env_data.ring_buffer=False
+      env_data.ragged_mha=False
+      env_data.flash_attention=True
+      env_data.generate_cache_stacked=True
+      env_data.new_cache_stacked=False
+      env_data.lazy_cache_update=True
+      env_data.quant_config.enable_kv_quantization=True
+    env, model_arg = helpers.make_env_tiny(True, update_env_data)
+    out_tokens, expected_output_tokens = self._llama_e2e(env, model_arg)
+    self.assertEqual(out_tokens, expected_output_tokens)
+
+
+  def test_llama_e2e_int8_left_aligned_lazy_cache_update_all_cache_stacked(self):
+    """end to end jetstream llama test with float32"""
+    jax.config.update("jax_platform_name", "cpu")
+    print(f"---------> {jax.devices()}")
+
+    def update_env_data(env_data):
+      env_data.ring_buffer=False
+      env_data.ragged_mha=False
+      env_data.flash_attention=True
+      env_data.generate_cache_stacked=True
+      env_data.new_cache_stacked=True
+      env_data.lazy_cache_update=True
+      env_data.quant_config.enable_kv_quantization=True
+      env_data.ragged_mha=True
+
+    env, model_arg = helpers.make_env_tiny(True, update_env_data)
     out_tokens, expected_output_tokens = self._llama_e2e(env, model_arg)
     self.assertEqual(out_tokens, expected_output_tokens)
 
