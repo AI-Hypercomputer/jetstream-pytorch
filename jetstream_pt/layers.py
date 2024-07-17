@@ -463,7 +463,7 @@ class AttentionKernel:
         )
       elif self.env.flash_attention:
         with torch_xla2.default_env():
-          local_output, (local_max, local_denom) = self.flash_attention(xq, keys, values, mask=local_mask)
+          local_output, (local_max, local_denom) = self.flash_attention(xq, keys, values, self.layer_id, mask=local_mask)
       else:
         if seqlen == 1:
            xq = torch.broadcast_to(xq, (xq.shape[0], xq.shape[1], 2, xq.shape[3]))
@@ -539,7 +539,7 @@ class Int8KVAttentionKernel:
     kv_pspec = self.env.partition_by_axis(self.kv_shard_axis)  # Number of heads
     others_pspec = self.env.partition_by_axis()
     self.dense_attention = ak.dense_attention
-    self.flash_attention = ak.flash_attention_quantized
+    self.flash_attention = ak.flash_attention
     self.ragged_attention_orig = ak.RaggedAttentionKernel(
         env,
         input_specs=(q_pspec, kv_pspec, kv_pspec, *([others_pspec] * 7)),
@@ -608,7 +608,7 @@ class Int8KVAttentionKernel:
         local_denom = local_denom.reshape(*local_denom.shape, 1)
       elif self.env.flash_attention:
         with torch_xla2.default_env():
-          local_output, (local_max, local_denom) = self.flash_attention(xq, keys, values, k_scaler, v_scaler, mask=local_mask)
+          local_output, (local_max, local_denom) = self.flash_attention(xq, keys, values, self.layer_id, k_scaler, v_scaler, mask=local_mask)
       else:
         local_output = self.dense_attention(xq, keys, values, k_scaler, v_scaler, local_mask)
         local_max = None
@@ -620,9 +620,6 @@ class Int8KVAttentionKernel:
           local_max = local_max[:, :, 0:1, :]
           local_denom = local_denom[:, :, 0:1, :]
 
-      # print(f"attention kernel local_output {local_output.shape} seqlen {seqlen}")
-      # if local_max is not None and local_denom is not None:
-      #   print(f"local_max {local_max.shape} local_denom {local_denom.shape}")
       self.env.apply_sharding(local_output, axis=self.q_shard_axis)
       return local_output, (local_max, local_denom)
     with jax.named_scope("attn_insert_cache"):
@@ -635,14 +632,16 @@ class Int8KVAttentionKernel:
       existing_output, (existing_max, existing_denom) = attend(xq, orig_keys, orig_values, k_scaler, v_scaler, mask)
       cache_len = orig_keys.shape[-2]
       existing_output = existing_output.reshape(bsz, num_heads, seqlen, head_dim)
-      existing_max = existing_max.reshape(bsz, num_heads, seqlen, 1)
-      existing_denom = existing_denom.reshape(bsz, num_heads, seqlen, 1)
     # For non flash attention or prefill, existing output contains everything
     if not self.env.lazy_cache_update or seqlen > 1:
       return existing_output
 
     # For flash attention, existing output contains the existing kv cache generated logits
     with jax.named_scope("attn_new_qkv"):
+      # At this point, flash attention or ragged attention must have been enabled
+      existing_max = existing_max.reshape(bsz, num_heads, seqlen, 1)
+      existing_denom = existing_denom.reshape(bsz, num_heads, seqlen, 1)
+
       if not self.env.ragged_mha or seqlen > 1:
         new_key = repeat_kv(new_key, n_rep)
         new_value = repeat_kv(new_value, n_rep)
