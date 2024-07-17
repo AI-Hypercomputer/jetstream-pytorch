@@ -111,11 +111,11 @@ class PyTorchEngine(engine_api.Engine):
         donate_argnums=(0, 1),
         out_shardings=self.get_decode_state_sharding(),
     )
-    # self.generate = jax.jit(
-    #     self.generate,
-    #     donate_argnums=(1,),
-    #     out_shardings=(self.get_decode_state_sharding(), None),
-    # )
+    self.generate = jax.jit(
+        self.generate,
+        donate_argnums=(1,),
+        out_shardings=(self.get_decode_state_sharding(), None),
+    )
     # self._insert_wrap = jax.jit(self._insert_wrap, donate_argnums=(0, 1),
     #                              out_shardings=self.get_decode_state_sharding())
 

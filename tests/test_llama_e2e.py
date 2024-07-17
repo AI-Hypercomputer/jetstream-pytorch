@@ -384,6 +384,26 @@ class LlamaE2ETest(unittest.TestCase):
       env_data.new_cache_stacked=True
       env_data.lazy_cache_update=True
       env_data.quant_config.enable_kv_quantization=True
+      env_data.ragged_mha=False
+
+    env, model_arg = helpers.make_env_tiny(True, update_env_data)
+    out_tokens, expected_output_tokens = self._llama_e2e(env, model_arg)
+    self.assertEqual(out_tokens, expected_output_tokens)
+
+
+  def test_llama_e2e_int8_left_aligned_lazy_cache_update_all_cache_stacked(self):
+    """end to end jetstream llama test with float32"""
+    jax.config.update("jax_platform_name", "cpu")
+    print(f"---------> {jax.devices()}")
+
+    def update_env_data(env_data):
+      env_data.ring_buffer=False
+      env_data.ragged_mha=False
+      env_data.flash_attention=True
+      env_data.generate_cache_stacked=True
+      env_data.new_cache_stacked=True
+      env_data.lazy_cache_update=True
+      env_data.quant_config.enable_kv_quantization=True
       env_data.ragged_mha=True
 
     env, model_arg = helpers.make_env_tiny(True, update_env_data)
