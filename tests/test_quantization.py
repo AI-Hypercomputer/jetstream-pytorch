@@ -138,8 +138,9 @@ class QuantizationTest(unittest.TestCase):
       env_data.generate_cache_stacked=True
       env_data.new_cache_stacked=True
       env_data.lazy_cache_update=True
-      env_data.quant_config.enable_kv_quantization=False
+      env_data.quant_config.enable_kv_quantization=True
       env_data.batch_size = 4
+      env_data.ragged_mha = True
     env, _ = helpers.make_env_tiny(False, update_env_data)
 
     batch = env.batch_size
