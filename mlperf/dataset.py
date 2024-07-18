@@ -108,9 +108,11 @@ class Dataset:
     )
 
   def LoadSamplesToRam(self, sample_list):
+    log.info('LoadSamplesToRam called')
     pass
 
   def UnloadSamplesFromRam(self, sample_list):
+    log.info('UnloadSamplesFromRam called')
     pass
 
   def __del__(self):

@@ -132,10 +132,14 @@ def create_quantization_config_from_flags():
   return config
 
 
-def create_engine_from_config_flags():
+def create_engine_from_config_flags(batch=None, cache_size=None):
   """create a pytorch engine from cmd flag"""
   jax.config.update("jax_default_prng_impl", "unsafe_rbg")
   os.environ["TF_CPP_MIN_LOG_LEVEL"] = "0"
+
+  # Optionally override batch and cache from flags
+  batch = batch or FLAGS.batch_size
+  cache_size = cache_size or FLAGS.max_cache_length
 
   devices = jax.devices()
   start = time.perf_counter()
@@ -171,9 +175,9 @@ def create_engine_from_config_flags():
       bf16_enable=FLAGS.bf16_enable,
       param_size=FLAGS.size,
       context_length=FLAGS.context_length,
-      batch_size=FLAGS.batch_size,
+      batch_size=batch,
       quant_config=quant_config,
-      max_cache_length=FLAGS.max_cache_length,
+      max_cache_length=cache_size,
       max_decode_length=FLAGS.max_decode_length,
       sharding_config=sharding_file_name,
       shard_on_batch=FLAGS.shard_on_batch,

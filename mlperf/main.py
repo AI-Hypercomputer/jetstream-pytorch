@@ -137,6 +137,7 @@ scenario_map = {
 
 
 def main():
+
   args = get_args()
 
   settings = lg.TestSettings()

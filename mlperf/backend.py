@@ -51,26 +51,6 @@ class StreamResponse:
   result: str = None
 
 
-def _find_interesting_samples(max_length, dataset, encoder):
-  start_len = 1
-  lengths = [len(encoder.encode(data)) for data in dataset]
-  min_length = min(lengths)
-  max_length = min(max(lengths), max_length)
-  start_len = 2 ** int(math.log2(min_length))
-  while start_len * 2 < max_length:
-    for i, data in enumerate(dataset):
-      length = len(encoder.encode(data))
-      if start_len < length <= start_len * 2:
-        log.info(f"Warmup sample: id={i} of length={length}")
-        yield i
-        break  # for
-      else:
-        log.info(
-            f"DISCARD Warmup sample: id={i} of length={length} for {start_len}"
-        )
-    start_len *= 2
-
-
 class ThreadedLMClient:
   """Holds a thread pool and a loadgen client for LM inference."""
 
@@ -213,8 +193,8 @@ class ThreadedLMClient:
           sample.id, response_data, response_size, n_tokens
       )
       lg.QuerySamplesComplete([query_sample_response])
-      # log.info(f"mark query as complete for - {dataset_name}")
-      log.info(f"mark query as complete")
+      log.info(f"mark query as complete for - {dataset_name}")
+      #log.info(f"mark query as complete")
       pred_output = self._tokenizer.decode(response_token_ids)
       self.pred_outputs[sample.index] = pred_output
       self._log_resp_cnt()
@@ -318,6 +298,7 @@ class SUT:
   def issue_queries(self, query_samples):
     """Issue queries."""
     num_query_samples = len(query_samples)
+    print('Called issue queries', query_samples)
     if num_query_samples > 1:
       log.info(f"Issuing {num_query_samples} queries. ")
       query_samples = self._sort_issue_queries(query_samples)
@@ -327,9 +308,11 @@ class SUT:
   def flush_queries(self):
     """Flush queries."""
     log.info("Loadgen has completed issuing queries... ")
+    start = time.perf_counter()
     self._client.flush()
+    print('Client flush', time.perf_counter() - start)
 
-    if self._pred_outputs_log_path is not None:
+    if False and self._pred_outputs_log_path is not None:
 
       pred_outputs = []
       for idx, x in self._client.pred_outputs.items():
@@ -347,6 +330,7 @@ class SUT:
         self.accuracy_log.flush()
         self.accuracy_log.close()
         log.info("Dumpped prediction outputs to accuracy log... ")
+    print('return', time.perf_counter() - start)
 
   def __del__(self):
     print("Finished destroying SUT.")

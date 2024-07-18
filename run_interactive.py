@@ -20,11 +20,13 @@ from typing import List
 # import torch_xla2 first!
 import torch_xla2  # pylint: disable
 import jax
+import jax.numpy as jnp
 import numpy as np
 from absl import app, flags
 from colorama import Fore, Style
 from jetstream.engine import token_utils
 from jetstream_pt import engine as je
+from jetstream_pt import offline_inference 
 from jetstream_pt.config import FLAGS, create_engine_from_config_flags
 
 
@@ -36,6 +38,9 @@ def main(argv):
   start = time.perf_counter()
   params = engine.load_params()
   print("Load params ", time.perf_counter() - start)
+
+  offline_inf = offline_inference.OfflineInference(engine)
+  offline_inf.warmup()
 
   metadata = engine.get_tokenizer()
   tokenizer = engine.build_tokenizer(metadata)
@@ -54,49 +59,28 @@ def main(argv):
       "<s>[INST] <<SYS>>\nYou are an AI assistant that helps people find information. Provide a detailed answer so user don\u2019t need to search outside to understand the answer.\n<</SYS>>\n\nUse reasoning to lead to the answer of the following question:\nWhere are you likely to find water underneath?\nOptions:\n- toilet\n- sink\n- jar\n- bridge\n- house\n Reasoning process: [/INST",
       "<s>[INST] <<SYS>>\nYou are an AI assistant. You will be given a task. You must generate a detailed and long answer.\n<</SYS>>\n\nContinue the following story.\n\nKay didn't have shoes that fit her feet properly. She only wore sneakers, because the \nChoose from: [I] shoes  fitted badly. [II] sneakers  fitted badly. [/INST]",
   ]
-  for prompt in prompts:
-    slot = random.randint(0, FLAGS.batch_size - 1)
+  print('warmup...')
+  start = time.perf_counter()
+  offline_inf.warmup()
+  end = time.perf_counter()
+  print('warmup done in', end - start)
+
+  input_data = []
+  for i, prompt in enumerate(prompts):
     tokens, true_length = tokenizer.encode(prompt)
+    input_data.append(offline_inference.InputData(
+      id=str(i),
+      tokens=jnp.array(tokens),
+      true_length=true_length
+    ))
 
+  
+  results = offline_inf.batch_inference(input_data)
+  for ids, result in results.items():
+    prompt = prompts[int(ids)]
     print(f"---- Input prompts are: {prompt}")
-    print(f"---- Encoded tokens are: {tokens}")
-
-    # pylint: disable-next=all
-    prefill_result, _ = engine.prefill(
-        params=params, padded_tokens=tokens, true_length=true_length
-    )
-    # pylint: disable-next=all
-    decode_state = engine.insert(prefill_result, decode_state, slot=slot)
-    sampled_tokens_list = []
-    print(f"---- Streaming decode started on #slot{slot}.")
-    complete = np.zeros((1,), dtype=np.bool_)
-    while True:
-      if profiling_output and not profiling_prefill:
-        jax.profiler.start_trace(profiling_output)
-      decode_state, result_tokens = engine.generate(params, decode_state)
-      if profiling_output and not profiling_prefill:
-        jax.profiler.stop_trace()
-      result_tokens = result_tokens.convert_to_numpy()
-      output, complete = token_utils.process_result_tokens(
-          tokenizer=tokenizer,
-          slot=slot,
-          slot_max_length=max_output_length,
-          result_tokens=result_tokens,
-          complete=complete,
-      )
-      if complete[0]:
-        break
-      token_ids = output[0].token_ids
-      sampled_tokens_list.extend(token_ids)
-
-    print("---- All output tokens.")
-    print(sampled_tokens_list)
-    print("---- All output text.")
-    print(tokenizer.decode(sampled_tokens_list))
-
-  if profiling_output and profiling_prefill:
-    jax.profiler.stop_trace()
-
+    print(f"---- RESPONSE tokens are: ")
+    print(tokenizer.decode(result))
 
 if __name__ == "__main__":
   os.environ["TF_CPP_MIN_LOG_LEVEL"] = "0"

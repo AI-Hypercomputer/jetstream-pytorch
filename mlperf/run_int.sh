@@ -7,9 +7,9 @@ OUTPUT_SIZE=1024
 CHECKPOINT_PATH=mlperf/data/mixtral-instruct-quantized/
 
 pushd ..
-python run_server.py \
+python run_interactive.py \
   --model_name=mixtral \
-  --batch_size=128 \
+  --batch_size=8 \
   --max_cache_length=$CACHE_LENGTH \
   --max_decode_length=$OUTPUT_SIZE \
   --context_length=$INPUT_SIZE \

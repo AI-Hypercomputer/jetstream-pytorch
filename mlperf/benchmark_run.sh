@@ -1,3 +1,6 @@
+#!/usr/bin/env bash
+
+me=$(basename "$0")
 BASEDIR=mlperf
 API_URL=0.0.0.0:9000
 USER_CONFIG=$BASEDIR/user.conf
