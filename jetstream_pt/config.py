@@ -93,25 +93,25 @@ flags.DEFINE_bool(
 flags.DEFINE_bool(
     "flash_attention",
     True,
-    "Whether to enable flas attention",
+    "Whether to enable flas attention. Only takes effect at test mode",
     required=False,
 )
 flags.DEFINE_bool(
     "generate_cache_stacked",
     True,
-    "Whether to stack the generate cache to the layer dimension",
+    "Whether to stack the generate cache to the layer dimension. Only takes effect at test mode",
     required=False,
 )
 flags.DEFINE_bool(
     "new_cache_stacked",
     True,
-    "Whether to stack the generate cache to the layer dimension",
+    "Whether to stack the generate cache to the layer dimension. Only takes effect at test mode",
     required=False,
 )
 flags.DEFINE_bool(
     "lazy_cache_update",
     True,
-    "Whether to update the cache during attention or delayed until all the layers are done",
+    "Whether to update the cache during attention or delayed until all the layers are done. Only takes effect at test mode",
     required=False,
 )
 flags.DEFINE_float(

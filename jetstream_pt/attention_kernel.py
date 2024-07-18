@@ -106,7 +106,14 @@ def ragged_flash_attention_kernel(
 
 
 @functools.partial(
-    jax.jit, static_argnames=["bk", "mask_value", "normalize_var", "testing", "quantized"]
+    jax.jit,
+    static_argnames=[
+        "bk",
+        "mask_value",
+        "normalize_var",
+        "testing",
+        "quantized",
+    ],
 )
 def ragged_mqa(
     q: jax.Array,
@@ -147,7 +154,12 @@ def ragged_mqa(
       index = b * (seq_len // bk) + i
 
       if stacked:
-        return layer_ref[0], ragged_batch_index_ref[index], ragged_block_index_ref[index], 0
+        return (
+            layer_ref[0],
+            ragged_batch_index_ref[index],
+            ragged_block_index_ref[index],
+            0,
+        )
       return ragged_batch_index_ref[index], ragged_block_index_ref[index], 0
 
     def q_index_map(
@@ -171,7 +183,6 @@ def ragged_mqa(
       return b, 0, i
 
     line_end = jnp.where(start < end, end, seq_len - 1)
-
 
     if stacked:
       q_bp = (None, None, time, head_dim)
@@ -199,7 +210,7 @@ def ragged_mqa(
         k,
         v,
         k_scaler,
-        v_scaler
+        v_scaler,
     )
 
     out, m, l = pl.pallas_call(
@@ -224,12 +235,8 @@ def ragged_mqa(
         interpret=testing,
         out_shape=[
             q,
-            jax.ShapeDtypeStruct(
-                (batch_size, time, head_dim), jnp.float32
-            ),
-            jax.ShapeDtypeStruct(
-                (batch_size, time, head_dim), jnp.float32
-            ),
+            jax.ShapeDtypeStruct((batch_size, time, head_dim), jnp.float32),
+            jax.ShapeDtypeStruct((batch_size, time, head_dim), jnp.float32),
         ],
     )(*inputs)
   return out, (m[..., 0], l[..., 0])
@@ -258,6 +265,7 @@ def ragged_mqa_kernel_reference(
   """Pallas kernel for flash attention."""
   b, i = pl.program_id(0), pl.program_id(1)
   del layer_ref
+
   @pl.when(i == 0)
   def init():
     m_ref[...] = jnp.full_like(m_ref, -jnp.inf)
@@ -280,7 +288,7 @@ def ragged_mqa_kernel_reference(
     )
 
     if normalize_var:
-      qk = qk / math.sqrt(k.shape[-1]) # Align with meta llama
+      qk = qk / math.sqrt(k.shape[-1])  # Align with meta llama
     # Quantized
     if quantized:
       qk = qk * k_scaler_ref[...]
@@ -290,7 +298,6 @@ def ragged_mqa_kernel_reference(
     m_curr = qk.max(axis=-1)
 
     s_curr = jnp.exp(qk - m_curr[..., None])
-
 
     l_curr = jax.lax.broadcast_in_dim(s_curr.sum(axis=-1), l_prev.shape, (0,))
     # Quantized
@@ -311,7 +318,17 @@ def ragged_mqa_kernel_reference(
         (l_prev * alpha * o_ref[...] + beta * o_curr_times_l_curr) / l_next_safe
     ).astype(o_ref.dtype)
 
-@functools.partial(jax.jit, static_argnames=["bk", "mask_value", "normalize_var", "testing", "quantized"])
+
+@functools.partial(
+    jax.jit,
+    static_argnames=[
+        "bk",
+        "mask_value",
+        "normalize_var",
+        "testing",
+        "quantized",
+    ],
+)
 def ragged_mqa_reference(
     q: jax.Array,
     k: jax.Array,
@@ -331,7 +348,7 @@ def ragged_mqa_reference(
 ) -> tuple[jax.Array, tuple[jax.Array, jax.Array]]:
   """Ragged multi query attention."""
   batch_size, time, head_dim = q.shape
-  #assert end.shape == (batch_size,)
+  # assert end.shape == (batch_size,)
   seq_len = k.shape[-2]
 
   stacked = False
@@ -349,24 +366,20 @@ def ragged_mqa_reference(
     b_next = jnp.where(not_done, b, jnp.where(am_last_batch, b, b + 1))
     # if not done, i next = i
     # if done
-      #if last batch, previous good block
-      #if not last batch, i next = 0
+    # if last batch, previous good block
+    # if not last batch, i next = 0
     i_next = jnp.where(
         not_done, i, jnp.where(am_last_batch, last_good_block, 0)
     )
     return b_next, i_next
 
-  def kv_index_map(b, i, layer_ref, start_ref,
-        end_ref,
-        *_):
+  def kv_index_map(b, i, layer_ref, start_ref, end_ref, *_):
     b_next, i_next = _compute_ragged_block_indices(b, i, end_ref)
     if stacked:
       return layer_ref[0], b_next, i_next, 0
     return b_next, i_next, 0
 
-  def kv_scale_index_map(b, i, layer_ref, start_ref,
-        end_ref,
-        *_):
+  def kv_scale_index_map(b, i, layer_ref, start_ref, end_ref, *_):
     b_next, i_next = _compute_ragged_block_indices(b, i, end_ref)
     if stacked:
       return layer_ref[0], b_next, 0, i_next
@@ -380,18 +393,18 @@ def ragged_mqa_reference(
     ks_bp = (None, 1, bk)
 
   in_specs = [
-        pl.BlockSpec(lambda b, i, *_: (b, 0, 0), (None, time, head_dim)),  # q 
-        pl.BlockSpec(kv_index_map, kv_bp), # k
-        pl.BlockSpec(kv_index_map, kv_bp), # v
-        pl.BlockSpec(kv_scale_index_map, ks_bp), # k_scaler
-        pl.BlockSpec(kv_scale_index_map, ks_bp), # v_scaler
-    ]
+      pl.BlockSpec(lambda b, i, *_: (b, 0, 0), (None, time, head_dim)),  # q
+      pl.BlockSpec(kv_index_map, kv_bp),  # k
+      pl.BlockSpec(kv_index_map, kv_bp),  # v
+      pl.BlockSpec(kv_scale_index_map, ks_bp),  # k_scaler
+      pl.BlockSpec(kv_scale_index_map, ks_bp),  # v_scaler
+  ]
 
   inputs = (
       jnp.array([layer]),
       start,
       end,
-      end, # line_end, not actually used
+      end,  # line_end, not actually used
       ragged_batch_index,
       ragged_block_index,
       q,
@@ -420,22 +433,27 @@ def ragged_mqa_reference(
           grid=(batch_size, seq_len // bk),
       ),
       interpret=testing,
-      #debug=True,
+      # debug=True,
       compiler_params={"dimension_semantics": ("parallel", "arbitrary")},
       out_shape=[
           q,
-          jax.ShapeDtypeStruct(
-              (batch_size, time, head_dim), jnp.float32
-          ),
-          jax.ShapeDtypeStruct(
-              (batch_size, time, head_dim), jnp.float32
-          ),
+          jax.ShapeDtypeStruct((batch_size, time, head_dim), jnp.float32),
+          jax.ShapeDtypeStruct((batch_size, time, head_dim), jnp.float32),
       ],
   )(*inputs)
   return out, (m[..., 0], l[..., 0])
 
+
 @functools.partial(
-    jax.jit, static_argnames=["bk", "mask_value", "normalize_var", "q_shard_axis", "kv_shard_axis", "testing"]
+    jax.jit,
+    static_argnames=[
+        "bk",
+        "mask_value",
+        "normalize_var",
+        "q_shard_axis",
+        "kv_shard_axis",
+        "testing",
+    ],
 )
 def ragged_mha(
     q: jax.Array,
@@ -451,8 +469,8 @@ def ragged_mha(
     bk: int = 512,
     mask_value: float = DEFAULT_MASK_VALUE,
     normalize_var: bool = True,
-    q_shard_axis:int = 0,
-    kv_shard_axis:int = 0,
+    q_shard_axis: int = 0,
+    kv_shard_axis: int = 0,
     testing: bool = False,
 ) -> tuple[jax.Array, tuple[jax.Array, jax.Array]]:
   """Ragged multi head attention.
@@ -506,9 +524,9 @@ def ragged_mha(
     v_scale = jnp.squeeze(v_scaler, -1)
 
   if stacked:
-      assert k_scale.shape == (k.shape[0], bq, 1, tk)
+    assert k_scale.shape == (k.shape[0], bq, 1, tk)
   else:
-      assert k_scale.shape == (bq, 1, tk)
+    assert k_scale.shape == (bq, 1, tk)
 
   replicated_inputs = (
       ragged_batch_index,
@@ -521,7 +539,7 @@ def ragged_mha(
   with jax.named_scope("ragged_mha_vmap"):
     out, (m, l) = jax.vmap(
         functools.partial(
-            #ragged_mqa,
+            # ragged_mqa,
             ragged_mqa_reference,
             bk=bk,
             mask_value=mask_value,
@@ -536,7 +554,7 @@ def ragged_mha(
             kv_shard_axis,
             *([None] * replicated_in_axes),
         ),
-        out_axes=q_shard_axis
+        out_axes=q_shard_axis,
     )(q, k, v, layer, start, end, *replicated_inputs)
   return out, (m, l)
 
@@ -567,24 +585,36 @@ def dense_attention(xq, keys, values, k_scaler=None, v_scaler=None, mask=None):
     output = torch.einsum("ikjm,ikml->ikjl", scores, values)
   return output
 
-def flash_attention(xq, keys, values, layer, k_scaler = None, v_scaler= None, mask=None, normalize_var=True):
+
+def flash_attention(
+    xq,
+    keys,
+    values,
+    layer,
+    k_scaler=None,
+    v_scaler=None,
+    mask=None,
+    normalize_var=True,
+):
   mask_value: float = DEFAULT_MASK_VALUE
   if keys.ndim == 5:
     keys = keys[layer]
     values = values[layer]
     k_scaler = k_scaler[layer] if k_scaler is not None else None
     v_scaler = v_scaler[layer] if v_scaler is not None else None
-    
+
   logits = torch.einsum(
       "bhqd,bhkd->bhqk", xq.type(torch.float32), keys.type(torch.float32)
   )
 
   if normalize_var:
-    logits = logits / math.sqrt(keys.shape[-1]) # Align with meta llama
+    logits = logits / math.sqrt(keys.shape[-1])  # Align with meta llama
   # Quantized
   if k_scaler is not None:
     bs, hs, ls, ds = k_scaler.shape
-    logits = logits * k_scaler.reshape(k_scaler.shape[-4], 1, 1, k_scaler.shape[-2])
+    logits = logits * k_scaler.reshape(
+        k_scaler.shape[-4], 1, 1, k_scaler.shape[-2]
+    )
 
   # mask = jnp.arange(keys.shape[1])[None] < lengths[:, None]
   if mask is not None:
@@ -593,12 +623,14 @@ def flash_attention(xq, keys, values, layer, k_scaler = None, v_scaler= None, ma
 
   logits_max, _ = torch.max(logits, axis=-1, keepdim=True)
   unnormalized = torch.exp(logits - logits_max)
-  #Quantized, should not put here, otherwise sum will have this too, which cancels with denominator
+  # Quantized, should not put here, otherwise sum will have this too, which cancels with denominator
   # unnormalized = unnormalized * v_scaler
 
   denominator = unnormalized.sum(axis=-1, keepdim=True)
   if v_scaler is not None:
-    unnormalized = unnormalized * v_scaler.reshape(v_scaler.shape[-4], 1, 1, v_scaler.shape[-2])
+    unnormalized = unnormalized * v_scaler.reshape(
+        v_scaler.shape[-4], 1, 1, v_scaler.shape[-2]
+    )
   o = (
       torch.einsum("bhqk,bhkd->bhqd", unnormalized.type_as(xq), values)
       / denominator
@@ -609,12 +641,23 @@ def flash_attention(xq, keys, values, layer, k_scaler = None, v_scaler= None, ma
 
 class RaggedAttentionKernel:
   """Ragged attention kernel."""
-  def __init__(self, env, input_specs, output_specs, q_shard_axis, kv_shard_axis):
+
+  def __init__(
+      self, env, input_specs, output_specs, q_shard_axis, kv_shard_axis
+  ):
     self.binded_ragged_mha = functools.partial(
-        ragged_mha, bk=env.block_size, q_shard_axis=q_shard_axis, kv_shard_axis=kv_shard_axis, testing=env.testing
+        ragged_mha,
+        bk=env.block_size,
+        q_shard_axis=q_shard_axis,
+        kv_shard_axis=kv_shard_axis,
+        testing=env.testing,
     )
     self.binded_ragged_mha = shard_map(
-        self.binded_ragged_mha, env.mesh, input_specs, output_specs, check_rep=False
+        self.binded_ragged_mha,
+        env.mesh,
+        input_specs,
+        output_specs,
+        check_rep=False,
     )
     self.binded_ragged_mha = jax.jit(self.binded_ragged_mha)
 
@@ -630,7 +673,6 @@ class RaggedAttentionKernel:
       ragged_block_index,
       k_scaler=None,
       v_scaler=None,
-
   ):
     return self.binded_ragged_mha(
         xq,
