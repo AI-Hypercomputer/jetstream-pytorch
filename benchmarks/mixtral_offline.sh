@@ -1,7 +1,7 @@
 CACHE_LENGTH=1024
 INPUT_SIZE=512
 OUTPUT_SIZE=1024
-BATCH_SIZE=512
+BATCH_SIZE=256
 CHECKPOINT_PATH=mlperf/data/mixtral-instruct-quantized/
 
 pushd ..

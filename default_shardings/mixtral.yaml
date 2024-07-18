@@ -5,8 +5,8 @@
 
 
 freqs_cis : -1 #  torch.complex64 (2048, 64)
-tok_embeddings.weight : 1 #  torch.float32 (vocab_size, 4096)
-tok_embeddings.weight_scaler : 0 #  torch.bfloat16 (4096,)
+tok_embeddings.weight : -1 #  torch.float32 (vocab_size, 4096)
+tok_embeddings.weight_scaler : -1 #  torch.bfloat16 (4096,)
 layers.*.attention.wo.weight : 1 #  torch.int8 (4096, 4096)
 layers.*.attention.wo.weight_scaler : -1 #  torch.bfloat16 (4096,)
 layers.*.attention.wq.weight : 0 #  torch.int8 (4096, 4096)
@@ -28,5 +28,5 @@ layers.*.block_sparse_moe.cond_ffn.w3_scaler: 1
 layers.*.ffn_norm.weight : -1 #  torch.float32 (4096,)
 layers.*.attention_norm.weight : -1 #  torch.float32 (4096,)
 norm.weight : -1 #  torch.float32 (4096,)
-output.weight : 0 #  torch.float32 (vocab_size, 4096)
-output.weight_scaler : 0 #  torch.float32 (4096,)
+output.weight : -1 #  torch.float32 (vocab_size, 4096)
+output.weight_scaler : -1 #  torch.float32 (4096,)

@@ -20,26 +20,37 @@ from typing import List
 # import torch_xla2 first!
 import torch_xla2  # pylint: disable
 import jax
+import jax.numpy as jnp
 import numpy as np
 from absl import app, flags
 from colorama import Fore, Style
 from jetstream.engine import token_utils
 from jetstream_pt import engine as je
+from jetstream_pt import offline_inference
 from jetstream_pt.config import FLAGS, create_engine_from_config_flags
+
+flags.DEFINE_string("prompt_file", "", "File with prompts")
+
+flags.DEFINE_string("prompt_format", "mlperf", "format of prompts")
+
+
+def get_prompts():
+  if FLAGS.prompt_file:
+    if prompt_format == "mlperf":
+      import pandas as pd
+
+      data = pd.read_pickle(FLAGS.prompt_file)
+      return list(data.input)
 
 
 # pylint: disable-next=all
 def main(argv):
-
   engine = create_engine_from_config_flags()
-
   start = time.perf_counter()
-  params = engine.load_params()
-  print("Load params ", time.perf_counter() - start)
+  offline_inf = offline_inference.OfflineInference(engine)
 
   metadata = engine.get_tokenizer()
   tokenizer = engine.build_tokenizer(metadata)
-  max_output_length = 1024
 
   profiling_output = FLAGS.profiling_output
   profiling_prefill = (
@@ -48,11 +59,6 @@ def main(argv):
       and profiling_output != ""
   )
 
-  if profiling_prefill:
-    jax.profiler.start_trace(profiling_output)
-  decode_state = engine.init_decode_state()
-  if profiling_prefill:
-    jax.profiler.stop_trace()
   prompts: List[str] = [
       "I believe the meaning of life is",
       "To add an element to an ArrayList of a specific class type in Java, you can follow the following steps:\n\n1. Create an instance of the class to be added.\n2. Get a reference to the ArrayList.\n3. Call the `add()` method on the ArrayList, passing the instance of the class as the argument.\n\nHere's an example of how to add an object of type `Person` to an ArrayList of type `ArrayList<Person>`:\n```csharp\n// Create a new instance of the Person class\nPerson person = new Person(\"John\", 25);\n\n// Get a reference to the ArrayList\nArrayList<Person> peopleList = new ArrayList<>();\n\n// Add the person object to the ArrayList\npeopleList.add(person);\n```\nIn this example, the `Person` class is assumed to have a constructor that takes two arguments: a String for the person's name, and an int for their age. You can substitute your own class and constructor as necessary.",
@@ -60,53 +66,31 @@ def main(argv):
       "<s>[INST] <<SYS>>\nYou are an AI assistant that helps people find information. Provide a detailed answer so user don\u2019t need to search outside to understand the answer.\n<</SYS>>\n\nUse reasoning to lead to the answer of the following question:\nWhere are you likely to find water underneath?\nOptions:\n- toilet\n- sink\n- jar\n- bridge\n- house\n Reasoning process: [/INST",
       "<s>[INST] <<SYS>>\nYou are an AI assistant. You will be given a task. You must generate a detailed and long answer.\n<</SYS>>\n\nContinue the following story.\n\nKay didn't have shoes that fit her feet properly. She only wore sneakers, because the \nChoose from: [I] shoes  fitted badly. [II] sneakers  fitted badly. [/INST]",
   ]
-  for prompt in prompts:
-    slot = random.randint(0, FLAGS.batch_size - 1)
+  print("init...")
+  start = time.perf_counter()
+  offline_inf.init_decode_state()
+  end = time.perf_counter()
+  print("init done in", end - start)
+
+  input_data = []
+  for i, prompt in enumerate(prompts):
     tokens, true_length = tokenizer.encode(prompt)
-
-    print(f"---- Input prompts are: {prompt}")
-    print(f"---- Encoded tokens are: {tokens}")
-
-    # pylint: disable-next=all
-    if profiling_prefill:
-      jax.profiler.start_trace(profiling_output)
-    prefill_result, _ = engine.prefill(
-        params=params, padded_tokens=tokens, true_length=true_length
+    input_data.append(
+        offline_inference.InputData(
+            id=str(i), tokens=jnp.array(tokens), true_length=true_length
+        )
     )
-    # pylint: disable-next=all
-    decode_state = engine.insert(prefill_result, decode_state, slot=slot)
-    if profiling_prefill:
-      jax.profiler.stop_trace()
 
-    sampled_tokens_list = []
-    print(f"---- Streaming decode started on #slot{slot}.")
-    complete = np.zeros((1,), dtype=np.bool_)
-    while True:
-      if profiling_output:
-        jax.profiler.start_trace(profiling_output)
-      decode_state, result_tokens = engine.generate(params, decode_state)
-      result_tokens = result_tokens.convert_to_numpy()
-
-      if profiling_output:
-        jax.profiler.stop_trace()
-      output, complete = token_utils.process_result_tokens(
-          tokenizer=tokenizer,
-          slot=slot,
-          slot_max_length=max_output_length,
-          result_tokens=result_tokens,
-          complete=complete,
-      )
-      if complete[0]:
-        break
-      token_ids = output[0].token_ids
-      sampled_tokens_list.extend(token_ids)
-
-    print("---- All output tokens.")
-    print(sampled_tokens_list)
-    print("---- All output text.")
-    print(tokenizer.decode(sampled_tokens_list))
+  results = offline_inf.batch_inference(input_data)
+  import ipdb; ipdb.set_trace()
+  for ids, result in results.items():
+    prompt = prompts[int(ids)]
+    print(f"---- Input prompts are: {prompt}")
+    print(f"---- RESPONSE tokens are: ")
+    print(tokenizer.decode(result))
 
 
 if __name__ == "__main__":
   os.environ["TF_CPP_MIN_LOG_LEVEL"] = "0"
+
   app.run(main)

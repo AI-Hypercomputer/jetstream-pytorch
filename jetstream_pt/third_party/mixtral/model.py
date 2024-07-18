@@ -22,8 +22,13 @@ from torch import Tensor
 from torch.nn import functional as F
 from .config import ModelArgs, find_multiple
 from jetstream_pt.layers import Attention, get_quantized_linear_layer, get_quantized_enbedding_layer
+from jetstream_pt import torchjax
 
 import jax
+from jax.sharding import Mesh, PartitionSpec as P, NamedSharding
+from jax.experimental.shard_map import shard_map
+
+from jetstream_pt import moe_kernel
 
 
 class Transformer(nn.Module):
@@ -191,7 +196,7 @@ class TransformerBlock(nn.Module):
 
 class Int8ConditionalFeedForward(nn.Module):
 
-  def __init__(self, config):
+  def __init__(self, config, env):
     super().__init__()
     w1 = torch.empty(
         config.num_experts,
@@ -222,32 +227,37 @@ class Int8ConditionalFeedForward(nn.Module):
     self.register_buffer("w2_scaler", w2_scaler)
     self.register_buffer("w3_scaler", w3_scaler)
 
+    self.use_moe = False
+    self.eval_gmm = shard_map(
+      moe_kernel.eval_gmm,
+      mesh=env.mesh,
+      in_specs=(
+        env.sharding_by_axis(-1).spec,
+        env.sharding_by_axis(1).spec,
+        env.sharding_by_axis(2).spec,
+        env.sharding_by_axis(1).spec,
+        env.sharding_by_axis(-1).spec,
+      ),
+      out_specs=env.sharding_by_axis(-1).spec,
+      check_rep=False)
+
   def forward(self, x: Tensor, expert_indices: Tensor) -> Tensor:
-    seq_len = x.shape[0]
-    if seq_len >= 4:
-      return self.forward_for_long_seq_len(x, expert_indices)
+    if self.use_moe and x.shape[0] >= 32:  # min length
+      return self.forward_moe(x, expert_indices)
     else:
-      return self.forward_for_short_seq_len(x, expert_indices)
+      return self.forward_full(x, expert_indices)
 
-  def forward_for_short_seq_len(
-      self, x: Tensor, expert_indices: Tensor
-  ) -> Tensor:
-    with jax.named_scope("conditional_ff"):
-      w1_weights = self.w1[expert_indices]  # [T, A, D, D]
-      w3_weights = self.w3[expert_indices]  # [T, A, D, D]
-      w2_weights = self.w2[expert_indices]  # [T, A, D, D]
-      w1_scaler = self.w1_scaler[expert_indices]
-      w2_scaler = self.w2_scaler[expert_indices]
-      w3_scaler = self.w3_scaler[expert_indices]
+  def forward_moe(self, x, expert_indices):
+    w1 = self.w1 * self.w1_scaler.unsqueeze(-1)
+    w2 = self.w2 * self.w2_scaler.unsqueeze(-1)
+    w3 = self.w3 * self.w3_scaler.unsqueeze(-1)
+    return torchjax.call_jax(
+        self.eval_gmm,
+        x, w1, w2, w3, expert_indices
+    )
 
-      x1 = F.silu(torch.einsum("ti,taoi -> tao", x, w1_weights) * w1_scaler)
-      x3 = torch.einsum("ti, taoi -> tao", x, w3_weights) * w3_scaler
-      expert_outs = (
-          torch.einsum("tao, taio -> tai", (x1 * x3), w2_weights) * w2_scaler
-      )
-    return expert_outs
 
-  def forward_for_long_seq_len(self, x, expert_indices):
+  def forward_full(self, x, expert_indices):
     seqlen = x.shape[0]
     num_experts = self.w1.shape[0]
 
@@ -268,7 +278,7 @@ class Int8ConditionalFeedForward(nn.Module):
 
 class ConditionalFeedForward(nn.Module):
 
-  def __init__(self, config):
+  def __init__(self, config, env):
     super().__init__()
     # TODO(How to enable quantization?)
     self.w1 = nn.Parameter(
@@ -329,7 +339,7 @@ class MOEFeedForward(nn.Module):
         if env.quant_config.enable_weight_quantization
         else ConditionalFeedForward
     )
-    self.cond_ffn = CondLayer(config)
+    self.cond_ffn = CondLayer(config, env)
     self.dim = config.dim
     self.num_activated_experts = config.num_activated_experts
 

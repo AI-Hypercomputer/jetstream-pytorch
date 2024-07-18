@@ -51,6 +51,12 @@ P = jax.sharding.PartitionSpec
 Params = jax.Array
 PrefillInputs = jax.Array
 
+import logging
+
+log = logging.getLogger(__name__)
+
+# pylint: disable-next=all
+
 
 @struct.dataclass
 # pylint: disable-next=all
@@ -130,9 +136,15 @@ class PyTorchEngine(engine_api.Engine):
   ) -> DecodeState:
     caches_obj = self.env.make_caches_generate()
     caches = [c.state() for c in caches_obj]
+    print(
+        f"Cache size total: {sum(np.prod(c.shape) for c, _ in caches)/(1<<30)} GB"
+    )
     scalers = []
     if self.env.quant_config.enable_kv_quantization:
       scalers = [c.scalers() for c in caches_obj]
+      print(
+          f"Cache scalers total: {sum(np.prod(c.shape) for c, _ in scalers)*2/(1<<30)} GB"
+      )
     return DecodeState(
         jnp.zeros((self.env.batch_size, 1), dtype=jnp.int32),
         caches,
@@ -760,6 +772,7 @@ class PyTorchEngine(engine_api.Engine):
 
   # pylint: disable-next=all
   def load_params(self) -> Params:
+    log.info("load_params")
     if self.weights is not None:
       return self.weights
     # We want to fix this: load from files
