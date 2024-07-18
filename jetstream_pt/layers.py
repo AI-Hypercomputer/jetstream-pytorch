@@ -585,8 +585,12 @@ class Int8KVAttentionKernel:
               impl = self.ragged_attention_new
       else:
               impl = self.ragged_attention_orig
-      if not self.env.ragged_mha and seqlen == 1:
-        xq = torch.broadcast_to(xq, (xq.shape[0], xq.shape[1], 2, xq.shape[3]))
+      #if not self.env.ragged_mha and seqlen == 1:
+      true_len = seqlen
+      if n_rep == 1 and seqlen == 1:
+        true_len = 2
+        xq = torch.nn.functional.pad(xq, (0, 0, 0, true_len - seqlen), "constant", 0)
+        #xq = torch.broadcast_to(xq, (bsz, num_heads, true_len, head_dim))
 
       # We are not using ragged attention for prefill yet.
       if self.env.ragged_mha and seqlen == 1:
@@ -603,8 +607,8 @@ class Int8KVAttentionKernel:
             k_scaler,
             v_scaler,
         )
-        local_max = local_max.reshape(*local_max.shape, 1)
-        local_denom = local_denom.reshape(*local_denom.shape, 1)
+        #local_max = local_max.reshape(*local_max.shape, 1)
+        #local_denom = local_denom.reshape(*local_denom.shape, 1)
       elif self.env.flash_attention:
         with torch_xla2.default_env():
           local_output, (local_max, local_denom) = self.flash_attention(xq, keys, values, self.layer_id, k_scaler, v_scaler, mask=local_mask)
@@ -613,7 +617,12 @@ class Int8KVAttentionKernel:
         local_max = None
         local_denom = None
 
-      if local_output.shape[-2] == 2:
+      local_output = local_output.reshape(bsz, num_heads, true_len, head_dim)
+      if local_max is not None:
+        local_max = local_max.reshape(bsz, num_heads, true_len, 1)
+        local_denom= local_denom.reshape(bsz, num_heads, true_len, 1)
+
+      if true_len != seqlen:
         local_output = local_output[:, :, 0:1, :]
         if local_max is not None:
           local_max = local_max[:, :, 0:1, :]
@@ -630,7 +639,7 @@ class Int8KVAttentionKernel:
     with jax.named_scope("attn_qkv"):
       existing_output, (existing_max, existing_denom) = attend(xq, orig_keys, orig_values, k_scaler, v_scaler, mask)
       cache_len = orig_keys.shape[-2]
-      existing_output = existing_output.reshape(bsz, num_heads, seqlen, head_dim)
+      #existing_output = existing_output.reshape(bsz, num_heads, seqlen, head_dim)
     # For non flash attention or prefill, existing output contains everything
     if not self.env.lazy_cache_update or seqlen > 1:
       return existing_output
@@ -638,16 +647,16 @@ class Int8KVAttentionKernel:
     # For flash attention, existing output contains the existing kv cache generated logits
     with jax.named_scope("attn_new_qkv"):
       # At this point, flash attention or ragged attention must have been enabled
-      existing_max = existing_max.reshape(bsz, num_heads, seqlen, 1)
-      existing_denom = existing_denom.reshape(bsz, num_heads, seqlen, 1)
+      #existing_max = existing_max.reshape(bsz, num_heads, seqlen, 1)
+      #existing_denom = existing_denom.reshape(bsz, num_heads, seqlen, 1)
 
       if not self.env.ragged_mha or seqlen > 1:
         new_key = repeat_kv(new_key, n_rep)
         new_value = repeat_kv(new_value, n_rep)
       new_output, (new_max, new_denom) = attend(xq, new_key, new_value, new_k_scaler, new_v_scaler, None)
-      new_output = new_output.reshape(bsz, num_heads, 1, head_dim)
-      new_max = new_max.reshape(bsz, num_heads, 1, 1)
-      new_denom = new_denom.reshape(bsz, num_heads, 1, 1)
+      #new_output = new_output.reshape(bsz, num_heads, 1, head_dim)
+      #new_max = new_max.reshape(bsz, num_heads, 1, 1)
+      #new_denom = new_denom.reshape(bsz, num_heads, 1, 1)
 
     with jax.named_scope("attn_global"):
       global_sum = existing_denom * torch.exp(existing_max) + new_denom * torch.exp(new_max)

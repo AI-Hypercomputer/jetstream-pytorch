@@ -91,7 +91,7 @@ class QuantizationTest(unittest.TestCase):
       cache_shape = (batch, 2, 100, 2)  # bs, num heads, seqlen, dim
     with jax.default_device(jax.devices("cpu")[0]):
       
-      cache = cache_manager.KVCacheGenerate.empty(
+      cache = cache_manager.Int8KVCacheGenerate.empty(
           cache_shape, None, env
       )
       # seqlen is 1
