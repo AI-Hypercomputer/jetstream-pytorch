@@ -46,7 +46,8 @@ def main(argv):
 
   if profiling_prefill:
     jax.profiler.start_trace(profiling_output)
-    decode_state = engine.init_decode_state()
+  decode_state = engine.init_decode_state()
+  if profiling_prefill:
     jax.profiler.stop_trace()
   prompts: List[str] = [
       "I believe the meaning of life is",
@@ -65,11 +66,12 @@ def main(argv):
     # pylint: disable-next=all
     if profiling_prefill:
       jax.profiler.start_trace(profiling_output)
-      prefill_result = engine.prefill(
-          params=params, padded_tokens=tokens, true_length=true_length
-      )
+    prefill_result = engine.prefill(
+        params=params, padded_tokens=tokens, true_length=true_length
+    )
       # pylint: disable-next=all
-      decode_state = engine.insert(prefill_result, decode_state, slot=slot)
+    decode_state = engine.insert(prefill_result, decode_state, slot=slot)
+    if profiling_prefill:
       jax.profiler.stop_trace()
 
     sampled_tokens_list = []
@@ -78,8 +80,10 @@ def main(argv):
     while True:
       if profiling_output:
         jax.profiler.start_trace(profiling_output)
-        decode_state, result_tokens = engine.generate(params, decode_state)
-        result_tokens = result_tokens.convert_to_numpy()
+      decode_state, result_tokens = engine.generate(params, decode_state)
+      result_tokens = result_tokens.convert_to_numpy()
+      
+      if profiling_output:
         jax.profiler.stop_trace()
       output, complete = token_utils.process_result_tokens(
           tokenizer=tokenizer,
