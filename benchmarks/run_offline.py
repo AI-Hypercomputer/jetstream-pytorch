@@ -31,6 +31,7 @@ logging.getLogger().setLevel(logging.ERROR)
 
 flags.DEFINE_string("sharegpt_path", "", "path to sharegpt json file")
 
+profiler_started = False
 
 def run_prefill_time(engine, params, decode_state, seqlen):
   """Run prefill and measure time."""
@@ -52,18 +53,19 @@ def run_prefill_time(engine, params, decode_state, seqlen):
 
   nums = 5
   start = time.perf_counter()
-  if FLAGS.profiling_prefill:
-    for i in range(nums):
-      if i == nums - 1:
-          jax.profiler.start_trace(FLAGS.profiling_output)
-      prefill_result = engine.prefill(
-          params=params, padded_tokens=tokens, true_length=true_length
-      )
-      decode_state = engine.insert(
-          prefill_result, decode_state, slot=jnp.int32(i)
-      )
-    jax.block_until_ready(decode_state)
-    jax.profiler.stop_trace()
+  for i in range(nums):
+    if i == nums - 1 and FLAGS.profiling_prefill:
+        jax.profiler.start_trace(FLAGS.profiling_output)
+        profiler_started = True
+  
+    prefill_result = engine.prefill(
+        params=params, padded_tokens=tokens, true_length=true_length
+    )
+    decode_state = engine.insert(
+        prefill_result, decode_state, slot=jnp.int32(i)
+    )
+  jax.block_until_ready(decode_state)
+
   end = time.perf_counter()
   return (end - start) / nums, decode_state
 
@@ -109,8 +111,9 @@ def main(argv):
   print("======= decode starting ===")
   dec_times = []
   for i in range(10):
-    if profiling_output and i == 7:
+    if profiling_output and i == 7 and not profiler_started:
       jax.profiler.start_trace(profiling_output)
+      profiler_started = True
     start = time.perf_counter()
     # pylint: disable-next=all
     decode_state, sampled_tokens = engine.generate(params, decode_state)
@@ -120,7 +123,7 @@ def main(argv):
     dec_times.append(end - start)
     print(i, "decode time", (end - start))
 
-  if profiling_output:
+  if profiler_started:
     jax.profiler.stop_trace()
 
   print("prefill ", prefill_times)
