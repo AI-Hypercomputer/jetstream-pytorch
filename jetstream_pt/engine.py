@@ -357,7 +357,12 @@ class PyTorchEngine(engine_api.Engine):
           update_index = [idx, slot, 0, pos, 0]
           newk = jnp.expand_dims(newk, 0)
           newv = jnp.expand_dims(newv, 0)
-          caches = [(insert(caches[0][0], newk, update_index),insert(caches[0][1], newv, update_index))]
+          caches = [
+              (
+                  insert(caches[0][0], newk, update_index),
+                  insert(caches[0][1], newv, update_index),
+              )
+          ]
       else:
         update_index = [slot, 0, pos, 0]
         caches = [
@@ -373,8 +378,8 @@ class PyTorchEngine(engine_api.Engine):
             quantize.quantize_tensor, new_entry, reduce_axis
         )
         if self.env.generate_cache_stacked:
-            vals = jnp.expand_dims(vals, 0)
-            scales = jnp.expand_dims(scales, 0)
+          vals = jnp.expand_dims(vals, 0)
+          scales = jnp.expand_dims(scales, 0)
         new_scaler = jax.lax.dynamic_update_slice(
             scaler,
             scales,
@@ -392,25 +397,31 @@ class PyTorchEngine(engine_api.Engine):
         return res, new_scaler
 
       if self.env.generate_cache_stacked:
-          cache_k, k_scale = decode_state.caches[0][0], decode_state.cache_scales[0][0]
-          cache_v, v_scale = decode_state.caches[0][1], decode_state.cache_scales[0][1]
-          for idx, (newk, newv) in enumerate(prefix.caches):
-            update_index = [idx, slot, 0, pos, 0]
-            #newk = jnp.expand_dims(newk, 0)
-            #newv = jnp.expand_dims(newv, 0)
-            cache_k, k_scale = insert(cache_k, k_scale, newk, update_index)
-            cache_v, v_scale = insert(cache_v, v_scale, newv, update_index)
-          caches = [(cache_k, cache_v)]
-          scales = [(k_scale, v_scale)]
+        cache_k, k_scale = (
+            decode_state.caches[0][0],
+            decode_state.cache_scales[0][0],
+        )
+        cache_v, v_scale = (
+            decode_state.caches[0][1],
+            decode_state.cache_scales[0][1],
+        )
+        for idx, (newk, newv) in enumerate(prefix.caches):
+          update_index = [idx, slot, 0, pos, 0]
+          # newk = jnp.expand_dims(newk, 0)
+          # newv = jnp.expand_dims(newv, 0)
+          cache_k, k_scale = insert(cache_k, k_scale, newk, update_index)
+          cache_v, v_scale = insert(cache_v, v_scale, newv, update_index)
+        caches = [(cache_k, cache_v)]
+        scales = [(k_scale, v_scale)]
       else:
         update_index = [slot, 0, pos, 0]
         for (k, v), (kscaler, vscaler), (newk, newv) in zip(
             decode_state.caches, decode_state.cache_scales, prefix.caches
         ):
-            kcache, kscale = insert(k, kscaler, newk, update_index)
-            vcache, vscale = insert(v, vscaler, newv, update_index)
-            caches.append((kcache, vcache))
-            scales.append((kscale, vscale))
+          kcache, kscale = insert(k, kscaler, newk, update_index)
+          vcache, vscale = insert(v, vscaler, newv, update_index)
+          caches.append((kcache, vcache))
+          scales.append((kscale, vscale))
     lens = decode_state.lens.at[slot].set(1)
     return DecodeState(
         tokens,
@@ -463,25 +474,21 @@ class PyTorchEngine(engine_api.Engine):
     old_scales = decode_state.cache_scales
     cache_inserts = prefix.caches
 
-    # print(f"YY old_caches: {len(decode_state.caches)} cache_inserts: {len(cache_inserts)}")
     scales = []
     caches = []
     if not self.env.quant_config.enable_kv_quantization:
 
       @functools.partial(jax.jit, donate_argnums=(0, 1), inline=True)
-      def insert(cache, new_entry, layer_id):
+      def insert(cache, new_entry):
         new_entry = jnp.transpose(new_entry.squeeze(0), (1, 0, 2))
-        if self.env.generate_cache_stacked:
-          res = cache.at[layer_id, slot, :, update_indexes, :].set(new_entry)
-        else:
-          res = cache.at[slot, :, update_indexes, :].set(new_entry)
+        res = cache.at[slot, :, update_indexes, :].set(new_entry)
         res = jax.lax.with_sharding_constraint(res, self.cache_sharding)
         return res
 
-      for idx, (newk, newv) in enumerate(prefix.caches):
-        caches = [
-          (insert(old_caches[0][0], newk, idx), insert(old_caches[0][1], newv, idx))
-        ]
+      caches = [
+          (insert(k, newk), insert(v, newv))
+          for (k, v), (newk, newv) in zip(old_caches, cache_inserts)
+      ]
     else:
 
       @functools.partial(jax.jit, donate_argnums=(0, 1), inline=True)
@@ -526,11 +533,6 @@ class PyTorchEngine(engine_api.Engine):
       decode_state: DecodeState,
       slot: int,
   ) -> DecodeState:
-    # logging.info(
-    #     'Jet input prefix: %s, decode state before insert: %s',
-    #     prefix,
-    #     decode_state,
-    # )
     if self.env.ring_buffer:
       start_insert = decode_state.current_position - prefix.seq_len
       end_insert = start_insert + prefix.caches[0][0].shape[2]  # padded seclen
@@ -621,7 +623,6 @@ class PyTorchEngine(engine_api.Engine):
     ragged_batch_index, ragged_block_index = ragged_batch_index.reshape(
         (-1)
     ), ragged_block_index.reshape((-1))
-
 
     def update_mask():
       if self.env.ring_buffer:

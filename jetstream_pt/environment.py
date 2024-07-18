@@ -86,7 +86,7 @@ class JetEngineEnvironmentData:
   shard_on_batch: bool = False
 
   # Whether to enable ragged multi head attention.
-  ragged_mha: bool = True
+  ragged_mha: bool = False
 
   # The block size for the ragged attention.
   block_size: int = 512
@@ -95,15 +95,15 @@ class JetEngineEnvironmentData:
   starting_position: int = 512
 
   # Ring buffer
-  ring_buffer: bool = False
+  ring_buffer: bool = True
 
-  flash_attention: bool = True
+  flash_attention: bool = False
 
-  generate_cache_stacked: bool = True
+  generate_cache_stacked: bool = False
 
-  new_cache_stacked: bool = True
+  new_cache_stacked: bool = False
 
-  lazy_cache_update: bool = True
+  lazy_cache_update: bool = False
   # Variables used in token sampling
   # sampling algorithm to use ("greedy", "weighted", "neucleus", "topk")
   sampling_algorithm: str = "greedy"
@@ -131,18 +131,29 @@ class JetEngineEnvironment:
     self.batch_size = self._data.batch_size
     self.seq_len = self._data.max_input_sequence_length
     self.cache_len = self._data.cache_sequence_length
-    self.ragged_mha = self._data.ragged_mha
     self.block_size = self._data.block_size
     self.starting_position = self._data.starting_position
-    self.flash_attention = self._data.flash_attention
-    self.generate_cache_stacked = self._data.generate_cache_stacked
-    self.new_cache_stacked = self._data.new_cache_stacked
     self.num_layers = self._data.num_layers
-    self.ring_buffer = self._data.ring_buffer
-    self.lazy_cache_update = self._data.lazy_cache_update
     self.testing = self._data.testing
     self.testing_seed = self._data.testing_seed
+    self.ring_buffer = self._data.ring_buffer
+
+    if not self.ring_buffer:
+      self.lazy_cache_update = True
+      self.ragged_mha = True
+      self.flash_attention = True
+      self.generate_cache_stacked = True
+      self.new_cache_stacked = True
+
+    if self.testing:
+      self.lazy_cache_update = self._data.lazy_cache_update
+      self.ragged_mha = self._data.ragged_mha
+      self.flash_attention = self._data.flash_attention
+      self.generate_cache_stacked = self._data.generate_cache_stacked
+      self.new_cache_stacked = self._data.new_cache_stacked
+
     self.default_type = jnp.bfloat16 if self._data.bf16_enable else jnp.float32
+
     if self.generate_cache_stacked:
       self.cache_shape = (self.num_layers, *self._data.cache_shape)
     else:
@@ -163,11 +174,11 @@ class JetEngineEnvironment:
 
     if self.generate_cache_stacked:
       self.attention_kv_axis_names = (
-        "layer",
-        "batch",
-        "num_attn_heads",
-        "sequence_length",
-        "head_dim",
+          "layer",
+          "batch",
+          "num_attn_heads",
+          "sequence_length",
+          "head_dim",
       )
     if data.shard_on_batch:
       self.kv_cache_shard_axis = "batch"

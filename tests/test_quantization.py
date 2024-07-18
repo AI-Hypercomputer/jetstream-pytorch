@@ -34,11 +34,12 @@ from tests import helpers
 from torch.utils import _pytree as pytree
 from torch_xla2 import tensor
 import copy
+from absl.testing import parameterized
 
 torch.manual_seed(12345)
 
 
-class QuantizationTest(unittest.TestCase):
+class QuantizationTest(parameterized.TestCase):
   """test kv cache quantization"""
 
   def _xla_tensor(self, shape):
@@ -71,35 +72,47 @@ class QuantizationTest(unittest.TestCase):
     print("  norm: ", (w - w_dq).norm())
     print("  cosine dist: ", self._calc_cosine_dist(w, w_dq))
 
-  def test_kv_cache(self):
+  @parameterized.named_parameters(
+      ("ring_buffer", True),
+      ("left_aligned", False),
+  )
+  def test_kv_cache(self, ring_buffer):
     """test kv cache quantization"""
+
     def update_env_data(env_data):
-      env_data.ring_buffer=False
-      env_data.ragged_mha=False
-      env_data.flash_attention=True
-      env_data.generate_cache_stacked=True
-      env_data.new_cache_stacked=True
-      env_data.lazy_cache_update=True
+      env_data.ring_buffer = ring_buffer
+      env_data.ragged_mha = not ring_buffer
+      env_data.flash_attention = not ring_buffer
+      env_data.generate_cache_stacked = not ring_buffer
+      env_data.new_cache_stacked = not ring_buffer
+      env_data.lazy_cache_update = not ring_buffer
       env_data.quant_config.enable_kv_quantization = True
       env_data.batch_size = 4
+
     env, _ = helpers.make_env_tiny(True, update_env_data)
-    
+
     batch = env.batch_size
     if env.generate_cache_stacked:
-      cache_shape = (env.num_layers, batch, 2, 100, 2)  # layer, bs, num heads, seqlen, dim
+      cache_shape = (
+          env.num_layers,
+          batch,
+          2,
+          100,
+          2,
+      )  # layer, bs, num heads, seqlen, dim
     else:
       cache_shape = (batch, 2, 100, 2)  # bs, num heads, seqlen, dim
     with jax.default_device(jax.devices("cpu")[0]):
-      
-      cache = cache_manager.Int8KVCacheGenerate.empty(
-          cache_shape, None, env
-      )
+
+      cache = cache_manager.Int8KVCacheGenerate.empty(cache_shape, None, env)
       # seqlen is 1
       k = self._xla_tensor((batch, 2, 1, 2))
       v = self._xla_tensor((batch, 2, 1, 2))
 
       def update_finalize_compare(in_k, in_v, in_layer, in_pos):
-        cache.input_pos = [in_pos] if env.ring_buffer else jnp.array([in_pos] * batch)
+        cache.input_pos = (
+            [in_pos] if env.ring_buffer else jnp.array([in_pos] * batch)
+        )
 
         # layer id may or may not take effect, depends on the env config.
         cache.update(in_k, in_v, layer_id=in_layer)
@@ -113,44 +126,68 @@ class QuantizationTest(unittest.TestCase):
 
         if env.generate_cache_stacked:
           self.assertTrue(
-              jnp.allclose(k._elem, new_k._elem[in_layer, :, :, in_pos:(in_pos + 1), :], atol=0.1)
+              jnp.allclose(
+                  k._elem,
+                  new_k._elem[in_layer, :, :, in_pos : (in_pos + 1), :],
+                  atol=0.1,
+              )
           )
           self.assertTrue(
-              jnp.allclose(v._elem, new_v._elem[in_layer, :, :, in_pos:(in_pos + 1), :], atol=0.1)
+              jnp.allclose(
+                  v._elem,
+                  new_v._elem[in_layer, :, :, in_pos : (in_pos + 1), :],
+                  atol=0.1,
+              )
           )
         else:
           self.assertTrue(
-              jnp.allclose(k._elem, new_k._elem[:, :, in_pos:(in_pos + 1), :], atol=0.1)
+              jnp.allclose(
+                  k._elem, new_k._elem[:, :, in_pos : (in_pos + 1), :], atol=0.1
+              )
           )
           self.assertTrue(
-              jnp.allclose(v._elem, new_v._elem[:, :, in_pos:(in_pos + 1), :], atol=0.1)
+              jnp.allclose(
+                  v._elem, new_v._elem[:, :, in_pos : (in_pos + 1), :], atol=0.1
+              )
           )
+
       update_finalize_compare(k, v, in_layer=1, in_pos=57)
       update_finalize_compare(k, v, in_layer=1, in_pos=58)
       update_finalize_compare(k, v, in_layer=2, in_pos=3)
 
-  def test_kv_kernel(self):
+  @parameterized.named_parameters(
+      ("ring_buffer", True),
+      ("left_aligned", False),
+  )
+  def test_kv_kernel(self, ring_buffer):
     """test kv cache quantization"""
+
     def update_env_data(env_data):
-      env_data.ring_buffer=False
-      env_data.ragged_mha=False
-      env_data.flash_attention=True
-      env_data.generate_cache_stacked=True
-      env_data.new_cache_stacked=True
-      env_data.lazy_cache_update=True
-      env_data.quant_config.enable_kv_quantization=True
+      env_data.ring_buffer = ring_buffer
+      env_data.ragged_mha = not ring_buffer
+      env_data.flash_attention = not ring_buffer
+      env_data.generate_cache_stacked = not ring_buffer
+      env_data.new_cache_stacked = not ring_buffer
+      env_data.lazy_cache_update = not ring_buffer
+      env_data.quant_config.enable_kv_quantization = True
       env_data.batch_size = 4
-      env_data.ragged_mha = True
+
     env, _ = helpers.make_env_tiny(False, update_env_data)
 
     batch = env.batch_size
     if env.generate_cache_stacked:
-      cache_shape = (env.num_layers, batch, 2, 100, 2)  # bs, num heads, seqlen, dim
+      cache_shape = (
+          env.num_layers,
+          batch,
+          2,
+          100,
+          2,
+      )  # bs, num heads, seqlen, dim
     else:
       cache_shape = (batch, 2, 100, 2)  # layers, bs, num heads, seqlen, dim
 
     with jax.default_device(jax.devices("cpu")[0]):
-      
+
       key = jax.random.PRNGKey(123)
       key2 = jax.random.PRNGKey(456)
       cache_k_jax = jax.random.normal(key, cache_shape, dtype=env.default_type)
@@ -158,8 +195,10 @@ class QuantizationTest(unittest.TestCase):
 
       start = jnp.zeros((batch,), dtype=jnp.int32)
 
-      cache_k, cache_v, start = torchjax.to_torch((cache_k_jax, cache_v_jax, start))
-      
+      cache_k, cache_v, start = torchjax.to_torch(
+          (cache_k_jax, cache_v_jax, start)
+      )
+
       # Prepare quantized cache before written in
       cache_k_int, cache_k_scaler, _ = quantize_tensor(cache_k, (-3, -1))
       cache_v_int, cache_v_scaler, _ = quantize_tensor(cache_v, (-3, -1))
@@ -172,30 +211,48 @@ class QuantizationTest(unittest.TestCase):
       xq, xk, xv = torchjax.to_torch((xq, xk, xv))
 
       def get_var(position: int):
-        pos = [position] if env.ring_buffer else jnp.array([position] * batch, dtype=jnp.int64)
-        mask = jax.lax.broadcast_in_dim(jnp.array([0] * position + [float("-inf")] * (100 - position)), (env.batch_size, 1, 1, 100), (3,))
+        pos = (
+            [position]
+            if env.ring_buffer
+            else jnp.array([position] * batch, dtype=jnp.int64)
+        )
+        mask = jax.lax.broadcast_in_dim(
+            jnp.array([0] * position + [float("-inf")] * (100 - position)),
+            (env.batch_size, 1, 1, 100),
+            (3,),
+        )
         mask = torchjax.to_torch((mask))
         return pos, mask
-
 
       cache = cache_manager.KVCacheGenerate(cache_k, cache_v, None, None, env)
       # layer_id doesn't matter, will assign later
       attention_float = layers.AttentionKernel(env, layer_id=0)
 
       float_res = []
-      def update_finalize_record(in_attention, in_cache, in_q, in_k, in_v, in_layer, in_pos):
+
+      def update_finalize_record(
+          in_attention, in_cache, in_q, in_k, in_v, in_layer, in_pos
+      ):
         pos, mask = get_var(in_pos)
-        in_attention.layer_id=in_layer
+        in_attention.layer_id = in_layer
         in_cache.input_pos = pos
-        ret = in_attention(in_q, in_k, in_v, mask, in_cache, start=start, end=pos)
+        ret = in_attention(
+            in_q, in_k, in_v, mask, in_cache, start=start, end=pos
+        )
         in_cache.finalize()
         return ret
 
-      float_res.append(update_finalize_record(attention_float, cache, xq, xk, xv, 1, 57))
-      float_res.append(update_finalize_record(attention_float, cache, xq, xk, xv, 1, 58))
-      float_res.append(update_finalize_record(attention_float, cache, xq, xk, xv, 2, 3))
+      float_res.append(
+          update_finalize_record(attention_float, cache, xq, xk, xv, 1, 57)
+      )
+      float_res.append(
+          update_finalize_record(attention_float, cache, xq, xk, xv, 1, 58)
+      )
+      float_res.append(
+          update_finalize_record(attention_float, cache, xq, xk, xv, 2, 3)
+      )
 
-      # Running into the issue of multiple env object always share the same quant_config. 
+      # Running into the issue of multiple env object always share the same quant_config.
       # Record the results and compare as a workaround.
       env._data.quant_config.enable_kv_quantization = True
       env = environment.JetEngineEnvironment(env._data)
@@ -213,13 +270,19 @@ class QuantizationTest(unittest.TestCase):
       attention_quant = layers.Int8KVAttentionKernel(env, layer_id=0)
 
       int_res = []
-      int_res.append(update_finalize_record(attention_quant, cache_int, xq, xk, xv, 1, 57))
-      int_res.append(update_finalize_record(attention_quant, cache_int, xq, xk, xv, 1, 58))
-      int_res.append(update_finalize_record(attention_quant, cache_int, xq, xk, xv, 2, 3))
+      int_res.append(
+          update_finalize_record(attention_quant, cache_int, xq, xk, xv, 1, 57)
+      )
+      int_res.append(
+          update_finalize_record(attention_quant, cache_int, xq, xk, xv, 1, 58)
+      )
+      int_res.append(
+          update_finalize_record(attention_quant, cache_int, xq, xk, xv, 2, 3)
+      )
 
       for f, i in zip(float_res, int_res):
         self.assertTrue(jnp.allclose(f.jax(), i.jax(), atol=0.01))
-  
+
   def test_quantize_dequantize_tensor(self):
 
     def quantize_dequantize_weight(w, n_bit):

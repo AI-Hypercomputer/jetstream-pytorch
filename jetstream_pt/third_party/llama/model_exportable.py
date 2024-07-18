@@ -258,7 +258,7 @@ class Transformer(ModuleBase):
       bsz, seqlen = tokens.shape
       freqs_cis = self.freqs_cis[input_pos]
       freqs_cis = freqs_cis.reshape(bsz, seqlen, -1)
-    
+
     # Should check more thoroughly, as of now, when prefill, it's always not stacked. When generate, it's controlled by the parameter.
     # target_cache_layers = 1 if self.env.generate_cache_stacked else len(self.layers)
     # assert len(caches) == target_cache_layers, f"Number of caches ({len(caches)}) and layers ({target_cache_layers}) dont match"
