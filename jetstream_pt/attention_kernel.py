@@ -364,6 +364,14 @@ def ragged_mqa_reference(
       return layer_ref[0], b_next, i_next, 0
     return b_next, i_next, 0
 
+  def kv_scale_index_map(b, i, layer_ref, start_ref,
+        end_ref,
+        *_):
+    b_next, i_next = _compute_ragged_block_indices(b, i, end_ref)
+    if stacked:
+      return layer_ref[0], b_next, 0, i_next
+    return b_next, 0, i_next
+
   if stacked:
     kv_bp = (None, None, bk, head_dim)
     ks_bp = (None, None, 1, bk)
@@ -372,11 +380,11 @@ def ragged_mqa_reference(
     ks_bp = (None, 1, bk)
 
   in_specs = [
-        pl.BlockSpec(lambda b, i, *_: (b, 0, 0), (None, time, head_dim)),  # k
-        pl.BlockSpec(kv_index_map, kv_bp), # q
+        pl.BlockSpec(lambda b, i, *_: (b, 0, 0), (None, time, head_dim)),  # q 
+        pl.BlockSpec(kv_index_map, kv_bp), # k
         pl.BlockSpec(kv_index_map, kv_bp), # v
-        pl.BlockSpec(kv_index_map, ks_bp), # k_scaler
-        pl.BlockSpec(kv_index_map, ks_bp), # v_scaler
+        pl.BlockSpec(kv_scale_index_map, ks_bp), # k_scaler
+        pl.BlockSpec(kv_scale_index_map, ks_bp), # v_scaler
     ]
 
   inputs = (
@@ -412,6 +420,7 @@ def ragged_mqa_reference(
           grid=(batch_size, seq_len // bk),
       ),
       interpret=testing,
+      #debug=True,
       compiler_params={"dimension_semantics": ("parallel", "arbitrary")},
       out_shape=[
           q,
@@ -470,25 +479,36 @@ def ragged_mha(
   mask_value = DEFAULT_MASK_VALUE
   bk = min(bk, k.shape[-2])
   bq, hq, tq, dq = q.shape
+  dk = k.shape[-1]
   hkv = k.shape[-3]
   tk = k.shape[-2]
+
+  assert k.shape[-1] == q.shape[-1]
+  assert k.shape[-4] == q.shape[-4]
+
   rep = hq // hkv
   if rep > 1:
     q = q.reshape(bq, hkv, rep, tq, dq).reshape(bq, hkv, rep * tq, dq)
-  
+  stacked = True if k.ndim == 5 else False
+
   replicated_in_axes = 7
   if k_scaler is None:
     quantized = False
     if k.ndim == 5:
-      kv_scale_shape = (1, 1, 1, tk)
+      kv_scale_shape = (k.shape[0], bq, 1, tk)
     else:
-      kv_scale_shape = (1, 1, tk)
+      kv_scale_shape = (bq, 1, tk)
     k_scale = jnp.ones(kv_scale_shape, dtype=jnp.bfloat16)
     v_scale = jnp.ones(kv_scale_shape, dtype=jnp.bfloat16)
   else:
     quantized = True
     k_scale = jnp.squeeze(k_scaler, -1)
     v_scale = jnp.squeeze(v_scaler, -1)
+
+  if stacked:
+      assert k_scale.shape == (k.shape[0], bq, 1, tk)
+  else:
+      assert k_scale.shape == (bq, 1, tk)
 
   replicated_inputs = (
       ragged_batch_index,

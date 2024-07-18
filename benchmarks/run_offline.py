@@ -52,14 +52,18 @@ def run_prefill_time(engine, params, decode_state, seqlen):
 
   nums = 5
   start = time.perf_counter()
-  for i in range(nums):
-    prefill_result, _ = engine.prefill(
-        params=params, padded_tokens=tokens, true_length=true_length
-    )
-    decode_state = engine.insert(
-        prefill_result, decode_state, slot=jnp.int32(i)
-    )
-  jax.block_until_ready(decode_state)
+  if FLAGS.profiling_prefill:
+    for i in range(nums):
+      if i == nums - 1:
+          jax.profiler.start_trace(FLAGS.profiling_output)
+      prefill_result = engine.prefill(
+          params=params, padded_tokens=tokens, true_length=true_length
+      )
+      decode_state = engine.insert(
+          prefill_result, decode_state, slot=jnp.int32(i)
+      )
+    jax.block_until_ready(decode_state)
+    jax.profiler.stop_trace()
   end = time.perf_counter()
   return (end - start) / nums, decode_state
 
