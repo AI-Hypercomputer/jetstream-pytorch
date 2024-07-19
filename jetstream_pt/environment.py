@@ -92,7 +92,7 @@ class JetEngineEnvironmentData:
   block_size: int = 512
 
   # Starting position
-  starting_position: int = 512
+  starting_position: int = 0
 
   # Ring buffer
   ring_buffer: bool = True

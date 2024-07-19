@@ -368,18 +368,12 @@ def apply_rotary_emb(
 def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
   """torch.repeat_interleave(x, dim=2, repeats=n_rep)."""
 
-  bs, n_kv_heads, slen, head_dim = (
-      x.shape[-4],
-      x.shape[-3],
-      x.shape[-2],
-      x.shape[-1],
-  )
-  if x.ndim == 5:
-    stacked = True
-  else:
-    stacked = False
+  *_, bs, n_kv_heads, slen, head_dim = x.shape
+  stacked = x.ndim == 5
+
   if n_rep == 1:
     return x
+
   if stacked:
     layer = x.shape[0]
     return (
@@ -832,8 +826,13 @@ class Attention(ModuleBase):
     xk = xk.transpose(1, 2)
     xv = xv.transpose(1, 2)
     xq = xq.transpose(1, 2)
+
     if mask.ndim == 2:
-      mask = mask[:, None, None, :]
+      if seqlen == 1:
+        mask = mask[:, None, None, :]
+      else:
+        mask = mask[None, None, :, :]
+
     # if cache is not None and cache.cache_k is not None:
     # print(f"xq {xq.shape} xk {xk.shape} cache shape {cache.cache_k.shape}")
     output = self.attention_kernel(

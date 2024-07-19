@@ -136,7 +136,7 @@ class GemmaAttention(nn.Module):
         if env.quant_config.enable_kv_quantization
         else layers.AttentionKernel
     )
-    self.attention_kernel = Kernel(env)
+    self.attention_kernel = Kernel(env, layer_id)
 
   def forward(
       self,

@@ -65,9 +65,13 @@ class ModelComponentTest(unittest.TestCase):
     freqs_cis = freqs_cis[start_pos : start_pos + seqlen]
     return freqs_cis
 
-  def _generate_mask(self, cache_length, pos, seqlen):
+  def _generate_mask(self, cache_length, pos, seqlen, ring_buffer=True):
     x = jnp.arange(0, cache_length)
-    cond = jnp.logical_and(x < pos, x >= pos - seqlen)
+    if ring_buffer:
+      cond = jnp.logical_and(x <= pos, x >= pos - seqlen)
+    else:
+      # Left aligned buffer we postpone the cache update
+      cond = jnp.logical_and(x < pos, x >= pos - seqlen)
     res = jnp.where(cond, 0, float("-inf"))
     return torchjax.to_torch(res)
 
@@ -205,6 +209,7 @@ class ModelComponentTest(unittest.TestCase):
           head_dim=head_dim,
           device="meta",
           env=env,
+          layer_id=0,
       )
 
       def load_hook(state_dict, prefix, *args):
@@ -230,8 +235,8 @@ class ModelComponentTest(unittest.TestCase):
       freqs_cis = self._make_freqs_cis(model_arg, seqlen, start_pos)
       mask = self._prefill_mask(seqlen, start_pos)
       kv_write_indexes = torch.arange(0, seqlen)
-      cache_k = torch.zeros((batch, seqlen, num_heads, head_dim))
-      cache_v = torch.zeros((batch, seqlen, num_heads, head_dim))
+      cache_k = torch.zeros((batch, seqlen, num_kv_heads, head_dim))
+      cache_v = torch.zeros((batch, seqlen, num_kv_heads, head_dim))
       inputs_orig = (x, freqs_cis, kv_write_indexes, (cache_k, cache_v), mask)
 
       expected_out = attention_orig(*inputs_orig)

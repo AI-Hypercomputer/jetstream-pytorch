@@ -145,7 +145,7 @@ class PyTorchEngine(engine_api.Engine):
             (self.env.batch_size, self.env.cache_sequence_length),
             float("-inf"),
             dtype=self.default_dtype,
-        ),
+        ),  # mask
     )
 
   # pylint: disable-next=all
