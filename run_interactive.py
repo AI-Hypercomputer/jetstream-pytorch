@@ -69,7 +69,7 @@ def main(argv):
     prefill_result, _ = engine.prefill(
         params=params, padded_tokens=tokens, true_length=true_length
     )
-      # pylint: disable-next=all
+    # pylint: disable-next=all
     decode_state = engine.insert(prefill_result, decode_state, slot=slot)
     if profiling_prefill:
       jax.profiler.stop_trace()
