@@ -42,7 +42,11 @@ def main(argv):
   max_output_length = 1024
 
   profiling_output = FLAGS.profiling_output
-  profiling_prefill = FLAGS.profiling_prefill and profiling_output is not None and profiling_output != ""
+  profiling_prefill = (
+      FLAGS.profiling_prefill
+      and profiling_output is not None
+      and profiling_output != ""
+  )
 
   if profiling_prefill:
     jax.profiler.start_trace(profiling_output)
@@ -82,7 +86,7 @@ def main(argv):
         jax.profiler.start_trace(profiling_output)
       decode_state, result_tokens = engine.generate(params, decode_state)
       result_tokens = result_tokens.convert_to_numpy()
-      
+
       if profiling_output:
         jax.profiler.stop_trace()
       output, complete = token_utils.process_result_tokens(
