@@ -139,7 +139,8 @@ class WeightOnlyPerChannelQuantizedLinear(torch.nn.Module):
       if not self.quantize_activation:
         result = F.linear(inputs, self.weight)
       else:
-        # We have to call jax because we need to do dot(int8, int8)->int32.
+        # We have to call jax because we need to specify the output dtype of dot
+        # dot(int8, int8)->bf16.
         # This semantic cannot be represented in torch. The inferred output dtype
         # will be int8 in torch, causing the dot result to overflow.
         result = torchjax.call_jax(
