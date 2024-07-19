@@ -86,31 +86,31 @@ flags.DEFINE_integer(
 )
 flags.DEFINE_bool(
     "ring_buffer",
-    False,
+    True,
     "Whether to enable ring buffer",
     required=False,
 )
 flags.DEFINE_bool(
     "flash_attention",
-    True,
+    False,
     "Whether to enable flas attention. Only takes effect at test mode",
     required=False,
 )
 flags.DEFINE_bool(
     "generate_cache_stacked",
-    True,
+    False,
     "Whether to stack the generate cache to the layer dimension. Only takes effect at test mode",
     required=False,
 )
 flags.DEFINE_bool(
     "new_cache_stacked",
-    True,
+    False,
     "Whether to stack the generate cache to the layer dimension. Only takes effect at test mode",
     required=False,
 )
 flags.DEFINE_bool(
     "lazy_cache_update",
-    True,
+    False,
     "Whether to update the cache during attention or delayed until all the layers are done. Only takes effect at test mode",
     required=False,
 )
