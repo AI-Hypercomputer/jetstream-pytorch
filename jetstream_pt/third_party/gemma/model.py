@@ -342,7 +342,7 @@ class GemmaModel(nn.Module):
     self.env = env
 
     self.layers = nn.ModuleList()
-    for layer_id, _ in enumerate(range(config.num_hidden_layers)):
+    for layer_id in range(config.num_hidden_layers):
       self.layers.append(GemmaDecoderLayer(config, env, layer_id))
     self.norm = RMSNorm(
         config.hidden_size, eps=config.rms_norm_eps, device=config.device

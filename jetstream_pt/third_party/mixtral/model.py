@@ -39,7 +39,7 @@ class Transformer(nn.Module):
     )
     self.layers = nn.ModuleList(
         TransformerBlock(config, env, layer_id)
-        for layer_id, _ in enumerate(range(config.n_layer))
+        for layer_id in range(config.n_layer)
     )
     self.norm = RMSNorm(config.dim, eps=config.norm_eps)
     LinearLayer = get_quantized_linear_layer(env.quant_config)
