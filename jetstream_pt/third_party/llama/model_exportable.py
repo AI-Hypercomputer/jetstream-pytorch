@@ -261,14 +261,14 @@ class Transformer(ModuleBase):
 
     end = None if start is None else (start + input_pos) % self.env.cache_len
     # For stacked case, cannot get cache inside the loop which will cause cache copy
-    for layer in range(self.layers):
+    for layer_id, layer in enumerate(self.layers):
       if caches[0].stacked:
         cache = caches[0]
       else:
-        cache = caches[layer]
+        cache = caches[layer_id]
       # else:  # For stacked case, there is only 1 yer of kv cache
 
-      with jax.named_scope("TransformerBlock_Layer_" + str(layer)):
+      with jax.named_scope("TransformerBlock_Layer_" + str(layer_id)):
         h = layer(
             h,
             freqs_cis,
