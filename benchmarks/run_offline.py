@@ -31,10 +31,8 @@ logging.getLogger().setLevel(logging.ERROR)
 
 flags.DEFINE_string("sharegpt_path", "", "path to sharegpt json file")
 
-profiler_started = False
 
-
-def run_prefill_time(engine, params, decode_state, seqlen):
+def run_prefill_time(engine, params, decode_state, seqlen, profiler_started):
   """Run prefill and measure time."""
   metadata = engine.get_tokenizer()
   tokenizer = engine.build_tokenizer(metadata)
@@ -93,9 +91,10 @@ def main(argv):
   prefill_times = {}
 
   decode_state = engine.init_decode_state()
+  profiler_started = False
   for batch, _ in MAXTEXT_PREFILL.items():
     runtime, decode_state = run_prefill_time(
-        engine, params, decode_state, batch
+        engine, params, decode_state, batch, profiler_started
     )
     prefill_times[batch] = runtime
 

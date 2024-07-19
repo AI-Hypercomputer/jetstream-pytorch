@@ -497,7 +497,6 @@ def ragged_mha(
   mask_value = DEFAULT_MASK_VALUE
   bk = min(bk, k.shape[-2])
   bq, hq, tq, dq = q.shape
-  dk = k.shape[-1]
   hkv = k.shape[-3]
   tk = k.shape[-2]
 
@@ -507,7 +506,7 @@ def ragged_mha(
   rep = hq // hkv
   if rep > 1:
     q = q.reshape(bq, hkv, rep, tq, dq).reshape(bq, hkv, rep * tq, dq)
-  stacked = True if k.ndim == 5 else False
+  stacked = k.ndim == 5
 
   replicated_in_axes = 7
   if k_scaler is None:
@@ -596,7 +595,7 @@ def flash_attention(
     mask=None,
     normalize_var=True,
 ):
-  mask_value: float = DEFAULT_MASK_VALUE
+  """Flash attention kernel."""
   if keys.ndim == 5:
     keys = keys[layer]
     values = values[layer]
@@ -611,7 +610,6 @@ def flash_attention(
     logits = logits / math.sqrt(keys.shape[-1])  # Align with meta llama
   # Quantized
   if k_scaler is not None:
-    bs, hs, ls, ds = k_scaler.shape
     logits = logits * k_scaler.reshape(
         k_scaler.shape[-4], 1, 1, k_scaler.shape[-2]
     )

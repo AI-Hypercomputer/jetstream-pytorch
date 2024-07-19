@@ -111,7 +111,8 @@ flags.DEFINE_bool(
 flags.DEFINE_bool(
     "lazy_cache_update",
     False,
-    "Whether to update the cache during attention or delayed until all the layers are done. Only takes effect at test mode",
+    "Whether to update the cache during attention or delayed until all the layers are done. "
+    "Only takes effect at test mode",
     required=False,
 )
 flags.DEFINE_float(
