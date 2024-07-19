@@ -262,7 +262,7 @@ def ragged_mqa_kernel_reference(
     normalize_var: bool,
     quantized: bool,
 ):
-  """Pallas kernel for flash attention."""
+  """Pallas kernel for ragged attention."""
   b, i = pl.program_id(0), pl.program_id(1)
   del layer_ref
 
