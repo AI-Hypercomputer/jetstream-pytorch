@@ -652,10 +652,6 @@ class PyTorchEngine(engine_api.Engine):
       mask = update_mask()
 
     next_token = self._sampling(logits, self.env.batch_size)
-    # print(f"current input pos: {decode_state.input_pos} and generated token is {next_token}")
-    # # for layer, (k,v) in enumerate(new_caches[0]):
-    # data = new_caches[0][0] * new_scales[0][0] if self.env.quant_config.enable_kv_quantization else new_caches[0][0]
-    # print(f"layer 0, scaled back k is {data}")
     if self.env.ring_buffer:
       input_pos = decode_state.input_pos + 1
       lens = decode_state.lens + 1
@@ -698,11 +694,6 @@ class PyTorchEngine(engine_api.Engine):
         input_pos,
         mask,
     )
-    # print(
-    #     "new_pos",
-    #     (decode_state.current_position + 1) % self.env.cache_sequence_length,
-    # )
-    # print(f"new_token: {jnp.squeeze(next_token)}")
     return new_decode_state, result_tokens
 
   # pylint: disable-next=all
