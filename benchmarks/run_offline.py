@@ -33,6 +33,7 @@ flags.DEFINE_string("sharegpt_path", "", "path to sharegpt json file")
 
 profiler_started = False
 
+
 def run_prefill_time(engine, params, decode_state, seqlen):
   """Run prefill and measure time."""
   metadata = engine.get_tokenizer()
@@ -55,9 +56,9 @@ def run_prefill_time(engine, params, decode_state, seqlen):
   start = time.perf_counter()
   for i in range(nums):
     if i == nums - 1 and FLAGS.profiling_prefill:
-        jax.profiler.start_trace(FLAGS.profiling_output)
-        profiler_started = True
-  
+      jax.profiler.start_trace(FLAGS.profiling_output)
+      profiler_started = True
+
     prefill_result, _ = engine.prefill(
         params=params, padded_tokens=tokens, true_length=true_length
     )
