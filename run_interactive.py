@@ -70,7 +70,7 @@ def main(argv):
     # pylint: disable-next=all
     if profiling_prefill:
       jax.profiler.start_trace(profiling_output)
-    prefill_result = engine.prefill(
+    prefill_result, _ = engine.prefill(
         params=params, padded_tokens=tokens, true_length=true_length
     )
     # pylint: disable-next=all

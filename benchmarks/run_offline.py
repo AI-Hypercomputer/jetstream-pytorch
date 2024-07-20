@@ -109,7 +109,7 @@ def main(argv):
 
   profiling_output = FLAGS.profiling_output
   print("======= decode starting ===")
-  
+
   dec_times = []
   for i in range(10):
     if profiling_output and i == 7 and not profiler_started:
