@@ -38,7 +38,8 @@ class Transformer(nn.Module):
         config.vocab_size, config.dim, device=config.device
     )
     self.layers = nn.ModuleList(
-        TransformerBlock(config, env) for _ in range(config.n_layer)
+        TransformerBlock(config, env, layer_id)
+        for layer_id in range(config.n_layer)
     )
     self.norm = RMSNorm(config.dim, eps=config.norm_eps)
     LinearLayer = get_quantized_linear_layer(env.quant_config)
@@ -142,7 +143,7 @@ class Transformer(nn.Module):
 
 class TransformerBlock(nn.Module):
 
-  def __init__(self, config: ModelArgs, env) -> None:
+  def __init__(self, config: ModelArgs, env, layer_id) -> None:
     super().__init__()
     self.attention = Attention(
         config.n_head,
@@ -151,6 +152,7 @@ class TransformerBlock(nn.Module):
         config.dim,
         env=env,
         device=config.device,
+        layer_id=layer_id,
     )
     self.block_sparse_moe = MOEFeedForward(config, config.device, env)
     self.ffn_norm = RMSNorm(config.dim, config.norm_eps)

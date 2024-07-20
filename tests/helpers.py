@@ -6,7 +6,7 @@ from jetstream_pt.third_party.mixtral import config as mixtral_config
 from jetstream_pt import environment
 
 
-def make_env_tiny(bf16_enable=True):
+def make_env_tiny(bf16_enable=True, env_data_update_fn=lambda _: None):
   torch_dtype = torch.bfloat16 if bf16_enable else torch.float32
   torch.set_default_dtype(torch_dtype)
   jax.config.update("jax_dynamic_shapes", False)
@@ -26,6 +26,8 @@ def make_env_tiny(bf16_enable=True):
       environment_data.cache_sequence_length,
       config.dim // config.n_heads,
   )
+  environment_data.testing = True
+  env_data_update_fn(environment_data)
   env = environment.JetEngineEnvironment(environment_data)
   env.apply_sharding = lambda *args, **kwargs: None  # don't shard on cpu
   return env, config

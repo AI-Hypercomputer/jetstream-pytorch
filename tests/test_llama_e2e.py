@@ -23,15 +23,16 @@ import torch
 import torch_xla2
 from torch.utils import _pytree as pytree
 
-
 from jetstream_pt.engine import PyTorchEngine
 from jetstream_pt.third_party.llama import model_exportable, model_args
 from jetstream_pt.third_party.llama.generation_original import LlamaOriginal
 from jetstream_pt import environment
 from tests import helpers
+from jetstream_pt import torchjax
+from absl.testing import parameterized
 
 
-class LlamaE2ETest(unittest.TestCase):
+class LlamaE2ETest(parameterized.TestCase):
   """This test class includes all E2E test for llama2"""
 
   def _from_torch(self, tree):
@@ -187,6 +188,9 @@ class LlamaE2ETest(unittest.TestCase):
 
     model_ours = model_exportable.Transformer(model_arg, env)
 
+    for k, v in model_ours.state_dict().items():
+      if "scale" in k:
+        state_dict[k] = helpers.to_xla_tensor(v)
     engine = PyTorchEngine(pt_model=model_ours, env=env)
 
     params = self._from_torch(state_dict)
@@ -230,6 +234,58 @@ class LlamaE2ETest(unittest.TestCase):
     print(f"---------> {jax.devices()}")
 
     env, model_arg = helpers.make_env_tiny(bf16_enable=True)
+    out_tokens, expected_output_tokens = self._llama_e2e(env, model_arg)
+    self.assertNotEqual(out_tokens, expected_output_tokens)
+
+  @parameterized.named_parameters(
+      ("ring_buffer_f32", True, False, False),
+      ("left_aligned_f32", False, False, False),
+  )
+  def test_llama_e2e_result_verification(
+      self, ring_buffer, quantized, bf16_enabled
+  ):
+    """end to end jetstream llama test with float32"""
+    jax.config.update("jax_platform_name", "cpu")
+    print(f"---------> {jax.devices()}")
+
+    def update_env_data(env_data):
+      env_data.ring_buffer = ring_buffer
+      env_data.ragged_mha = not ring_buffer
+      env_data.flash_attention = not ring_buffer
+      env_data.generate_cache_stacked = not ring_buffer
+      env_data.new_cache_stacked = not ring_buffer
+      env_data.lazy_cache_update = not ring_buffer
+      env_data.ragged_mha = not ring_buffer
+      env_data.quant_config.enable_kv_quantization = quantized
+
+    env, model_arg = helpers.make_env_tiny(bf16_enabled, update_env_data)
+    out_tokens, expected_output_tokens = self._llama_e2e(env, model_arg)
+    self.assertEqual(out_tokens, expected_output_tokens)
+
+  @parameterized.named_parameters(
+      ("ring_buffer_int8", True, True, True),
+      ("ring_buffer_bf16", True, False, True),
+      ("left_aligned_int8", False, True, True),
+      ("left_aligned_bf16", False, False, True),
+  )
+  def test_llama_e2e_no_result_verification(
+      self, ring_buffer, quantized, bf16_enabled
+  ):
+    """end to end jetstream llama test with float32"""
+    jax.config.update("jax_platform_name", "cpu")
+    print(f"---------> {jax.devices()}")
+
+    def update_env_data(env_data):
+      env_data.ring_buffer = ring_buffer
+      env_data.ragged_mha = not ring_buffer
+      env_data.flash_attention = not ring_buffer
+      env_data.generate_cache_stacked = not ring_buffer
+      env_data.new_cache_stacked = not ring_buffer
+      env_data.lazy_cache_update = not ring_buffer
+      env_data.ragged_mha = not ring_buffer
+      env_data.quant_config.enable_kv_quantization = quantized
+
+    env, model_arg = helpers.make_env_tiny(bf16_enabled, update_env_data)
     out_tokens, expected_output_tokens = self._llama_e2e(env, model_arg)
     self.assertNotEqual(out_tokens, expected_output_tokens)
 
