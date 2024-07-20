@@ -53,7 +53,7 @@ def run_prefill_time(engine, params, decode_state, seqlen, profiler_started):
   nums = 5
   start = time.perf_counter()
   for i in range(nums):
-    if i == nums - 1 and FLAGS.profiling_prefill:
+    if i == nums - 1 and FLAGS.profiling_prefill and not profiler_started:
       jax.profiler.start_trace(FLAGS.profiling_output)
       profiler_started = True
 
@@ -66,7 +66,7 @@ def run_prefill_time(engine, params, decode_state, seqlen, profiler_started):
   jax.block_until_ready(decode_state)
 
   end = time.perf_counter()
-  return (end - start) / nums, decode_state
+  return (end - start) / nums, decode_state, profiler_started
 
 
 MAXTEXT_PREFILL = {
@@ -93,7 +93,7 @@ def main(argv):
   decode_state = engine.init_decode_state()
   profiler_started = False
   for batch, _ in MAXTEXT_PREFILL.items():
-    runtime, decode_state = run_prefill_time(
+    runtime, decode_state, profiler_started = run_prefill_time(
         engine, params, decode_state, batch, profiler_started
     )
     prefill_times[batch] = runtime
@@ -109,6 +109,7 @@ def main(argv):
 
   profiling_output = FLAGS.profiling_output
   print("======= decode starting ===")
+  
   dec_times = []
   for i in range(10):
     if profiling_output and i == 7 and not profiler_started:
