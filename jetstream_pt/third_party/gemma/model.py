@@ -73,6 +73,7 @@ class GemmaAttention(nn.Module):
       head_dim: int,
       device,
       env,
+      layer_id,
   ):
     super().__init__()
 
@@ -135,7 +136,7 @@ class GemmaAttention(nn.Module):
         if env.quant_config.enable_kv_quantization
         else layers.AttentionKernel
     )
-    self.attention_kernel = Kernel(env)
+    self.attention_kernel = Kernel(env, layer_id)
 
   def forward(
       self,
@@ -272,7 +273,7 @@ class GemmaMLP(nn.Module):
 
 class GemmaDecoderLayer(nn.Module):
 
-  def __init__(self, config: gemma_config.GemmaConfig, env):
+  def __init__(self, config: gemma_config.GemmaConfig, env, layer_id):
     super().__init__()
     self.self_attn = GemmaAttention(
         config.hidden_size,
@@ -281,6 +282,7 @@ class GemmaDecoderLayer(nn.Module):
         config.head_dim,
         config.device,
         env,
+        layer_id,
     )
 
     self.mlp = GemmaMLP(
@@ -340,8 +342,8 @@ class GemmaModel(nn.Module):
     self.env = env
 
     self.layers = nn.ModuleList()
-    for _ in range(config.num_hidden_layers):
-      self.layers.append(GemmaDecoderLayer(config, env))
+    for layer_id in range(config.num_hidden_layers):
+      self.layers.append(GemmaDecoderLayer(config, env, layer_id))
     self.norm = RMSNorm(
         config.hidden_size, eps=config.rms_norm_eps, device=config.device
     )

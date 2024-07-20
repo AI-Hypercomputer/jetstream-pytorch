@@ -18,6 +18,7 @@ import dataclasses
 import yaml
 
 import jax
+import jax.numpy as jnp
 import jax.sharding as jsharding
 from jax.experimental import mesh_utils
 import torch_xla2
@@ -98,11 +99,18 @@ class JetEngineEnvironmentData:
   block_size: int = 512
 
   # Starting position
-  starting_position: int = 512
+  starting_position: int = 0
 
   # Ring buffer
   ring_buffer: bool = True
 
+  flash_attention: bool = False
+
+  generate_cache_stacked: bool = False
+
+  new_cache_stacked: bool = False
+
+  lazy_cache_update: bool = False
   # Variables used in token sampling
   # sampling algorithm to use ("greedy", "weighted", "neucleus", "topk")
   sampling_algorithm: str = "greedy"
@@ -116,6 +124,10 @@ class JetEngineEnvironmentData:
   # temperature parameter for scaling probability
   temperature: float = 1.0
 
+  testing: bool = False
+
+  testing_seed: int = 0
+
 
 # pylint: disable-next=all
 class JetEngineEnvironment:
@@ -126,10 +138,34 @@ class JetEngineEnvironment:
     self.batch_size = self._data.batch_size
     self.seq_len = self._data.max_input_sequence_length
     self.cache_len = self._data.cache_sequence_length
-    self.ragged_mha = self._data.ragged_mha
     self.block_size = self._data.block_size
     self.starting_position = self._data.starting_position
+    self.num_layers = self._data.num_layers
+    self.testing = self._data.testing
+    self.testing_seed = self._data.testing_seed
     self.ring_buffer = self._data.ring_buffer
+
+    if not self.ring_buffer:
+      self.lazy_cache_update = True
+      self.ragged_mha = True
+      self.flash_attention = True
+      self.generate_cache_stacked = True
+      self.new_cache_stacked = True
+
+    if self.testing:
+      self.lazy_cache_update = self._data.lazy_cache_update
+      self.ragged_mha = self._data.ragged_mha
+      self.flash_attention = self._data.flash_attention
+      self.generate_cache_stacked = self._data.generate_cache_stacked
+      self.new_cache_stacked = self._data.new_cache_stacked
+
+    self.default_type = jnp.bfloat16 if self._data.bf16_enable else jnp.float32
+
+    if self.generate_cache_stacked:
+      self.cache_shape = (self.num_layers, *self._data.cache_shape)
+    else:
+      self.cache_shape = self._data.cache_shape
+
     P = jax.sharding.PartitionSpec
 
     num_of_partitions = jax.device_count()
@@ -143,19 +179,29 @@ class JetEngineEnvironment:
     self.x_sharding = jsharding.NamedSharding(self.mesh, P("x"))
     self.replicated = jsharding.NamedSharding(self.mesh, P())
 
-    if data.shard_on_batch:
-      cache_sharding_axis = 0
-    else:
-      cache_sharding_axis = self.attention_kv_axis_names.index(
-          self.kv_cache_shard_axis
+    if self.generate_cache_stacked:
+      self.attention_kv_axis_names = (
+          "layer",
+          "batch",
+          "num_attn_heads",
+          "sequence_length",
+          "head_dim",
       )
+    if data.shard_on_batch:
+      self.kv_cache_shard_axis = "batch"
+    else:
+      self.kv_cache_shard_axis = "num_attn_heads"
 
-    if self.cache_shape[cache_sharding_axis] == 1:
+    self.cache_sharding_axis = self.attention_kv_axis_names.index(
+        self.kv_cache_shard_axis
+    )
+
+    if self.cache_shape[self.cache_sharding_axis] == 1:
       # cannot shard on an axis that is 1
       # default to last
-      cache_sharding_axis = len(self.cache_shape) - 1
+      self.cache_sharding_axis = len(self.cache_shape) - 1
 
-    self.cache_sharding = self.sharding_by_axis(cache_sharding_axis)
+    self.cache_sharding = self.sharding_by_axis(self.cache_sharding_axis)
     self._load_sharding_config()
 
   def _load_sharding_config(self):
@@ -201,19 +247,20 @@ class JetEngineEnvironment:
   def make_caches_generate(self):
     """Create kv caches for inference generation"""
     caches = []
-    shape = self._data.cache_shape
 
-    for _ in range(self.num_layers):
+    layered_cache_count = 1 if self.generate_cache_stacked else self.num_layers
+
+    for _ in range(layered_cache_count):
       if self._data.quant_config.enable_kv_quantization:
         caches.append(
             cache_manager.Int8KVCacheGenerate.empty(
-                shape, self.cache_sharding, self.bf16_enable, env=self
+                self.cache_shape, self.cache_sharding, env=self
             )
         )
       else:
         caches.append(
             cache_manager.KVCacheGenerate.empty(
-                shape, self.cache_sharding, self.bf16_enable, env=self
+                self.cache_shape, self.cache_sharding, env=self
             )
         )
     return caches

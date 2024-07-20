@@ -90,6 +90,31 @@ flags.DEFINE_bool(
     "Whether to enable ring buffer",
     required=False,
 )
+flags.DEFINE_bool(
+    "flash_attention",
+    False,
+    "Whether to enable flas attention. Only takes effect at test mode",
+    required=False,
+)
+flags.DEFINE_bool(
+    "generate_cache_stacked",
+    False,
+    "Whether to stack the generate cache to the layer dimension. Only takes effect at test mode",
+    required=False,
+)
+flags.DEFINE_bool(
+    "new_cache_stacked",
+    False,
+    "Whether to stack the generate cache to the layer dimension. Only takes effect at test mode",
+    required=False,
+)
+flags.DEFINE_bool(
+    "lazy_cache_update",
+    False,
+    "Whether to update the cache during attention or delayed until all the layers are done. "
+    "Only takes effect at test mode",
+    required=False,
+)
 flags.DEFINE_float(
     "temperature",
     1.0,
@@ -184,6 +209,10 @@ def create_engine_from_config_flags():
       nucleus_topp=FLAGS.nucleus_topp,
       topk=FLAGS.topk,
       ring_buffer=FLAGS.ring_buffer,
+      flash_attention=FLAGS.flash_attention,
+      generate_cache_stacked=FLAGS.generate_cache_stacked,
+      new_cache_stacked=FLAGS.new_cache_stacked,
+      lazy_cache_update=FLAGS.lazy_cache_update,
   )
 
   print("Initialize engine", time.perf_counter() - start)
