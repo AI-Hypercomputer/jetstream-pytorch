@@ -713,6 +713,7 @@ class Int8KVAttentionKernel:
 
       return attn_out
 
+
 class Attention(ModuleBase):
   """Attention module."""
 
