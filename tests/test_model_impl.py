@@ -65,9 +65,13 @@ class ModelComponentTest(unittest.TestCase):
     freqs_cis = freqs_cis[start_pos : start_pos + seqlen]
     return freqs_cis
 
-  def _generate_mask(self, cache_length, pos, seqlen):
+  def _generate_mask(self, cache_length, pos, seqlen, ring_buffer=True):
     x = jnp.arange(0, cache_length)
-    cond = jnp.logical_and(x <= pos, x >= pos - seqlen)
+    if ring_buffer:
+      cond = jnp.logical_and(x <= pos, x >= pos - seqlen)
+    else:
+      # Left aligned buffer we postpone the cache update
+      cond = jnp.logical_and(x < pos, x >= pos - seqlen)
     res = jnp.where(cond, 0, float("-inf"))
     return torchjax.to_torch(res)
 
@@ -91,6 +95,7 @@ class ModelComponentTest(unittest.TestCase):
 
   # pylint: disable-next=all
   def test_attention(self):
+    torch.manual_seed(0)
     env, model_arg = helpers.make_env_tiny(False)
 
     attention_orig = model_original.Attention(model_arg)
@@ -101,6 +106,7 @@ class ModelComponentTest(unittest.TestCase):
         hidden_size=model_arg.dim,
         device="cpu",
         env=env,
+        layer_id=0,
     )
 
     seqlen = 32
@@ -136,11 +142,11 @@ class ModelComponentTest(unittest.TestCase):
 
     # insert prefilled cache entry
     cache_decode.cache_k._elem = cache_decode.cache_k._elem.at[
-        :, :, :pos, :
+        ..., :pos, :
     ].set(cache.cache_k._elem)
 
     cache_decode.cache_v._elem = cache_decode.cache_v._elem.at[
-        :, :, :pos, :
+        ..., :pos, :
     ].set(cache.cache_v._elem)
 
     # self._compare_cache(attention_orig.cache_k, cache_decode.cache_k)
@@ -154,7 +160,7 @@ class ModelComponentTest(unittest.TestCase):
         None,  # mask is none for decode
     )
     expected_out = attention_orig(*inputs_orig2)
-    cache_decode.pos = [pos]  # next position to update
+    cache_decode.input_pos = [pos]  # next position to update
     mask = self._generate_mask(env.cache_sequence_length, pos, seqlen)
     mask = mask.reshape(1, 1, 1, -1)  # seq dim is the last one
     freqs_cis = freqs_cis.reshape(batch, 1, -1)
@@ -203,6 +209,7 @@ class ModelComponentTest(unittest.TestCase):
           head_dim=head_dim,
           device="meta",
           env=env,
+          layer_id=0,
       )
 
       def load_hook(state_dict, prefix, *args):
@@ -228,8 +235,8 @@ class ModelComponentTest(unittest.TestCase):
       freqs_cis = self._make_freqs_cis(model_arg, seqlen, start_pos)
       mask = self._prefill_mask(seqlen, start_pos)
       kv_write_indexes = torch.arange(0, seqlen)
-      cache_k = torch.zeros((batch, seqlen, num_heads, head_dim))
-      cache_v = torch.zeros((batch, seqlen, num_heads, head_dim))
+      cache_k = torch.zeros((batch, seqlen, num_kv_heads, head_dim))
+      cache_v = torch.zeros((batch, seqlen, num_kv_heads, head_dim))
       inputs_orig = (x, freqs_cis, kv_write_indexes, (cache_k, cache_v), mask)
 
       expected_out = attention_orig(*inputs_orig)
@@ -300,10 +307,10 @@ class ModelComponentTest(unittest.TestCase):
 
     # insert prefilled cache entry
     cache_decode.cache_k._elem = cache_decode.cache_k._elem.at[
-        :, :, :pos, :
+        ..., :pos, :
     ].set(cache.cache_k._elem)
     cache_decode.cache_v._elem = cache_decode.cache_v._elem.at[
-        :, :, :pos, :
+        ..., :pos, :
     ].set(cache.cache_v._elem)
 
     # Now do one with decode
@@ -316,7 +323,7 @@ class ModelComponentTest(unittest.TestCase):
         None,  # mask is none for decode
     )
     expected_out = block_orig(*inputs_orig2)
-    cache_decode.pos = [pos]  # next position to update
+    cache_decode.input_pos = [pos]  # next position to update
     mask = self._generate_mask(env.cache_sequence_length, pos, seqlen)
     mask = mask.reshape(1, 1, 1, -1)  # seq dim is the last one
     freqs_cis = freqs_cis.reshape(batch, 1, -1)

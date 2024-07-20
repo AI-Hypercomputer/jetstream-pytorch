@@ -145,7 +145,7 @@ class PyTorchEngine(engine_api.Engine):
             (self.env.batch_size, self.env.cache_sequence_length),
             float("-inf"),
             dtype=self.default_dtype,
-        ),
+        ),  # mask
     )
 
   # pylint: disable-next=all
@@ -195,7 +195,10 @@ class PyTorchEngine(engine_api.Engine):
         # The mode is needed so that tensors created inside of
         # the model (such as via torch.ones etc) also have the right type
         res = torch.func.functional_call(self.pt_model, paramst, argst)
-    updated_caches = [c.state() for c in caches_obj]
+    updated_caches = []
+    for c in caches_obj:
+      c.finalize()
+      updated_caches.append(c.state())
     scales = []
     if self.env.quant_config.enable_kv_quantization:
       scales = [c.scalers() for c in caches_obj]
@@ -218,7 +221,8 @@ class PyTorchEngine(engine_api.Engine):
         dtype=self.default_dtype,
     )
     mask = jnp.triu(mask, k=1)
-    args = (tokens, input_indexes, caches, mask)
+    start = jnp.zeros((tokens.shape[0],), dtype=jnp.int32)
+    args = (tokens, input_indexes, caches, mask, start)
 
     paramst, argst = torchjax.to_torch((weights, args))
     with self._lock:
@@ -328,7 +332,7 @@ class PyTorchEngine(engine_api.Engine):
     tokens = decode_state.tokens.at[slot].set(prefix.token)
 
     x = jnp.arange(0, self.env.cache_sequence_length)
-    cond = jnp.logical_and(x <= current_pos, x >= pos)
+    cond = jnp.logical_and(x < current_pos, x >= pos)
     mask_insert = jnp.where(cond, 0, float("-inf"))
     mask = decode_state.mask.at[slot].set(mask_insert)
     start = decode_state.start.at[slot].set(
@@ -338,31 +342,48 @@ class PyTorchEngine(engine_api.Engine):
     if not self.env.quant_config.enable_kv_quantization:
 
       @functools.partial(jax.jit, donate_argnums=(0, 1), inline=True)
-      def insert(cache, new_entry):
+      def insert(cache, new_entry, update_index):
         res = jax.lax.dynamic_update_slice(
             cache,
             new_entry,
-            [slot, 0, pos, 0],
+            update_index,
         )
         res = jax.lax.with_sharding_constraint(res, self.cache_sharding)
         return res
 
-      caches = [
-          (insert(k, newk), insert(v, newv))
-          for (k, v), (newk, newv) in zip(decode_state.caches, prefix.caches)
-      ]
+      if self.env.generate_cache_stacked:
+        caches = decode_state.caches
+        for idx, (newk, newv) in enumerate(prefix.caches):
+          update_index = [idx, slot, 0, pos, 0]
+          newk = jnp.expand_dims(newk, 0)
+          newv = jnp.expand_dims(newv, 0)
+          caches = [
+              (
+                  insert(caches[0][0], newk, update_index),
+                  insert(caches[0][1], newv, update_index),
+              )
+          ]
+      else:
+        update_index = [slot, 0, pos, 0]
+        caches = [
+            (insert(k, newk, update_index), insert(v, newv, update_index))
+            for (k, v), (newk, newv) in zip(decode_state.caches, prefix.caches)
+        ]
     else:
 
       @functools.partial(jax.jit, donate_argnums=(0, 1), inline=True)
-      def insert(cache, scaler, new_entry):
-        reduce_axis = (1, 3)
+      def insert(cache, scaler, new_entry, update_index):
+        reduce_axis = (-3, -1)
         vals, scales, _ = torchjax.call_torch(
             quantize.quantize_tensor, new_entry, reduce_axis
         )
+        if self.env.generate_cache_stacked:
+          vals = jnp.expand_dims(vals, 0)
+          scales = jnp.expand_dims(scales, 0)
         new_scaler = jax.lax.dynamic_update_slice(
             scaler,
             scales,
-            [slot, 0, pos, 0],
+            update_index,
         )
         new_scaler = jax.lax.with_sharding_constraint(
             new_scaler, self.replicated
@@ -370,19 +391,37 @@ class PyTorchEngine(engine_api.Engine):
         res = jax.lax.dynamic_update_slice(
             cache,
             vals,
-            [slot, 0, pos, 0],
+            update_index,
         )
         res = jax.lax.with_sharding_constraint(res, self.cache_sharding)
         return res, new_scaler
 
-      for (k, v), (kscaler, vscaler), (newk, newv) in zip(
-          decode_state.caches, decode_state.cache_scales, prefix.caches
-      ):
-        kcache, kscale = insert(k, kscaler, newk)
-        vcache, vscale = insert(v, vscaler, newv)
-        caches.append((kcache, vcache))
-        scales.append((kscale, vscale))
-
+      if self.env.generate_cache_stacked:
+        cache_k, k_scale = (
+            decode_state.caches[0][0],
+            decode_state.cache_scales[0][0],
+        )
+        cache_v, v_scale = (
+            decode_state.caches[0][1],
+            decode_state.cache_scales[0][1],
+        )
+        for idx, (newk, newv) in enumerate(prefix.caches):
+          update_index = [idx, slot, 0, pos, 0]
+          # newk = jnp.expand_dims(newk, 0)
+          # newv = jnp.expand_dims(newv, 0)
+          cache_k, k_scale = insert(cache_k, k_scale, newk, update_index)
+          cache_v, v_scale = insert(cache_v, v_scale, newv, update_index)
+        caches = [(cache_k, cache_v)]
+        scales = [(k_scale, v_scale)]
+      else:
+        update_index = [slot, 0, pos, 0]
+        for (k, v), (kscaler, vscaler), (newk, newv) in zip(
+            decode_state.caches, decode_state.cache_scales, prefix.caches
+        ):
+          kcache, kscale = insert(k, kscaler, newk, update_index)
+          vcache, vscale = insert(v, vscaler, newv, update_index)
+          caches.append((kcache, vcache))
+          scales.append((kscale, vscale))
     lens = decode_state.lens.at[slot].set(1)
     return DecodeState(
         tokens,
@@ -416,10 +455,10 @@ class PyTorchEngine(engine_api.Engine):
     cond = jax.lax.cond(
         decode_state.current_position > start_insert,
         lambda x, start_insert, current_position: jnp.logical_and(
-            x >= start_insert, x <= current_position
+            x >= start_insert, x < current_position
         ),
         lambda x, start_insert, current_position: jnp.logical_or(
-            x >= start_insert, x <= current_position
+            x >= start_insert, x < current_position
         ),
         x,
         start_insert,
@@ -494,11 +533,6 @@ class PyTorchEngine(engine_api.Engine):
       decode_state: DecodeState,
       slot: int,
   ) -> DecodeState:
-    # logging.info(
-    #     'Jet input prefix: %s, decode state before insert: %s',
-    #     prefix,
-    #     decode_state,
-    # )
     if self.env.ring_buffer:
       start_insert = decode_state.current_position - prefix.seq_len
       end_insert = start_insert + prefix.caches[0][0].shape[2]  # padded seclen
@@ -580,11 +614,9 @@ class PyTorchEngine(engine_api.Engine):
     pos = decode_state.current_position
     if self.env.ring_buffer:
       input_indexes = jnp.full((1,), pos)
-      mask = decode_state.mask.at[:, decode_state.current_position].set(0)
     else:
       input_indexes = decode_state.input_pos
-      batch = jnp.arange(self.env.batch_size)
-      mask = decode_state.mask.at[batch, decode_state.input_pos].set(0)
+
     ragged_batch_index, ragged_block_index = (
         self.precompute_ragged_block_indices(decode_state)
     )
@@ -592,6 +624,16 @@ class PyTorchEngine(engine_api.Engine):
         (-1)
     ), ragged_block_index.reshape((-1))
 
+    def update_mask():
+      if self.env.ring_buffer:
+        return decode_state.mask.at[:, decode_state.current_position].set(0)
+
+      batch = jnp.arange(self.env.batch_size)
+      return decode_state.mask.at[batch, decode_state.input_pos].set(0)
+
+    mask = decode_state.mask
+    if not self.env.lazy_cache_update:
+      mask = update_mask()
     logits, new_caches, new_scales = self._call_model_generate(
         params,
         decode_state.tokens,
@@ -604,6 +646,10 @@ class PyTorchEngine(engine_api.Engine):
         ragged_batch_index,
         ragged_block_index,
     )
+
+    if self.env.lazy_cache_update:
+      # fill mask later, now use flash attention
+      mask = update_mask()
 
     next_token = self._sampling(logits, self.env.batch_size)
     if self.env.ring_buffer:
@@ -648,11 +694,6 @@ class PyTorchEngine(engine_api.Engine):
         input_pos,
         mask,
     )
-    print(
-        "new_pos",
-        (decode_state.current_position + 1) % self.env.cache_sequence_length,
-    )
-    print(f"new_token: {jnp.squeeze(next_token)}")
     return new_decode_state, result_tokens
 
   # pylint: disable-next=all
@@ -832,6 +873,10 @@ def create_pytorch_engine(
     nucleus_topp=None,
     topk=None,
     ring_buffer=True,
+    flash_attention=False,
+    generate_cache_stacked=False,
+    new_cache_stacked=False,
+    lazy_cache_update=False,
 ) -> PyTorchEngine:
   """Returns: The pytorch engine."""
 
@@ -902,6 +947,10 @@ def create_pytorch_engine(
       nucleus_topp=nucleus_topp,
       topk=topk,
       ring_buffer=ring_buffer,
+      flash_attention=flash_attention,
+      generate_cache_stacked=generate_cache_stacked,
+      new_cache_stacked=new_cache_stacked,
+      lazy_cache_update=lazy_cache_update,
   )
 
   if shard_on_batch and sharding_config:
