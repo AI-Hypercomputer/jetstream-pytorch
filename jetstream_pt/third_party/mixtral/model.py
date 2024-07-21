@@ -248,13 +248,13 @@ class Int8ConditionalFeedForward(nn.Module):
       return self.forward_full(x, expert_indices)
 
   def forward_moe(self, x, expert_indices):
-    w1 = self.w1 * self.w1_scaler.unsqueeze(-1)
-    w2 = self.w2 * self.w2_scaler.unsqueeze(-1)
-    w3 = self.w3 * self.w3_scaler.unsqueeze(-1)
+    w1 = self.w1 * self.w1_scaler.unsqueeze(-1).to(torch.float32)
+    w2 = self.w2 * self.w2_scaler.unsqueeze(-1).to(torch.float32)
+    w3 = self.w3 * self.w3_scaler.unsqueeze(-1).to(torch.float32)
     return torchjax.call_jax(
         self.eval_gmm,
         x, w1, w2, w3, expert_indices
-    )
+    ).to(torch.bfloat16)
 
 
   def forward_full(self, x, expert_indices):

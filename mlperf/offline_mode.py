@@ -235,7 +235,6 @@ class SUT:
   @timed("flush_queries")
   def flush_queries(self):
     start = time.perf_counter()
-    jax.profiler.start_trace("/mnt/disks/hanq/jax_profile")
 
     resp = collections.defaultdict(list)
     def emit_token(id_, token):
@@ -275,7 +274,6 @@ class SUT:
         # no need to drop state for the last one
         self.offline_inf[group_idx].decode_state = None
         gc.collect()
-    jax.profiler.stop_trace()
 
     end = time.perf_counter()
 

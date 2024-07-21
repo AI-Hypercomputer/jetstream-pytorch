@@ -4,7 +4,7 @@ me=$(basename "$0")
 BASEDIR=mlperf
 USER_CONFIG=$BASEDIR/user.conf
 DATA_DISK_DIR=$BASEDIR/data
-TOTAL_SAMPLE_COUNT=900
+TOTAL_SAMPLE_COUNT=15000
 
 # HF model id
 TOKENIZER_PATH="mistralai/Mixtral-8x7B-Instruct-v0.1"
@@ -24,7 +24,7 @@ export JAX_COMPILATION_CACHE_DIR="/tmp/jax_cache2"
 export LIBTPU_INIT_ARGS
 
 
-DATASET_PATH=$BASEDIR/data/mixtral_1k_data.pkl
+DATASET_PATH=$BASEDIR/data/mixtral_15k_data.pkl
 
 pushd ..
 python -m mlperf.offline_mode \
