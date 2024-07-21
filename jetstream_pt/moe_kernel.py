@@ -7,16 +7,22 @@ preferred_dtype = jnp.dtype('float32')
 
 def gmm_auto_tile(lhs, rhs, group_sizes):
   m, k, n = lhs.shape[0], lhs.shape[1], rhs.shape[2]
-  tm, tk, tn = min(512, m), min(512, k), min(512, n)
+  tm = min(256, m)
+  tk = 256 if k == 1792 else (min(4096, k) )
+  tn = 256 if n == 1792 else (min(4096, n) )
   gmm_result = gmm(
-    lhs.astype(preferred_dtype), 
-    rhs.astype(preferred_dtype), 
+    lhs, #.astype(preferred_dtype), 
+    rhs, #.astype(preferred_dtype), 
     group_sizes, tiling=(tm, tk, tn), 
     preferred_element_type=preferred_dtype)
   return gmm_result.astype(lhs.dtype)
 
 
 def eval_gmm(x, w1, w2, w3, expert_indices):
+    x = x.astype(preferred_dtype)
+    w1 = w1.astype(preferred_dtype)
+    w2 = w2.astype(preferred_dtype)
+    w3 = w3.astype(preferred_dtype)
     def _histogram(input,  min_: int, max_: int):
         assert min_ <= max_, "min_ must be less than or equal to max_."
         def searchsorted(sorted_sequence, values_to_search):
@@ -48,7 +54,7 @@ def eval_gmm(x, w1, w2, w3, expert_indices):
       sgmm, 
       jnp.transpose(w2, (0, 2, 1)),
       group_sizes)
-    gmm2 = gmm2.astype(w1.dtype)
+    #gmm2 = gmm2.astype(w1.dtype)
     gmm2 = jax.lax.psum(gmm2, 'x')
     current_hidden_states = gmm2[hidden_states_reverse_order].reshape(-1, k, n)
     return current_hidden_states

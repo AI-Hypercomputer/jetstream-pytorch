@@ -332,9 +332,9 @@ def _count_by_bucket(dataset):
 
   counts = [
       # power of 2
-      2 ** math.ceil(math.log2(len(dataset[group1]))),
-      2 ** math.ceil(math.log2(len(dataset[~group1 & group2]))),
-      2 ** math.ceil(math.log2(len(dataset[~group1 & ~group2]))),
+      math.ceil(len(dataset[group1]) * mult),
+      math.ceil(len(dataset[~group1 & group2]) * mult),
+      math.ceil(len(dataset[~group1 & ~group2]) * mult),
   ]
   return counts
 

@@ -227,7 +227,7 @@ class Int8ConditionalFeedForward(nn.Module):
     self.register_buffer("w2_scaler", w2_scaler)
     self.register_buffer("w3_scaler", w3_scaler)
 
-    self.use_moe = False
+    self.use_moe = True 
     self.eval_gmm = shard_map(
       moe_kernel.eval_gmm,
       mesh=env.mesh,
@@ -242,7 +242,7 @@ class Int8ConditionalFeedForward(nn.Module):
       check_rep=False)
 
   def forward(self, x: Tensor, expert_indices: Tensor) -> Tensor:
-    if self.use_moe and x.shape[0] >= 32:  # min length
+    if self.use_moe and x.shape[0] >= 1024:  # min length
       return self.forward_moe(x, expert_indices)
     else:
       return self.forward_full(x, expert_indices)
