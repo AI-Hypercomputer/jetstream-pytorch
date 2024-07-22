@@ -70,13 +70,13 @@ def run_prefill_time(engine, params, decode_state, seqlen, profiler_started):
 
 
 MAXTEXT_PREFILL = {
-    16: 0,
     32: 0,
     64: 14.02,
     128: 18.29,
     256: 23.59,
- #   512: 35.28,
- #   1024: 60.28,
+    512: 35.28,
+    1024: 60.28,
+    2048: 60.28,
 }
 
 
@@ -93,6 +93,8 @@ def main(argv):
   decode_state = engine.init_decode_state()
   profiler_started = False
   for batch, _ in MAXTEXT_PREFILL.items():
+    if batch > FLAGS.max_cache_length:
+      continue
     runtime, decode_state, profiler_started = run_prefill_time(
         engine, params, decode_state, batch, profiler_started
     )

@@ -1,11 +1,14 @@
-CACHE_LENGTH=1280
-INPUT_SIZE=256
-OUTPUT_SIZE=140
-BATCH_SIZE=1024
+CACHE_LENGTH=$1
+BATCH_SIZE=$2
+INPUT_SIZE=1024
+OUTPUT_SIZE=1024
 CHECKPOINT_PATH=mlperf/data/mixtral-instruct-quantized/
 
 pushd ..
 python -m benchmarks.run_offline \
+  --lazy_cache_update=1 \
+  --ring_buffer=0 \
+  --use_gmm_threshold=2048 \
   --model_name=mixtral \
   --batch_size=$BATCH_SIZE \
   --max_cache_length=$CACHE_LENGTH \
@@ -18,3 +21,4 @@ python -m benchmarks.run_offline \
   --quantize_kv_cache=1 \
   --profiling_output=/mnt/disks/hanq/mixtral-profiles
 popd
+echo "batch was $2 cache was $1"
