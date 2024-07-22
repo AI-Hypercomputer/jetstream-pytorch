@@ -1,11 +1,14 @@
-CACHE_LENGTH=1280
-INPUT_SIZE=256
-OUTPUT_SIZE=140
-BATCH_SIZE=1024
+CACHE_LENGTH=3072
+INPUT_SIZE=2048
+OUTPUT_SIZE=1024
+BATCH_SIZE=256
 CHECKPOINT_PATH=mlperf/data/mixtral-instruct-quantized/
 
 pushd ..
 python -m benchmarks.run_offline \
+  --lazy_cache_update=1 \
+  --ring_buffer=0 \
+  --use_gmm_threshold=2048 \
   --model_name=mixtral \
   --batch_size=$BATCH_SIZE \
   --max_cache_length=$CACHE_LENGTH \

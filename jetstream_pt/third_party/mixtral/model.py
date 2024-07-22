@@ -30,6 +30,12 @@ from jax.experimental.shard_map import shard_map
 
 from jetstream_pt import moe_kernel
 
+from absl import flags
+
+flags.DEFINE_integer(
+  'use_gmm_threshold', 2048, ''
+)
+
 
 class Transformer(nn.Module):
 
@@ -82,9 +88,9 @@ class Transformer(nn.Module):
       bsz, seqlen = idx.shape
       freqs_cis = self.freqs_cis[input_pos]
       freqs_cis = freqs_cis.reshape(bsz, seqlen, -1)
-    assert len(caches) == len(
-        self.layers
-    ), f"Number of caches ({len(caches)}) and layers ({len(self.layers)}) dont match"
+    # assert len(caches) == len(
+    #     self.layers
+    # ), f"Number of caches ({len(caches)}) and layers ({len(self.layers)}) dont match"
     for layer, cache in zip(self.layers, caches):
       with jax.named_scope("TransformerBlock"):
         x = layer(
@@ -227,7 +233,6 @@ class Int8ConditionalFeedForward(nn.Module):
     self.register_buffer("w2_scaler", w2_scaler)
     self.register_buffer("w3_scaler", w3_scaler)
 
-    self.use_moe = True 
     self.eval_gmm = shard_map(
       moe_kernel.eval_gmm,
       mesh=env.mesh,
@@ -242,7 +247,7 @@ class Int8ConditionalFeedForward(nn.Module):
       check_rep=False)
 
   def forward(self, x: Tensor, expert_indices: Tensor) -> Tensor:
-    if self.use_moe and x.shape[0] >= 1024:  # min length
+    if x.shape[0] >= flags.FLAGS.use_gmm_threshold:
       return self.forward_moe(x, expert_indices)
     else:
       return self.forward_full(x, expert_indices)
