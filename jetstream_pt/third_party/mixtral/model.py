@@ -22,8 +22,10 @@ from torch import Tensor
 from torch.nn import functional as F
 from .config import ModelArgs, find_multiple
 from jetstream_pt.layers import Attention, get_quantized_linear_layer, get_quantized_enbedding_layer
+from jetstream_pt import quantize, torchjax
 
 import jax
+import jax.numpy as jnp
 
 
 class Transformer(nn.Module):
@@ -233,6 +235,31 @@ class Int8ConditionalFeedForward(nn.Module):
     else:
       return self.forward_for_short_seq_len(x, expert_indices)
 
+  def _int_ti_eoi_teo(self, lhs, rhs):
+      # x1 = F.silu(torch.einsum("ti,eoi -> teo", x, self.w1) * self.w1_scaler)
+      result = torchjax.call_jax(
+          jax.lax.dot_general,
+          lhs,
+          rhs,
+          (((1,), (2)), ((), ())),
+          None,
+          jnp.bfloat16.dtype,
+      )
+      return result
+
+  def _int_teo_eio_tei(self, lhs, rhs):
+    #torch.einsum("teo, eio -> tei", (x1 * x3), self.w2) * self.w2_scaler
+    result = torchjax.call_jax(
+        jax.lax.dot_general,
+        lhs,
+        rhs,
+        (((2,), (2,)), ((1, ), (0, ))),
+        None,
+        jnp.bfloat16.dtype,
+    ) # output is (eti) for some reason
+    return result.transpose(0, 1)
+
+
   def forward_for_short_seq_len(
       self, x: Tensor, expert_indices: Tensor
   ) -> Tensor:
@@ -260,14 +287,20 @@ class Int8ConditionalFeedForward(nn.Module):
     # o = config.imtermediate size
     # i = config.dim
     with jax.named_scope("conditional_ff"):
-      x1 = F.silu(torch.einsum("ti,eoi -> teo", x, self.w1) * self.w1_scaler)
-      x3 = torch.einsum("ti, eoi-> teo", x, self.w3) * self.w3_scaler
+      x_int, x_scaler, _ = quantize.quantize_tensor(x, (1,))
+      x_scaler = x_scaler.reshape(seqlen, 1, 1)
+
+      x1 = F.silu(self._int_ti_eoi_teo(x_int, self.w1) * self.w1_scaler * x_scaler)
+      x3 = self._int_ti_eoi_teo(x_int, self.w3) * self.w3_scaler * x_scaler
+
+      x1x3_int, x1x3_scaler, _ = quantize.quantize_tensor(x1 * x3, (1, 2))
+      x1x3_scaler = x1x3_scaler.reshape(seqlen, 1, 1)
       expert_outs = (
-          torch.einsum("teo, eio -> tei", (x1 * x3), self.w2) * self.w2_scaler
+          self._int_teo_eio_tei(x1x3_int, self.w2) * self.w2_scaler
       )
       # e = 8; need to reduce to 2
       seq_indexes = torch.arange(seqlen).unsqueeze(1)
-      return expert_outs[seq_indexes, expert_indices]
+      return expert_outs[seq_indexes, expert_indices] * x1x3_scaler
 
 
 class ConditionalFeedForward(nn.Module):
