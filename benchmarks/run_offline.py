@@ -94,6 +94,8 @@ def main(argv):
   decode_state = engine.init_decode_state()
   profiler_started = False
   for batch, _ in MAXTEXT_PREFILL.items():
+    if batch > FLAGS.max_cache_length:
+      continue
     runtime, decode_state, profiler_started = run_prefill_time(
         engine, params, decode_state, batch, profiler_started
     )

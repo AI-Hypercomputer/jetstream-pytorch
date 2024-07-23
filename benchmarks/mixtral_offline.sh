@@ -10,6 +10,8 @@ INPUT_SIZE=1024
 OUTPUT_SIZE=1024
 >>>>>>> b7a2310 (make lance's change work for mixtral)
 CHECKPOINT_PATH=mlperf/data/mixtral-instruct-quantized/
+export JAX_COMPILATION_CACHE_DIR="/tmp/jax_cache2"
+export XLA_FLAGS="--xla_disable_hlo_passes=rematerialization"
 
 pushd ..
 python -m benchmarks.run_offline \
