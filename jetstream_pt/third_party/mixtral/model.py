@@ -77,11 +77,15 @@ class Transformer(nn.Module):
       bsz, seqlen = idx.shape
       freqs_cis = self.freqs_cis[input_pos]
       freqs_cis = freqs_cis.reshape(bsz, seqlen, -1)
-    assert len(caches) == len(
-        self.layers
-    ), f"Number of caches ({len(caches)}) and layers ({len(self.layers)}) dont match"
-    for layer, cache in zip(self.layers, caches):
-      with jax.named_scope("TransformerBlock"):
+
+    for layer_id, layer in enumerate(self.layers):
+      if caches[0].stacked:
+        cache = caches[0]
+      else:
+        cache = caches[layer_id]
+      # else:  # For stacked case, there is only 1 yer of kv cache
+
+      with jax.named_scope("TransformerBlock_Layer_" + str(layer_id)):
         x = layer(
             x,
             freqs_cis,
