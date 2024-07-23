@@ -283,6 +283,7 @@ class SUT:
         self.dataset.LoadSamplesToRam,
         self.dataset.UnloadSamplesFromRam,
     )
+    log.info(f'DATA set size: {self.dataset.total_sample_count} / {self.dataset.perf_count}')
     self.sut = lg.ConstructSUT(self.issue_queries, self.flush_queries)
 
   def load_tokenizer(
