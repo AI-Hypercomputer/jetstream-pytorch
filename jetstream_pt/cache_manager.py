@@ -537,120 +537,127 @@ class Int8KVCacheGenerate:
 
   def update(self, xk, xv, layer_id: int):
     """Update kv cache"""
-    k_quant, kscale = self.quantize(xk)
-    v_quant, vscale = self.quantize(xv)
+    with jax.named_scope("cache_update"):
+        k_quant, kscale = self.quantize(xk)
+        v_quant, vscale = self.quantize(xv)
 
-    if self.env.lazy_cache_update:
-      if self.env.new_cache_stacked:
-        self.new_ks[layer_id, ...] = k_quant
-        self.new_vs[layer_id, ...] = v_quant
-        self.new_k_scaler[layer_id, ...] = kscale
-        self.new_v_scaler[layer_id, ...] = vscale
-      else:
-        if self.env.generate_cache_stacked:
-          self.new_ks.append(k_quant)
-          self.new_vs.append(v_quant)
-          self.new_k_scaler.append(kscale)
-          self.new_v_scaler.append(vscale)
+        if self.env.lazy_cache_update:
+          if self.env.new_cache_stacked:
+            torch_xla2.interop.call_jax(jax.lax.dynamic_update_slice, self.new_ks, k_quant, (layer_id, 0, 0, 0, 0))
+            torch_xla2.interop.call_jax(jax.lax.dynamic_update_slice, self.new_vs, v_quant, (layer_id, 0, 0, 0, 0))
+            torch_xla2.interop.call_jax(jax.lax.dynamic_update_slice, self.new_k_scaler, kscale, (layer_id, 0, 0, 0, 0))
+            torch_xla2.interop.call_jax(jax.lax.dynamic_update_slice, self.new_v_scaler, vscale, (layer_id, 0, 0, 0, 0))
+
+            #self.new_ks[layer_id, ...] = k_quant
+            #self.new_vs[layer_id, ...] = v_quant
+            #self.new_k_scaler[layer_id, ...] = kscale
+            #self.new_v_scaler[layer_id, ...] = vscale
+          else:
+            if self.env.generate_cache_stacked:
+              self.new_ks.append(k_quant)
+              self.new_vs.append(v_quant)
+              self.new_k_scaler.append(kscale)
+              self.new_v_scaler.append(vscale)
+            else:
+              self.new_ks = k_quant
+              self.new_vs = v_quant
+              self.new_k_scaler = kscale
+              self.new_v_scaler = vscale
+        elif self.env.ring_buffer:
+          self.cache_k[:, :, self.input_pos, :] = k_quant
+          self.cache_v[:, :, self.input_pos, :] = v_quant
+          self.k_scaler[:, :, self.input_pos, :] = kscale
+          self.v_scaler[:, :, self.input_pos, :] = vscale
         else:
-          self.new_ks = k_quant
-          self.new_vs = v_quant
-          self.new_k_scaler = kscale
-          self.new_v_scaler = vscale
-    elif self.env.ring_buffer:
-      self.cache_k[:, :, self.input_pos, :] = k_quant
-      self.cache_v[:, :, self.input_pos, :] = v_quant
-      self.k_scaler[:, :, self.input_pos, :] = kscale
-      self.v_scaler[:, :, self.input_pos, :] = vscale
-    else:
-      # We don't handle left aligned but lazy_cache_update=False
-      self.cache_k[self.batch, :, self.input_pos, :] = k_quant.squeeze(2)
-      self.cache_v[self.batch, :, self.input_pos, :] = v_quant.squeeze(2)
-      self.k_scaler[self.batch, :, self.input_pos, :] = kscale.squeeze(2)
-      self.v_scaler[self.batch, :, self.input_pos, :] = vscale.squeeze(2)
+          # We don't handle left aligned but lazy_cache_update=False
+          self.cache_k[self.batch, :, self.input_pos, :] = k_quant.squeeze(2)
+          self.cache_v[self.batch, :, self.input_pos, :] = v_quant.squeeze(2)
+          self.k_scaler[self.batch, :, self.input_pos, :] = kscale.squeeze(2)
+          self.v_scaler[self.batch, :, self.input_pos, :] = vscale.squeeze(2)
 
-    return (
-        self.cache_k,
-        self.cache_v,
-        k_quant,
-        v_quant,
-        self.k_scaler,
-        self.v_scaler,
-        kscale,
-        vscale,
-    )
+        return (
+            self.cache_k,
+            self.cache_v,
+            k_quant,
+            v_quant,
+            self.k_scaler,
+            self.v_scaler,
+            kscale,
+            vscale,
+        )
 
   def finalize(self):
     """Finalize the cache operation and updates the cache."""
-    if not self.env.lazy_cache_update:
-      return
-    if self.env.ring_buffer:
-      # Assume no cache stack for ring buffer
-      # pylint: disable-next=all
-      self.cache_k._elem = (
-          self.cache_k.jax().at[..., self.input_pos, :].set(self.new_ks.jax())
-      )
-      # pylint: disable-next=all
-      self.cache_v._elem = (
-          self.cache_v.jax().at[..., self.input_pos, :].set(self.new_vs.jax())
-      )
-    else:
-      if self.env.generate_cache_stacked:
-        if self.env.new_cache_stacked:
-          # new kv scaler also has to go through shard_map instead of indexing
-          # because it needs to reshape to (batch, layer) which mess up with the data
-          caches = [
-              self.cache_k,
-              self.cache_v,
-              self.new_ks,
-              self.new_vs,
-              self.k_scaler,
-              self.v_scaler,
-              self.new_k_scaler,
-              self.new_v_scaler,
-          ]
-          (
-              self.cache_k,
-              self.cache_v,
-              self.k_scaler,
-              self.v_scaler,
-          ) = torch_xla2.interop.call_jax(
-              self.update_single_cache_line, *caches, self.input_pos
+    with jax.named_scope("cache_finalize"):
+        if not self.env.lazy_cache_update:
+          return
+        if self.env.ring_buffer:
+          # Assume no cache stack for ring buffer
+          # pylint: disable-next=all
+          self.cache_k._elem = (
+              self.cache_k.jax().at[..., self.input_pos, :].set(self.new_ks.jax())
+          )
+          # pylint: disable-next=all
+          self.cache_v._elem = (
+              self.cache_v.jax().at[..., self.input_pos, :].set(self.new_vs.jax())
           )
         else:
-          caches = [
-              self.cache_k,
-              self.cache_v,
-              self.new_ks,
-              self.new_vs,
-              self.k_scaler,
-              self.v_scaler,
-              self.new_k_scaler,
-              self.new_v_scaler,
-          ]
-          (
-              self.cache_k,
-              self.cache_v,
-              self.k_scaler,
-              self.v_scaler,
-          ) = torch_xla2.interop.call_jax(
-              self.update_single_cache_line, *caches, self.input_pos
-          )
-      else:
-        (
-            self.cache_k,
-            self.cache_v,
-            self.k_scaler,
-            self.v_scaler,
-        ) = torch_xla2.interop.call_jax(
-            self.update_single_cache_line,
-            self.cache_k,
-            self.cache_v,
-            self.new_ks,
-            self.new_vs,
-            self.k_scaler,
-            self.v_scaler,
-            self.new_k_scaler,
-            self.new_v_scaler,
-            self.input_pos,
-        )
+          if self.env.generate_cache_stacked:
+            if self.env.new_cache_stacked:
+              # new kv scaler also has to go through shard_map instead of indexing
+              # because it needs to reshape to (batch, layer) which mess up with the data
+              caches = [
+                  self.cache_k,
+                  self.cache_v,
+                  self.new_ks,
+                  self.new_vs,
+                  self.k_scaler,
+                  self.v_scaler,
+                  self.new_k_scaler,
+                  self.new_v_scaler,
+              ]
+              (
+                  self.cache_k,
+                  self.cache_v,
+                  self.k_scaler,
+                  self.v_scaler,
+              ) = torch_xla2.interop.call_jax(
+                  self.update_single_cache_line, *caches, self.input_pos
+              )
+            else:
+              caches = [
+                  self.cache_k,
+                  self.cache_v,
+                  self.new_ks,
+                  self.new_vs,
+                  self.k_scaler,
+                  self.v_scaler,
+                  self.new_k_scaler,
+                  self.new_v_scaler,
+              ]
+              (
+                  self.cache_k,
+                  self.cache_v,
+                  self.k_scaler,
+                  self.v_scaler,
+              ) = torch_xla2.interop.call_jax(
+                  self.update_single_cache_line, *caches, self.input_pos
+              )
+          else:
+            (
+                self.cache_k,
+                self.cache_v,
+                self.k_scaler,
+                self.v_scaler,
+            ) = torch_xla2.interop.call_jax(
+                self.update_single_cache_line,
+                self.cache_k,
+                self.cache_v,
+                self.new_ks,
+                self.new_vs,
+                self.k_scaler,
+                self.v_scaler,
+                self.new_k_scaler,
+                self.new_v_scaler,
+                self.input_pos,
+            )

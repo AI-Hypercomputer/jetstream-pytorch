@@ -151,6 +151,7 @@ class WeightOnlyPerChannelQuantizedLinear(torch.nn.Module):
             None,
             jnp.bfloat16.dtype,
         )
+        #result = torch_xla2.interop.call_jax(jnp.einsum, "...hd,id->...hi", inputs, self.weight, preferred_element_type=jnp.bfloat16)
       result = result * self.weight_scaler
       if self.quantize_activation:
         result = result * act_s
@@ -802,7 +803,7 @@ class Attention(ModuleBase):
       ragged_batch_index=None,
       ragged_block_index=None,
   ):
-    with jax.named_scope("attn_linear_before_cache"):
+    with jax.named_scope("attn_wq"):
       bsz, seqlen = x.shape[0], x.shape[-2]
 
       # qkv fuse
@@ -811,15 +812,22 @@ class Attention(ModuleBase):
             [self.q_size, self.kv_size, self.kv_size], dim=-1
         )
       else:
-        xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
-      xq = xq.view(bsz, seqlen, self.n_heads, self.head_dim)
-      xk = xk.view(bsz, seqlen, self.n_kv_heads, self.head_dim)
-      xv = xv.view(bsz, seqlen, self.n_kv_heads, self.head_dim)
+        with jax.named_scope("attn_wq"):
+          xq = self.wq(x)
+        with jax.named_scope("attn_wk"):
+          xk = self.wk(x)
+        with jax.named_scope("attn_wv"):
+          xv = self.wv(x)
+      
+      with jax.named_scope("attn_wqkv_view"):
+       xq = xq.view(bsz, seqlen, self.n_heads, self.head_dim)
+       xk = xk.view(bsz, seqlen, self.n_kv_heads, self.head_dim)
+       xv = xv.view(bsz, seqlen, self.n_kv_heads, self.head_dim)
 
-      shard_axis = 0 if self.env.shard_on_batch else 2
-      self.env.apply_sharding(xq, axis=shard_axis)
-      self.env.apply_sharding(xk, axis=shard_axis)
-      self.env.apply_sharding(xv, axis=shard_axis)
+       shard_axis = 0 if self.env.shard_on_batch else 2
+       self.env.apply_sharding(xq, axis=shard_axis)
+       self.env.apply_sharding(xk, axis=shard_axis)
+       self.env.apply_sharding(xv, axis=shard_axis)
 
     with jax.named_scope("attn_rope"):
       xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
@@ -849,5 +857,8 @@ class Attention(ModuleBase):
         ragged_block_index,
     ).type_as(xq)
     # print(f"output {output.shape}")
-    output = output.transpose(-3, -2).contiguous().view(bsz, seqlen, -1)
-    return self.wo(output)
+    
+    with jax.named_scope("attn_wo"):
+      output = output.transpose(-3, -2).contiguous().view(bsz, seqlen, -1)
+      output = self.wo(output)
+      return output

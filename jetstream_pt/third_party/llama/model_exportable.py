@@ -77,8 +77,18 @@ class FeedForward(ModuleBase):
     self.annotate_sharding("w3.weight", 0)
 
   def forward(self, x):
-    result = self.w2(F.silu(self.w1(x)) * self.w3(x))
-    return result
+    with jax.named_scope("w1"):  
+      result = self.w1(x)
+    with jax.named_scope("silu"):
+      result = F.silu(result)
+    with jax.named_scope("w3"):
+      w3 = self.w3(x)
+    with jax.named_scope("w1*w3"):
+      result = result * w3
+    with jax.named_scope("w2"):
+      result = self.w2(result)
+      #result = self.w2(F.silu(self.w1(x)) * self.w3(x))
+      return result
 
 
 class TransformerBlock(ModuleBase):
