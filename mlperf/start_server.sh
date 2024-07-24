@@ -8,6 +8,8 @@ CHECKPOINT_PATH=mlperf/data/mixtral-instruct-quantized/
 pushd ..
 python run_server.py \
   --model_name=mixtral \
+  --lazy_cache_update=1 \
+  --ring_buffer=0 \
   --batch_size=128 \
   --max_cache_length=$CACHE_LENGTH \
   --max_decode_length=$OUTPUT_SIZE \

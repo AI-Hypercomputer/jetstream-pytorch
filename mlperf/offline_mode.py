@@ -116,6 +116,9 @@ flags.DEFINE_bool(
 flags.DEFINE_bool(
   "internal_dummy_model", False, "Skips actual model compute, used for testing"
 )
+flags.DEFINE_integer(
+  "log_every_n_complete", 100, "print after n completions"
+)
 
 
 scenario_map = {
@@ -185,7 +188,12 @@ def _log_complete(sample_id, response_token_ids):
       sample_id, response_data, response_size, n_tokens
   )
   lg.QuerySamplesComplete([query_sample_response])
+  _log_complete.count += 1
   # import ipdb; ipdb.set_trace()
+  if (_log_complete.count) % FLAGS.log_every_n_complete == 0:
+    log.info(f'{_log_complete.count} queries have completed')
+
+_log_complete.count = 0
 
 def _log_first(sample_id, response_token_ids):
   assert (response_token_ids[0] <= 32000)
