@@ -3,9 +3,11 @@
 CACHE_LENGTH=2048
 INPUT_SIZE=1024
 OUTPUT_SIZE=1024
-CHECKPOINT_PATH=~/data/mlperf/llama2-70b
+CHECKPOINT_PATH=mlperf/data/llama2-70b
+export JAX_COMPILATION_CACHE_DIR="/tmp/jax_cache"
 pushd ..
 python run_server.py \
+  --quantize_activation=1 \
   --model_name=llama-2 \
   --size=70b \
   --ring_buffer=0 \

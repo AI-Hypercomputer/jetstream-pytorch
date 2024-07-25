@@ -84,11 +84,9 @@ async def send_request(
   # Tokenization on client side following MLPerf standard.
   token_ids = np.random.randint(0, 1000, input_request.request_len)
   request = jetstream_pb2.DecodeRequest(
-      session_cache=session_cache,
       token_content=jetstream_pb2.DecodeRequest.TokenContent(
           token_ids=token_ids
       ),
-      priority=priority,
       max_tokens=input_request.output_len,
   )
   output = RequestFuncOutput()

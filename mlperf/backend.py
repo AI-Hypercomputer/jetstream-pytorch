@@ -185,11 +185,9 @@ class ThreadedLMClient:
       token_ids = [int(token_id_str) for token_id_str in sample_data.split(",")]
 
     request = jetstream_pb2.DecodeRequest(
-        session_cache="",
         token_content=jetstream_pb2.DecodeRequest.TokenContent(
             token_ids=token_ids
         ),
-        priority=0,
         max_tokens=self._max_output_len,
     )
     generated_token_list = self._grpc_request(request, sample, warmup)
