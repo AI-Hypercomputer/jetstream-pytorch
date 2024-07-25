@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 
-CACHE_LENGTH=3072
-INPUT_SIZE=512
-OUTPUT_SIZE=512
-CHECKPOINT_PATH=mlperf/data/mixtral-instruct-quantized/
-
+CACHE_LENGTH=2048
+INPUT_SIZE=1024
+OUTPUT_SIZE=1024
+CHECKPOINT_PATH=~/data/mlperf/llama2-70b
 pushd ..
 python run_server.py \
-  --model_name=mixtral \
-  --lazy_cache_update=1 \
+  --model_name=llama-2 \
+  --size=70b \
   --ring_buffer=0 \
-  --batch_size=128 \
+  --batch_size=96 \
   --max_cache_length=$CACHE_LENGTH \
   --max_decode_length=$OUTPUT_SIZE \
   --context_length=$INPUT_SIZE \

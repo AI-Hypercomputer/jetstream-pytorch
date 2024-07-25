@@ -186,7 +186,7 @@ if __name__ == "__main__":
   parser.add_argument("--seed", type=int, default=0)
 
   parser.add_argument("--port", type=str, default=9000)
-  parser.add_argument("--max-length", type=int, default=512)
+  parser.add_argument("--max_length", type=int, default=1024)
 
   parsed_args = parser.parse_args()
   main(parsed_args)

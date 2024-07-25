@@ -251,7 +251,6 @@ class SUT:
       input_data = copy.copy(self._sample_id_to_input[q.index])
       input_data.id = q.id
       self._groupped_queries[group].append(input_data)
-
     if len(self._queries) != sum(len(q) for q in self._groupped_queries):
       import ipdb; ipdb.set_trace()
 
