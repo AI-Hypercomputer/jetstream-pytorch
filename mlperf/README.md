@@ -10,6 +10,7 @@ and only tried with offline benchmark
 
 ```
 ./install.sh
+EXPORT DATA_DISK_DIR=Your directory for dataset, checkpoints
 ```
 
 ## Offline runs:
