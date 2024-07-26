@@ -36,7 +36,7 @@ DATASET_PATH=$DATA_DISK_DIR/processed-data.pkl
 
 pushd ..
 python -m mlperf.offline_mode \
-  --quantize_activation=False \
+  --quantize_activation=True \
   --lazy_cache_update=1 \
   --ring_buffer=0 \
   --mlperf_test_mode=$1 \

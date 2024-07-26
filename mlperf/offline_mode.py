@@ -157,7 +157,7 @@ def _classify_query(dataset_rows, index):
       return 2
   else:
     sample = dataset_rows[index][1]
-    total_len = sample.tok_input_length + (sample.tok_output_length * 3)
+    total_len = sample.tok_input_length + (sample.tok_output_length * 2.5)
     if total_len <= 512:
       return 0
     elif total_len <= 1024:
@@ -414,7 +414,8 @@ def main(argv):
   engines = []
   params = None
   for i, (length, max_batch) in enumerate(length_and_batch):
-    batch = min(counts_by_bucket[i], max_batch)
+    #batch = min(counts_by_bucket[i], max_batch)
+    batch = max_batch
     log.info(f"Using batch size of {batch} for {length}")
     engine = create_engine_from_config_flags(batch=batch, cache_len=length)
     offline_inf = offline_inference.OfflineInference(engine, params)
