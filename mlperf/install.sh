@@ -21,15 +21,15 @@ pip install mlperf-loadgen
 pushd $DATA_DISK_DIR
 
 # model weights
-gcloud storage cp gs://sixiang_gcp/mixtral-instruct-quantized ./ --recursive
+# gcloud storage cp gs://sixiang_gcp/mixtral-instruct-quantized ./ --recursive
 # NOTE: uncomment one so you dont download too much weights to your box
 gcloud storage cp gs://sixiang_gcp/llama2-70b/llama2-70b/ ./ --recursive
 
 # Get mixtral data
-wget https://inference.mlcommons-storage.org/mixtral_8x7b%2F2024.06.06_mixtral_15k_v4.pkl
-mv mixtral_8x7b%2F2024.06.06_mixtral_15k_v4.pkl mixtral_15k_data.pkl
-wget https://inference.mlcommons-storage.org/mixtral_8x7b%2F2024.06.06_mixtral_15k_calibration_v4.pkl
-mv mixtral_8x7b%2F2024.06.06_mixtral_15k_calibration_v4.pkl mixtral_15k_calibration_data.pkl
+#wget https://inference.mlcommons-storage.org/mixtral_8x7b%2F2024.06.06_mixtral_15k_v4.pkl
+#mv mixtral_8x7b%2F2024.06.06_mixtral_15k_v4.pkl mixtral_15k_data.pkl
+#wget https://inference.mlcommons-storage.org/mixtral_8x7b%2F2024.06.06_mixtral_15k_calibration_v4.pkl
+#mv mixtral_8x7b%2F2024.06.06_mixtral_15k_calibration_v4.pkl mixtral_15k_calibration_data.pkl
 
 # Get llama70b data
 gcloud storage cp \

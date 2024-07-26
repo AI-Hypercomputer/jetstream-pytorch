@@ -157,7 +157,7 @@ def _classify_query(dataset_rows, index):
       return 2
   else:
     sample = dataset_rows[index][1]
-    total_len = sample.tok_input_length + sample.tok_output_length
+    total_len = sample.tok_input_length + (sample.tok_output_length * 3)
     if total_len <= 512:
       return 0
     elif total_len <= 1024:

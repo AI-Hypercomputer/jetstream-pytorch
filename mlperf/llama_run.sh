@@ -2,7 +2,8 @@
 me=$(basename "$0")
 
 USER_CONFIG=mlperf/user.conf
-TOTAL_SAMPLE_COUNT=24576
+#TOTAL_SAMPLE_COUNT=24576
+TOTAL_SAMPLE_COUNT=1000
 
 # HF model id
 TOKENIZER_PATH="meta-llama/Llama-2-70b-hf"
@@ -13,6 +14,9 @@ else
 	LOADGEN_RUN_TYPE=offline-performance
 fi
 echo "loadgen run type is " $LOADGEN_RUN_TYPE
+
+DATA_DISK_DIR=mlperf/data
+
 OUTPUT_LOG_DIR=${DATA_DISK_DIR}/logs/llama/
 OUTPUT_LOG_ID=${MODEL_NAME}-${DATASET_TYPE}-${LOADGEN_RUN_TYPE}-${LOADGEN_RUN_TIMESTAMP}
 
@@ -29,7 +33,8 @@ export LIBTPU_INIT_ARGS
 
 
 #DATASET_PATH=$DATA_DISK_DIR/open_orca_gpt4_tokenized_llama.sampled_24576.pkl
-DATASET_PATH=$DATA_DISK_DIR/processed-data.pkl
+#DATASET_PATH=$DATA_DISK_DIR/processed-data.pkl
+DATASET_PATH=$DATA_DISK_DIR/processed-calibration-data.pkl
 
 pushd ..
 python -m mlperf.offline_mode \
