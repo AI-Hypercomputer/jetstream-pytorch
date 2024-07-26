@@ -15,7 +15,6 @@ else
 fi
 echo "loadgen run type is " $LOADGEN_RUN_TYPE
 
-DATA_DISK_DIR=mlperf/data
 
 OUTPUT_LOG_DIR=${DATA_DISK_DIR}/logs/llama/
 OUTPUT_LOG_ID=${MODEL_NAME}-${DATASET_TYPE}-${LOADGEN_RUN_TYPE}-${LOADGEN_RUN_TIMESTAMP}
