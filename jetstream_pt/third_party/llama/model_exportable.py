@@ -14,7 +14,7 @@ from jetstream_pt.layers import (
     RMSNorm,
     WeightOnlyBlockwiseQuantizedLinear,
     WeightOnlyPerChannelQuantizedLinear,
-    get_quantized_enbedding_layer,
+    get_quantized_embedding_layer,
     get_quantized_linear_layer,
 )
 from torch import nn
@@ -188,7 +188,7 @@ class Transformer(ModuleBase):
     self.vocab_size = params.vocab_size
     self.n_layers = params.n_layers
 
-    Embedding = get_quantized_enbedding_layer(env.quant_config)
+    Embedding = get_quantized_embedding_layer(env.quant_config)
     self.tok_embeddings = Embedding(
         params.vocab_size,
         params.dim,
