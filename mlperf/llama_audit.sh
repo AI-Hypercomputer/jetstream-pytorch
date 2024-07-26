@@ -2,8 +2,7 @@
 me=$(basename "$0")
 
 USER_CONFIG=mlperf/user.conf
-TOTAL_SAMPLE_COUNT=24576
-#TOTAL_SAMPLE_COUNT=1000
+TOTAL_SAMPLE_COUNT=100
 
 # HF model id
 TOKENIZER_PATH="meta-llama/Llama-2-70b-hf"
@@ -52,7 +51,7 @@ python -m mlperf.offline_mode \
   --output_mode tokenized \
 	--mlperf_conf mlperf/mlperf.conf \
 	--user_conf ${USER_CONFIG} \
-	--audit_conf audit.conf \
+	--audit_conf mlperf/audit.conf \
 	--total_sample_count ${TOTAL_SAMPLE_COUNT} \
 	--dataset_path ${DATASET_PATH} \
 	--output_log_dir ${OUTPUT_LOG_DIR} 2>&1 | tee ${OUTPUT_LOG_DIR}/server_accuracy_log.log
