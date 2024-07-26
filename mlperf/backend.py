@@ -13,7 +13,6 @@
 # limitations under the License.
 
 """mlperf loadgen interface for LLama2."""
-import math
 import array
 import concurrent.futures
 import dataclasses
@@ -25,7 +24,7 @@ from typing import List, Optional, Any
 
 import numpy as np
 
-from . import dataset
+import dataset
 
 import mlperf_loadgen as lg
 
@@ -49,26 +48,6 @@ class WarmupSample:
 @dataclasses.dataclass
 class StreamResponse:
   result: str = None
-
-
-def _find_interesting_samples(max_length, dataset, encoder):
-  start_len = 1
-  lengths = [len(encoder.encode(data)) for data in dataset]
-  min_length = min(lengths)
-  max_length = min(max(lengths), max_length)
-  start_len = 2 ** int(math.log2(min_length))
-  while start_len * 2 < max_length:
-    for i, data in enumerate(dataset):
-      length = len(encoder.encode(data))
-      if start_len < length <= start_len * 2:
-        log.info(f"Warmup sample: id={i} of length={length}")
-        yield i
-        break  # for
-      else:
-        log.info(
-            f"DISCARD Warmup sample: id={i} of length={length} for {start_len}"
-        )
-    start_len *= 2
 
 
 class ThreadedLMClient:
@@ -108,13 +87,10 @@ class ThreadedLMClient:
     self.pred_outputs = {}
     self._resp_cnt = 0
 
-    # Post processing stop sequence for Mixtral MXBP dataset
-    self._stop_seq: List[int] = [13, 13940, 28832, 13]
-    self._stop_seq_len = len(self._stop_seq)
-
     log.info("Creating grpc channel with api_url {}".format(api_url))
     options = [("grpc.keepalive_timeout_ms", 10000)]
     self._grpc_channel = grpc.insecure_channel(api_url, options=options)
+
 
   @property
   def tokenizer(self):
@@ -124,15 +100,6 @@ class ThreadedLMClient:
     self._resp_cnt += 1
     if self._resp_cnt % self._log_interval == 0:
       log.info("Completed %d queries", self._resp_cnt)
-
-  def post_process_response(self, response_tokens):
-    for i in range(self._stop_seq_len, len(response_tokens)):
-      if response_tokens[i - self._stop_seq_len : i] == self._stop_seq:
-        # log.info(f"Post process found stop seq: {response_tokens}")
-        return response_tokens[:i]
-
-    # log.info(f"Post process no-op for {response_tokens}")
-    return response_tokens
 
   def process_single_sample_async(self, query_sample, warmup):
     """Executes a single query and marks responses complete asynchronously.
@@ -150,7 +117,9 @@ class ThreadedLMClient:
     concurrent.futures.wait(self._futures)
     self._futures = []
 
-  def _grpc_request(self, request, sample, warmup):
+  def _grpc_request(
+      self, request, sample, warmup
+  ):
     """Send grpc synchronous request since the current grpc server is sync."""
     stub = jetstream_pb2_grpc.OrchestratorStub(self._grpc_channel)
     token_list = []
@@ -192,15 +161,7 @@ class ThreadedLMClient:
     )
     generated_token_list = self._grpc_request(request, sample, warmup)
     if not warmup:
-      try:
-        dataset_name = self._dataset.input_datasets[sample.index]
-        if dataset_name == "MBXP":
-          response_token_ids = self.post_process_response(generated_token_list)
-        else:
-          response_token_ids = generated_token_list
-      except Exception as e:
-        log.info(f"Error - {e}")
-        response_token_ids = generated_token_list
+      response_token_ids = generated_token_list
       n_tokens = len(response_token_ids)
       response_token_ids = np.array(response_token_ids, dtype=np.int64)
       response_array = array.array("B", response_token_ids.tobytes())
@@ -211,8 +172,8 @@ class ThreadedLMClient:
           sample.id, response_data, response_size, n_tokens
       )
       lg.QuerySamplesComplete([query_sample_response])
-      # log.info(f"mark query as complete for - {dataset_name}")
-      log.info(f"mark query as complete")
+      log.info("mark query complete")
+
       pred_output = self._tokenizer.decode(response_token_ids)
       self.pred_outputs[sample.index] = pred_output
       self._log_resp_cnt()
@@ -257,22 +218,22 @@ class SUT:
     log.info("Loading Dataset ... ")
     self.dataset = dataset.Dataset(
         dataset_path=self._dataset_path,
-        input_mode=self._input_mode,
+        input_mode = self._input_mode,
         total_sample_count=self._total_sample_count,
         perf_count_override=self._perf_count_override,
     )
 
     client_cls = ThreadedLMClient
     self._client = client_cls(
-        is_stream=self._is_stream,
-        num_threads=self._num_client_threads,
-        api_url=self._api_url,
-        dataset_object=self.dataset,
-        input_mode=self._input_mode,
-        output_mode=self._output_mode,
-        tokenizer=self._tokenizer,
-        max_output_len=self._max_output_len,
-        log_interval=self._log_interval,
+          is_stream=self._is_stream,
+          num_threads=self._num_client_threads,
+          api_url=self._api_url,
+          dataset_object=self.dataset,
+          input_mode = self._input_mode,
+          output_mode = self._output_mode,
+          tokenizer=self._tokenizer,
+          max_output_len=self._max_output_len,
+          log_interval=self._log_interval,
     )
 
     self.qsl = lg.ConstructQSL(
@@ -281,35 +242,34 @@ class SUT:
         self.dataset.LoadSamplesToRam,
         self.dataset.UnloadSamplesFromRam,
     )
+
+    # We need to add some warmup to improve throughput estimation
+    log.info("Starting warmup....")
+    # Warm up with exponentially increasing batch sizes up to 32.
+
+    log.info("Warmup done....")
+    time.sleep(30)
     self.sut = lg.ConstructSUT(self.issue_queries, self.flush_queries)
 
-  def load_tokenizer(
-      self, tokenizer_path: Optional[str] = None
-  ) -> Optional[AutoTokenizer]:
-    """Returns tokenizer"""
-    if tokenizer_path is not None:
-      tokenizer = AutoTokenizer.from_pretrained(
-          tokenizer_path,
-          model_max_length=1024,
-          padding_side="left",
-          use_fast=True,
-      )
-      tokenizer.pad_token = tokenizer.eos_token
-      return tokenizer
+  def load_tokenizer(self, tokenizer_path: Optional[str] = None) -> Optional[AutoTokenizer]:
+      """ Returns tokenizer """
+      if tokenizer_path is not None:
+        tokenizer = AutoTokenizer.from_pretrained(
+            tokenizer_path,
+            model_max_length=1024,
+            padding_side="left",
+            use_fast=True
+        )
+        tokenizer.pad_token = tokenizer.eos_token
+        return tokenizer
 
   def _sort_issue_queries(self, query_samples):
     """Issue queries."""
     query_samples_with_length = []
     for query_sample in query_samples:
-      query_sample_token_length = self.dataset.inputs_with_token_lengths[
-          query_sample.index
-      ][1]
-      query_samples_with_length.append(
-          (query_sample_token_length, query_sample)
-      )
-    sorted_query_samples_with_length = sorted(
-        query_samples_with_length, key=itemgetter(0)
-    )
+      query_sample_token_length = self.dataset.inputs_with_token_lengths[query_sample.index][1]
+      query_samples_with_length.append((query_sample_token_length, query_sample))
+    sorted_query_samples_with_length = sorted(query_samples_with_length, key=itemgetter(0))
     sorted_query_samples = [x[1] for x in sorted_query_samples_with_length]
     return sorted_query_samples
 
@@ -331,11 +291,7 @@ class SUT:
 
       pred_outputs = []
       for idx, x in self._client.pred_outputs.items():
-        pred_output = {
-            "qsl_idx": idx,
-            "intput": self._client._dataset.inputs[idx],
-            "data": x,
-        }
+        pred_output = {"qsl_idx": idx, "intput": self._client._dataset.inputs[idx], "data": x}
         pred_outputs.append(pred_output)
       log.info(f"Generated {len(pred_outputs)} prediction outputs")
 

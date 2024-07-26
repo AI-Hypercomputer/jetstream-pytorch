@@ -21,108 +21,82 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("dataset.py")
 
 
-class Dataset:
+class Dataset():
+    def __init__(
+        self,
+        dataset_path: str,
+        input_mode: str,
+        total_sample_count: int = 24576,
+        perf_count_override: int = None
+    ):
+        if not os.path.isfile(dataset_path):
+            log.warn("Processed pickle file {} not found. Please check that the path is correct".format(dataset_path))
+        self.dataset_path = dataset_path
 
-  def __init__(
-      self,
-      dataset_path: str,
-      input_mode: str,
-      total_sample_count: int = 15000,
-      perf_count_override: int = None,
-  ):
-    if not os.path.isfile(dataset_path):
-      log.warn(
-          "Processed pickle file {} not found. Please check that the path is correct".format(
-              dataset_path
-          )
-      )
-    self.dataset_path = dataset_path
+        self._input_mode = validate_sample_mode(input_mode)
+        self.load_processed_dataset()
 
-    self._input_mode = validate_sample_mode(input_mode)
-    self.load_processed_dataset()
+        self.total_sample_count = min(len(self.input_ids_strs), total_sample_count)
+        self.perf_count = perf_count_override or self.total_sample_count
 
-    self.total_sample_count = min(len(self.input_ids_strs), total_sample_count)
-    self.perf_count = perf_count_override or self.total_sample_count
+    @property
+    def input_ids_strs(self):
+        return self._input_ids_strs
 
-  @property
-  def input_ids_strs(self):
-    return self._input_ids_strs
+    @property
+    def input_texts(self):
+        return self._input_texts
 
-  @property
-  def input_texts(self):
-    return self._input_texts
+    @property
+    def input_token_lengths(self):
+        return self._input_token_lengths
 
-  @property
-  def input_token_lengths(self):
-    return self._input_token_lengths
+    @property
+    def inputs(self):
+        return self._inputs
 
-  @property
-  def inputs(self):
-    return self._inputs
+    @property
+    def inputs_with_token_lengths(self):
+        return self._inputs_with_token_lengths
 
-  @property
-  def inputs_with_token_lengths(self):
-    return self._inputs_with_token_lengths
+    def load_processed_dataset(self):
+        processed_data = pd.read_pickle(self.dataset_path)
 
-  @property
-  def input_datasets(self):
-    return self._input_datasets
+        self._input_ids_strs = []
+        for input_ids in processed_data['tok_input']:
+            input_ids_str = ",".join([str(input_id) for input_id in input_ids])
+            self._input_ids_strs.append(input_ids_str)
 
-  def load_processed_dataset(self):
-    processed_data = pd.read_pickle(self.dataset_path)
-    # processed_data = processed_data[processed_data["dataset"] == "MBXP"]
-    # processed_data = processed_data.reset_index(drop=True)
+        self._input_texts = []
+        for input_text in processed_data['input']:
+            self._input_texts.append(input_text)
 
-    self._input_ids_strs = []
-    for input_ids in processed_data["tok_input"]:
-      input_ids_str = ",".join([str(input_id) for input_id in input_ids])
-      self._input_ids_strs.append(input_ids_str)
+        self._input_token_lengths = []
+        for token_length in processed_data['tok_input_length']:
+            self._input_token_lengths.append(token_length)
 
-    self._input_texts = []
-    for input_text in processed_data["input"]:
-      self._input_texts.append(input_text)
+        log.info(f"input_mode is {self._input_mode}")
+        self._inputs = self._input_ids_strs if self._input_mode == "tokenized" else self._input_texts
+        log.info(f"example sample input is {self._inputs[0]}")
+        self._inputs_with_token_lengths = [
+            (input_ids_str_or_input_text, token_length)
+            for input_ids_str_or_input_text, token_length
+            in zip(self._inputs, self._input_token_lengths)
+        ]
 
-    self._input_token_lengths = []
-    for token_length in processed_data["tok_input_len"]:
-      self._input_token_lengths.append(token_length)
+    def LoadSamplesToRam(self, sample_list):
+        pass
 
-    log.info(f"input_mode is {self._input_mode}")
-    self._inputs = (
-        self._input_ids_strs
-        if self._input_mode == "tokenized"
-        else self._input_texts
-    )
-    log.info(f"example sample input is {self._inputs[0]}")
-    self._inputs_with_token_lengths = [
-        (input_ids_str_or_input_text, token_length)
-        for input_ids_str_or_input_text, token_length in zip(
-            self._inputs, self._input_token_lengths
-        )
-    ]
+    def UnloadSamplesFromRam(self, sample_list):
+        pass
 
-    self._input_datasets = []
-    for dataset in processed_data["dataset"]:
-      self._input_datasets.append(dataset)
-    log.info(
-        f"example sample input dataset is {self._input_datasets[0]} and total {len(self._input_datasets)}"
-    )
-
-  def LoadSamplesToRam(self, sample_list):
-    pass
-
-  def UnloadSamplesFromRam(self, sample_list):
-    pass
-
-  def __del__(self):
-    pass
+    def __del__(self):
+        pass
 
 
 SAMPLE_MODE_CHOICES = ["tokenized", "text"]
 
-
 def validate_sample_mode(sample_mode: str) -> str:
-  if sample_mode not in SAMPLE_MODE_CHOICES:
-    raise ValueError(
-        "The sample_mode should be set to either `tokenized` or `text`."
-    )
-  return sample_mode
+    if sample_mode not in SAMPLE_MODE_CHOICES:
+        raise ValueError("The sample_mode should be set to either `tokenized` or `text`.")
+    return sample_mode
