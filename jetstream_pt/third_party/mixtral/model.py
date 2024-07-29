@@ -21,7 +21,7 @@ import torch.nn as nn
 from torch import Tensor
 from torch.nn import functional as F
 from .config import ModelArgs, find_multiple
-from jetstream_pt.layers import Attention, get_quantized_linear_layer, get_quantized_enbedding_layer
+from jetstream_pt.layers import Attention, get_quantized_linear_layer, get_quantized_embedding_layer
 
 import jax
 
@@ -33,7 +33,7 @@ class Transformer(nn.Module):
     self.config = config
     self.env = env
 
-    Embedding = get_quantized_enbedding_layer(env.quant_config)
+    Embedding = get_quantized_embedding_layer(env.quant_config)
     self.tok_embeddings = Embedding(
         config.vocab_size, config.dim, device=config.device
     )
