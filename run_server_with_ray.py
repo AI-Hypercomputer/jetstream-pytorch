@@ -34,7 +34,7 @@ flags.DEFINE_string(
     "available servers",
 )
 flags.DEFINE_integer("prometheus_port", 0, "")
-flags.DEFINE_integer("tpu_chips", 16, "device tpu_chips")
+flags.DEFINE_integer("tpu_chips", 16, "all devices tpu_chips")
 
 flags.DEFINE_bool("enable_jax_profiler", False, "enable jax profiler")
 flags.DEFINE_integer("jax_profiler_port", 9999, "port of JAX profiler server")
@@ -74,6 +74,7 @@ def create_engine():
       jax_profiler_port=FLAGS.jax_profiler_port,
       num_hosts=FLAGS.num_hosts,
       worker_chips=FLAGS.worker_chips,
+      tpu_chips=FLAGS.tpu_chips,
   )
 
   print("Initialize engine", time.perf_counter() - start)
