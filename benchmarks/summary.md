@@ -7,6 +7,9 @@ Date | Device  | dtype | batch size | cache length |max input length |max output
 ----| ------- | ------ |---------- | -------------|-----------------|------------------|----------------------
 2024-04-24 | TPU v5e-8 | bfloat16 | 128 | 2048 | 1024 | 1024 | 8249 
 2024-04-24 | TPU v5e-8 | int8 | 256 | 2048 | 1024 | 1024 | 10873
+2024-07-29 | TPU v5e-8 | int8 | 256 | 2048 | 1024 | 1024 | 8471.54
+
+**NOTE:(2024-07-29)** Looks like we have a regression in the past 3 month. We are working in fixing it.
 
 
 ## Gemma - 7B
