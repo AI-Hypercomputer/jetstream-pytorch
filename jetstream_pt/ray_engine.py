@@ -215,7 +215,7 @@ def create_pytorch_ray_engine(
     sharding_config=None,
     is_disaggregated: bool = False,
     num_hosts: int = 0,
-    worker_chips: int = 0, 
+    worker_chips: int = 0,
     decode_pod_slice_name: str = None,
     enable_jax_profiler: bool = False,
     jax_profiler_port: int = 9999,
@@ -231,9 +231,7 @@ def create_pytorch_ray_engine(
     )
   ray.init(ignore_reinit_error=True)
   pod_name = tpu.get_current_pod_name()
-  num_hosts = (
-      num_hosts if num_hosts > 0 else tpu.get_current_pod_worker_count()
-  )
+  num_hosts = num_hosts if num_hosts > 0 else tpu.get_current_pod_worker_count()
   print(f"pod_name:{pod_name}, number of host: {num_hosts}")
   assert (
       pod_name is not None

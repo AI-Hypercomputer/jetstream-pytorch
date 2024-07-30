@@ -45,7 +45,9 @@ flags.DEFINE_bool(
 
 flags.DEFINE_integer("num_hosts", 0, "Number of TPU host", required=False)
 
-flags.DEFINE_integer("worker_chips", 4, "Number of TPU chips per worker", required=False)
+flags.DEFINE_integer(
+    "worker_chips", 4, "Number of TPU chips per worker", required=False
+)
 
 flags.DEFINE_string("decode_pod_slice_name", "", "Decode pod slice name")
 

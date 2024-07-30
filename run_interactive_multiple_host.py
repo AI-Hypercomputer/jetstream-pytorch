@@ -32,6 +32,7 @@ _WORKER_CHIPS = flags.DEFINE_integer(
     "worker_chips", 4, "Number of TPU chips per worker", required=False
 )
 
+
 def create_engine():
   """create a pytorch engine"""
   jax.config.update("jax_default_prng_impl", "unsafe_rbg")
