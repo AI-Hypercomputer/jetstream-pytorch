@@ -102,12 +102,12 @@ spec:
               limits:
                 cpu: "8"
                 ephemeral-storage: 30Gi
-                google.com/tpu: "4"
+                google.com/tpu: "8"
                 memory: 200G
               requests:
                 cpu: "8"
                 ephemeral-storage: 30Gi
-                google.com/tpu: "4"
+                google.com/tpu: "8"
                 memory: 200G
             securityContext:
               {}
@@ -127,8 +127,8 @@ spec:
                 bucketName: ricliu-llama2 
                 mountOptions: "implicit-dirs"
         nodeSelector:
-          cloud.google.com/gke-tpu-accelerator: tpu-v4-podslice
-          cloud.google.com/gke-tpu-topology: 2x2x1
+          cloud.google.com/gke-tpu-topology: 2x4
+          cloud.google.com/gke-tpu-accelerator: tpu-v5-lite-podslice
           iam.gke.io/gke-metadata-server-enabled: "true"
       metadata:
         annotations:

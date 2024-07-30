@@ -1,4 +1,4 @@
-# This template contains a Kuberay cluster using a 2x2x1 TPU v4 PodSlice.
+# This template contains a Kuberay cluster using a 2x2x2 TPU v4 PodSlice.
 # To get access to TPU resources, please follow instructions in this link:
 # https://cloud.google.com/kubernetes-engine/docs/how-to/tpus
 apiVersion: ray.io/v1
@@ -55,6 +55,10 @@ spec:
                 name: client
               - containerPort: 8000
                 name: serve
+              - containerPort: 8471
+                name: slicebuilder
+              - containerPort: 8081
+                name: mxla
               - containerPort: 8888
                 name: grpc
         volumes:
@@ -65,7 +69,7 @@ spec:
               driver: gcsfuse.csi.storage.gke.io
               readOnly: true
               volumeAttributes:
-                bucketName: ricliu-llama2
+                bucketName: ricliu-llama2-70b-chat
                 mountOptions: "implicit-dirs"
       metadata:
         annotations:
@@ -81,7 +85,7 @@ spec:
     replicas: 1
     minReplicas: 1
     maxReplicas: 1
-    numOfHosts: 1
+    numOfHosts: 2
     groupName: workergroup
     template:
       spec:
@@ -103,12 +107,12 @@ spec:
                 cpu: "8"
                 ephemeral-storage: 30Gi
                 google.com/tpu: "4"
-                memory: 200G
+                memory: 180G
               requests:
                 cpu: "8"
                 ephemeral-storage: 30Gi
                 google.com/tpu: "4"
-                memory: 200G
+                memory: 180G
             securityContext:
               {}
             env:
@@ -124,12 +128,12 @@ spec:
               driver: gcsfuse.csi.storage.gke.io
               readOnly: true
               volumeAttributes:
-                bucketName: ricliu-llama2 
+                bucketName: ricliu-llama2-70b-chat
                 mountOptions: "implicit-dirs"
         nodeSelector:
-          cloud.google.com/gke-tpu-accelerator: tpu-v4-podslice
-          cloud.google.com/gke-tpu-topology: 2x2x1
           iam.gke.io/gke-metadata-server-enabled: "true"
+          cloud.google.com/gke-tpu-topology: 2x4
+          cloud.google.com/gke-tpu-accelerator: tpu-v5-lite-podslice
       metadata:
         annotations:
           gke-gcsfuse/volumes: "true"
