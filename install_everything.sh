@@ -29,7 +29,7 @@ pip install tensorflow-text
 pip install tensorflow
 pip install huggingface_hub
 
-pip install ray[default]==2.22.0
+pip install ray[default]==2.33.0
 # torch cpu
 pip install torch==2.3.1+cpu --index-url https://download.pytorch.org/whl/cpu
 pip install tensorflow flatbuffers absl-py sentencepiece seqio google-cloud-storage 

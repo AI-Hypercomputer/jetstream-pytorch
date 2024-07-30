@@ -24,6 +24,13 @@ from jetstream.engine import token_utils
 from jetstream_pt import ray_engine
 from jetstream_pt.config import FLAGS
 
+_NUM_HOSTS = flags.DEFINE_integer(
+    "num_hosts", 0, "Number of TPU host", required=False
+)
+
+_WORKER_CHIPS = flags.DEFINE_integer(
+    "worker_chips", 4, "Number of TPU chips per worker", required=False
+)
 
 def create_engine():
   """create a pytorch engine"""
@@ -43,6 +50,8 @@ def create_engine():
       quantize_kv=FLAGS.quantize_kv_cache,
       max_cache_length=FLAGS.max_cache_length,
       sharding_config=FLAGS.sharding_config,
+      num_hosts=_NUM_HOSTS.value,
+      worker_chips=_WORKER_CHIPS.value,
   )
 
   print("Initialize engine", time.perf_counter() - start)
