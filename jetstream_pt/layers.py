@@ -454,8 +454,9 @@ class AttentionKernel:
 
       true_len = seqlen
       # When GQA is enabled, it not necessary to expand
-      if n_rep == 1 and seqlen == 1:
+      if not (self.env.ragged_mha and n_rep > 1) and seqlen == 1:
         true_len = 2
+        #xq = torch.broadcast_to(xq, (xq.shape[0], xq.shape[1], 2, xq.shape[3]))
         xq = torch.nn.functional.pad(
             xq, (0, 0, 0, true_len - seqlen), "constant", 0
         )
@@ -611,12 +612,11 @@ class Int8KVAttentionKernel:
 
       true_len = seqlen
       # When GQA is enabled, it not necessary to expand
-      if n_rep == 1 and seqlen == 1:
+      if not (self.env.ragged_mha and n_rep > 1) and seqlen == 1:
         true_len = 2
         xq = torch.nn.functional.pad(
             xq, (0, 0, 0, true_len - seqlen), "constant", 0
         )
-        # xq = torch.broadcast_to(xq, (bsz, num_heads, true_len, head_dim))
 
       # We are not using ragged attention for prefill yet.
       if self.env.ragged_mha and seqlen == 1:
