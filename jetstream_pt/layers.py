@@ -454,7 +454,7 @@ class AttentionKernel:
 
       true_len = seqlen
       # When GQA is enabled, it not necessary to expand
-      if n_rep == 1 and seqlen == 1:
+      if not (self.env.ragged_mha and n_rep > 1) and seqlen == 1:
         true_len = 2
         xq = torch.nn.functional.pad(
             xq, (0, 0, 0, true_len - seqlen), "constant", 0
@@ -611,7 +611,7 @@ class Int8KVAttentionKernel:
 
       true_len = seqlen
       # When GQA is enabled, it not necessary to expand
-      if n_rep == 1 and seqlen == 1:
+      if not (self.env.ragged_mha and n_rep > 1) and seqlen == 1:
         true_len = 2
         xq = torch.nn.functional.pad(
             xq, (0, 0, 0, true_len - seqlen), "constant", 0
@@ -619,7 +619,7 @@ class Int8KVAttentionKernel:
         # xq = torch.broadcast_to(xq, (bsz, num_heads, true_len, head_dim))
 
       # We are not using ragged attention for prefill yet.
-      if self.env.ragged_mha and seqlen == 1:
+      if self.env.ragged_mha and seqlen == 1 and keys.shape[-2] != 1:
         local_output, (local_max, local_denom) = torch_xla2.interop.call_jax(
             impl,
             xq,
@@ -692,9 +692,8 @@ class Int8KVAttentionKernel:
     # For flash attention, existing output contains the existing kv cache generated logits
     with jax.named_scope("attn_new_qkv"):
       # At this point, flash attention or ragged attention must have been enabled
-      if not self.env.ragged_mha or seqlen > 1:
-        new_key = repeat_kv(new_key, n_rep)
-        new_value = repeat_kv(new_value, n_rep)
+      new_key = repeat_kv(new_key, n_rep)
+      new_value = repeat_kv(new_value, n_rep)
       new_output, (new_max, new_denom) = attend(
           xq, new_key, new_value, new_k_scaler, new_v_scaler, None
       )
