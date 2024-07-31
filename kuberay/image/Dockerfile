@@ -1,4 +1,4 @@
-FROM rayproject/ray:2.22.0-py310
+FROM rayproject/ray:2.32.0-py310
 
 RUN pip install flax==0.8.3
 RUN pip install jax[tpu]==0.4.30 -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
