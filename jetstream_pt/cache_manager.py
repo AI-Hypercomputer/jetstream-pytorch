@@ -58,6 +58,13 @@ class KVCachePrefill:
     """Get prefill cache state"""
     return self.cache_k, self.cache_v
 
+  def pack(self):
+    # return all states
+    return self.state()
+
+  def reset(self, states):
+    (self.cache_k, self.cache_v) = states
+
 
 # pylint: disable-next=all
 def KVCachePrefill_flatten(cache):
@@ -171,6 +178,14 @@ class Int8KVCacheGenerate:
   def scalers(self):
     """Get kv cache scalers"""
     return torchjax.from_torch((self.k_scaler, self.v_scaler))
+
+  def pack(self):
+    # return all states
+    return (self.cache_k, self.cache_v, self.k_scaler, self.v_scaler)
+
+  def reset(self, states):
+    (self.cache_k, self.cache_v, self.k_scaler, self.v_scaler) = states
+
 
   @classmethod
   # pylint: disable-next=all

@@ -3,9 +3,11 @@
 
 from typing import Any, List, Optional
 
+import collections
 import jax
 import torch
 import torch.nn.functional as F
+from jetstream_pt import torchjax
 from jetstream_pt.layers import (
     Attention,
     Int8Embedding,
@@ -71,6 +73,8 @@ class FeedForward(nn.Module):
     result = self.w2(F.silu(self.w1(x)) * self.w3(x))
     return result
 
+from jax.sharding import Mesh, PartitionSpec as P
+from jax.experimental.shard_map import shard_map
 
 class TransformerBlock(nn.Module):
   """Transformer block."""
@@ -109,6 +113,80 @@ class TransformerBlock(nn.Module):
     )
     self.ffn_norm = RMSNorm(args.dim, eps=args.norm_eps, device=args.device)
 
+    _attn_state_spec = collections.OrderedDict({
+            "wo.weight": P(None, 'x') ,
+            "wo.weight_scaler": P('x'),
+            "wq.weight":  P('x'),
+            "wq.weight_scaler": P('x'),
+            "wk.weight":  P('x'),
+            "wk.weight_scaler": P('x'),
+            "wv.weight":  P('x'),
+            "wv.weight_scaler": P('x'),
+        })
+
+
+    self._sharded_attention = shard_map(
+      self._sharded_attention,
+      mesh=self.env.mesh,
+      in_specs=(
+        _attn_state_spec,
+        P(), # x
+        P(), # freqs_cis, 
+        P(), # mask 
+        (
+          P(None, 'x', None, None), #cache
+          P(None, 'x', None, None),#cache
+          P(None, 'x', None, None), #cache
+          P(None, 'x', None, None), #cache
+        )
+      ),
+      out_specs=(
+        P(),
+        (
+          P(None, 'x', None, None),#cache
+          P(None, 'x', None, None),#cache
+          P(None, 'x', None, None),#cache
+          P(None, 'x', None, None),#cache
+        )
+      ),
+    )
+    self._sharded_attention_prefill = shard_map(
+      self._sharded_attention,
+      mesh=self.env.mesh,
+      in_specs=(
+        _attn_state_spec,
+        P(), # x
+        P(), # freqs_cis, 
+        P(), # mask 
+        (
+          P(None, 'x', None, None), #cache
+          P(None, 'x', None, None),#cache
+        )
+      ),
+      out_specs=(
+        P(),
+        (
+          P(None, 'x', None, None),#cache
+          P(None, 'x', None, None),#cache
+        )
+      ),
+    )
+
+
+  def _sharded_attention(self, 
+    attn_states,
+    x, freqs_cis, mask, 
+    cache_states,
+  ):
+    x, freqs_cis, mask, cache_states = torchjax.to_torch(
+      (x, freqs_cis, mask, cache_states))
+    cache_manager = Int8KVCacheGenerate(*cache_states)
+    res = torch.func.functional_call(self.attention, attn_states,
+      (x, freqs_cis, mask, cache_manager, None, None, None, None)
+    )
+    res._elem = jax.lax.psum(res._elem, 'x')
+    return torchjax.t2j(res, cache_manager.pack())
+
   def forward(
       self,
       x: torch.Tensor,
@@ -121,16 +199,29 @@ class TransformerBlock(nn.Module):
       ragged_block_index=None,
   ):
     with jax.named_scope("Attention"):
-      attn = self.attention.forward(
-          self.attention_norm(x),
-          freqs_cis,
-          mask,
-          cache,
-          start,
-          end,
-          ragged_batch_index,
-          ragged_block_index,
-      )
+      normed = self.attention_norm(x),
+      cache_states = cache.pack()
+      if len(cache_states) == 2:
+        attn, new_states = torchjax.call_jax(
+            self._sharded_attention_prefill,
+              self.attention.state_dict(),
+              normed,
+              freqs_cis,
+              mask,
+              cache_states,
+        )
+      else:
+        attn, new_states = torchjax.call_jax(
+            self._sharded_attention,
+            (
+              self.attention.state_dict(),
+              normed,
+              freqs_cis,
+              mask,
+              cache_states,
+            )
+        )
+      cache.reset(new_states)
     with jax.named_scope("ffn_norm"):
       h = x + attn
       ffns = self.ffn_norm(h)
