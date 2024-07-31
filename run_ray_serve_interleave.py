@@ -34,13 +34,12 @@ flags.DEFINE_integer("tpu_chips", 16, "device tpu_chips")
 flags.DEFINE_bool("enable_jax_profiler", False, "enable jax profiler")
 flags.DEFINE_integer("jax_profiler_port", 9999, "port of JAX profiler server")
 flags.DEFINE_integer("num_hosts", 4, "Number of TPU host", required=False)
-
+flags.DEFINE_integer(
+    "worker_chips", 4, "Number of TPU chips per worker", required=False
+)
 
 def create_head_resource_name(generation, tpu_chips):
-  # TODO: Make this work for special cases like v5e-8
-  num_cores = 2 * tpu_chips
-
-  return f"TPU-{generation}-{num_cores}-head"
+  return f"TPU-{generation}-{tpu_chips}-head"
 
 
 def create_engine(**kwargs):
@@ -60,6 +59,9 @@ def create_engine(**kwargs):
       quantize_kv=kwargs["quantize_kv"],
       max_cache_length=kwargs["max_cache_length"],
       sharding_config=kwargs["sharding_config"],
+      num_hosts=kwargs["num_hosts"],
+      worker_chips=kwargs["worker_chips"],
+      tpu_chips=kwargs["tpu_chips"],
       enable_jax_profiler=kwargs["enable_jax_profiler"],
       jax_profiler_port=kwargs["jax_profiler_port"],
   )
@@ -124,6 +126,8 @@ def main(_argv):
       ray_actor_options={"resources": {resource_name: 1}}
   ).bind(
       tpu_chips=FLAGS.tpu_chips,
+      worker_chips=FLAGS.worker_chips,
+      num_hosts=FLAGS.num_hosts,
       model_name=FLAGS.model_name,
       tokenizer_path=FLAGS.tokenizer_path,
       ckpt_path=FLAGS.checkpoint_path,
