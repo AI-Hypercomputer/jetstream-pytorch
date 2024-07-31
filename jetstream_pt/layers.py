@@ -313,7 +313,7 @@ def create_quantized_from_nn_linear(
   return obj
 
 
-def get_quantized_enbedding_layer(config: "QuantizationConfig"):
+def get_quantized_embedding_layer(config: "QuantizationConfig"):
   if not config.enable_weight_quantization:
     return nn.Embedding
   else:

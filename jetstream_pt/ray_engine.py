@@ -215,6 +215,8 @@ def create_pytorch_ray_engine(
     sharding_config=None,
     is_disaggregated: bool = False,
     num_hosts: int = 0,
+    worker_chips: int = 0,
+    tpu_chips: int = 0,
     decode_pod_slice_name: str = None,
     enable_jax_profiler: bool = False,
     jax_profiler_port: int = 9999,
@@ -230,9 +232,8 @@ def create_pytorch_ray_engine(
     )
   ray.init(ignore_reinit_error=True)
   pod_name = tpu.get_current_pod_name()
-  num_hosts = (
-      num_hosts if is_disaggregated else tpu.get_current_pod_worker_count()
-  )
+  num_hosts = num_hosts if num_hosts > 0 else tpu.get_current_pod_worker_count()
+  worker_chips = worker_chips if worker_chips > 0 else 4
   print(f"pod_name:{pod_name}, number of host: {num_hosts}")
   assert (
       pod_name is not None
@@ -240,9 +241,13 @@ def create_pytorch_ray_engine(
   assert (
       num_hosts > 0
   ), f"num_hosts (current value {num_hosts}) should be a positive number"
+  assert (
+      num_hosts * worker_chips == tpu_chips
+  ), f"num_hosts:{num_hosts} * worker_chips: {worker_chips} not equal to tpu_chips: {tpu_chips}"
+
   # pylint: disable-next=all
   engine_worker_with_tpu_resource = PyTorchRayWorker.options(
-      resources={"TPU": 4},
+      resources={"TPU": worker_chips},
       runtime_env=RuntimeEnv(env_vars={"JAX_PLATFORMS": "tpu,cpu"}),
   )
   engine_workers = []
