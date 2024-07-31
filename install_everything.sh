@@ -39,5 +39,5 @@ git submodule update --init --recursive
 pip show google-jetstream && pip uninstall -y google-jetstream
 pip show torch_xla2 && pip uninstall -y torch_xla2
 pip install -e .
-pip install -U jax[tpu]==0.4.31 -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+pip install -U jax[tpu]==0.4.30 -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
 pip install -U torch==2.3.1+cpu --index-url https://download.pytorch.org/whl/cpu
