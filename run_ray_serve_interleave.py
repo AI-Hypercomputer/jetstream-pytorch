@@ -38,6 +38,7 @@ flags.DEFINE_integer(
     "worker_chips", 4, "Number of TPU chips per worker", required=False
 )
 
+
 def create_head_resource_name(generation, tpu_chips):
   return f"TPU-{generation}-{tpu_chips}-head"
 
