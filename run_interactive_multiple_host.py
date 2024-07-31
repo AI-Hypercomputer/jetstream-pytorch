@@ -57,7 +57,7 @@ def create_engine():
       sharding_config=FLAGS.sharding_config,
       num_hosts=_NUM_HOSTS.value,
       worker_chips=_WORKER_CHIPS.value,
-      tpu_chips=_TPU_CHIPS,
+      tpu_chips=_TPU_CHIPS.value,
   )
 
   print("Initialize engine", time.perf_counter() - start)
