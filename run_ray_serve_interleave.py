@@ -40,8 +40,11 @@ flags.DEFINE_integer(
 
 
 def create_head_resource_name(generation, tpu_chips):
-  """Create head resource name."""
-  return f"TPU-{generation}-{tpu_chips}-head"
+  if generation == "v5litepod":
+    return f"TPU-{generation}-{tpu_chips}-head"
+  else:
+    tpu_cores = tpu_chips * 2
+    return f"TPU-{generation}-{tpu_cores}-head"
 
 
 def create_engine(**kwargs):
