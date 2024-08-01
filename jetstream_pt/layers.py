@@ -595,9 +595,9 @@ class Attention(nn.Module):
         )
       else:
         xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
-      xq = xq.view(bsz, seqlen, self.n_heads, self.head_dim)
-      xk = xk.view(bsz, seqlen, self.n_kv_heads, self.head_dim)
-      xv = xv.view(bsz, seqlen, self.n_kv_heads, self.head_dim)
+      xq = xq.view(bsz, seqlen, -1, self.head_dim)
+      xk = xk.view(bsz, seqlen, -1, self.head_dim)
+      xv = xv.view(bsz, seqlen, -1, self.head_dim)
 
       shard_axis = 0 if self.env.shard_on_batch else 2
       self.env.apply_sharding(xq, axis=shard_axis)

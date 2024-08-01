@@ -7,7 +7,7 @@ import collections
 import jax
 import torch
 import torch.nn.functional as F
-from jetstream_pt import torchjax
+from jetstream_pt import torchjax, cache_manager
 from jetstream_pt.layers import (
     Attention,
     Int8Embedding,
@@ -115,7 +115,7 @@ class TransformerBlock(nn.Module):
 
     _attn_state_spec = collections.OrderedDict({
             "wo.weight": P(None, 'x') ,
-            "wo.weight_scaler": P('x'),
+            "wo.weight_scaler": P(),
             "wq.weight":  P('x'),
             "wq.weight_scaler": P('x'),
             "wk.weight":  P('x'),
@@ -125,7 +125,7 @@ class TransformerBlock(nn.Module):
         })
 
 
-    self._sharded_attention = shard_map(
+    self._sharded_attention_generate = shard_map(
       self._sharded_attention,
       mesh=self.env.mesh,
       in_specs=(
@@ -136,19 +136,21 @@ class TransformerBlock(nn.Module):
         (
           P(None, 'x', None, None), #cache
           P(None, 'x', None, None),#cache
-          P(None, 'x', None, None), #cache
-          P(None, 'x', None, None), #cache
-        )
+          P(),#cache
+          P(),#cache
+        ),
+        P(), # position
       ),
       out_specs=(
         P(),
         (
           P(None, 'x', None, None),#cache
           P(None, 'x', None, None),#cache
-          P(None, 'x', None, None),#cache
-          P(None, 'x', None, None),#cache
-        )
+          P(),#cache
+          P(),#cache
+        ),
       ),
+      check_rep=False,
     )
     self._sharded_attention_prefill = shard_map(
       self._sharded_attention,
@@ -161,7 +163,8 @@ class TransformerBlock(nn.Module):
         (
           P(None, 'x', None, None), #cache
           P(None, 'x', None, None),#cache
-        )
+        ),
+        P(), # position
       ),
       out_specs=(
         P(),
@@ -170,6 +173,26 @@ class TransformerBlock(nn.Module):
           P(None, 'x', None, None),#cache
         )
       ),
+      check_rep=False,
+    )
+
+    _ff_state_spec = collections.OrderedDict({
+            "w1.weight": P('x') ,
+            "w1.weight_scaler": P('x'),
+            "w2.weight":  P(None, 'x'),
+            "w2.weight_scaler": P(),
+            "w3.weight":  P('x'),
+            "w3.weight_scaler": P('x'),
+        })
+    self._ff = shard_map(
+      self._shard_ff,
+      mesh=self.env.mesh,
+      in_specs=(
+        _ff_state_spec,
+        P(), # ffns
+      ),
+      out_specs=P(),
+      check_rep=False,
     )
 
 
@@ -177,15 +200,29 @@ class TransformerBlock(nn.Module):
     attn_states,
     x, freqs_cis, mask, 
     cache_states,
+    position,
   ):
-    x, freqs_cis, mask, cache_states = torchjax.to_torch(
-      (x, freqs_cis, mask, cache_states))
-    cache_manager = Int8KVCacheGenerate(*cache_states)
+    self.env.sharding_off = True
+    attn_states, x, freqs_cis, mask, cache_states = torchjax.to_torch(
+      (attn_states, x, freqs_cis, mask, cache_states))
+    if len(cache_states) == 2:
+      cache_m = cache_manager.KVCachePrefill(True)
+      cache_m.reset(cache_states)
+    else:
+      cache_m = cache_manager.Int8KVCacheGenerate(*cache_states, position)
     res = torch.func.functional_call(self.attention, attn_states,
-      (x, freqs_cis, mask, cache_manager, None, None, None, None)
+      (x, freqs_cis, mask, cache_m, None, None, None, None)
     )
     res._elem = jax.lax.psum(res._elem, 'x')
-    return torchjax.t2j(res, cache_manager.pack())
+    self.env.sharding_off = False
+    return torchjax.from_torch((res, cache_m.pack()))
+
+  def _shard_ff(self, states, ffns):
+    states, ffns = torchjax.to_torch((states, ffns))
+    res = torch.func.functional_call(self.feed_forward, states, (ffns, ))
+    res._elem = jax.lax.psum(res._elem, 'x')
+    return torchjax.from_torch(res)
+    
 
   def forward(
       self,
@@ -199,7 +236,7 @@ class TransformerBlock(nn.Module):
       ragged_block_index=None,
   ):
     with jax.named_scope("Attention"):
-      normed = self.attention_norm(x),
+      normed = self.attention_norm(x)
       cache_states = cache.pack()
       if len(cache_states) == 2:
         attn, new_states = torchjax.call_jax(
@@ -209,17 +246,17 @@ class TransformerBlock(nn.Module):
               freqs_cis,
               mask,
               cache_states,
+              0,
         )
       else:
         attn, new_states = torchjax.call_jax(
-            self._sharded_attention,
-            (
+            self._sharded_attention_generate,
               self.attention.state_dict(),
               normed,
               freqs_cis,
               mask,
               cache_states,
-            )
+              cache.input_pos,
         )
       cache.reset(new_states)
     with jax.named_scope("ffn_norm"):
@@ -227,7 +264,9 @@ class TransformerBlock(nn.Module):
       ffns = self.ffn_norm(h)
 
     with jax.named_scope("ffn"):
-      out = h + self.feed_forward.forward(ffns)
+      out = h + torchjax.call_jax(
+          self._ff, self.feed_forward.state_dict(), ffns)
+      self.env.apply_sharding(out, axis=-1)
       return out
 
 
@@ -312,6 +351,7 @@ class Transformer(nn.Module):
     with jax.named_scope("transformer_tok"):
       seqlen = tokens.shape[-1]
       h = self.tok_embeddings(tokens)
+      self.env.apply_sharding(h, axis=-1)
 
     with jax.named_scope("transformer_freq"):
       bsz, seqlen = tokens.shape

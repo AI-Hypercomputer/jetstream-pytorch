@@ -152,6 +152,7 @@ class JetEngineEnvironment:
 
     self.cache_sharding = self.sharding_by_axis(cache_sharding_axis)
     self._load_sharding_config()
+    self.sharding_off = False
 
   def _load_sharding_config(self):
     """Load sharding config"""
@@ -168,6 +169,8 @@ class JetEngineEnvironment:
   def apply_sharding(self, tensor, *, axis: int | None):
     """Apply sharding for tensor"""
     if not isinstance(tensor, torch_xla2.tensor.XLATensor2):
+      return
+    if self.sharding_off:
       return
     sharding_spec = self.sharding_by_axis(axis)
     # pylint: disable-next=all
