@@ -15,6 +15,7 @@
 """Implement Jet Engine API."""
 
 from typing import Any, List, Optional, Tuple, Union
+import copy
 import threading
 import functools
 import os
@@ -89,7 +90,13 @@ class PyTorchEngine(engine_api.Engine):
       weights=None,
   ):
     self.pt_model = pt_model
+
     self.env = env
+    # NOTE: this makes prefill a little faster
+    env2 = JetEngineEnvironment(env._data)
+    env2.jpt_ffn_shmap = True
+    self.pt_model_prefill = llama_model.Transformer(self.pt_model.params, env2)
+
     self.default_dtype = jnp.bfloat16 if env.bf16_enable else jnp.float32
     self.rng = jax.random.PRNGKey(0)
     self.weights = weights
@@ -227,7 +234,7 @@ class PyTorchEngine(engine_api.Engine):
     paramst, argst = torchjax.to_torch((weights, args))
     with self._lock:
       with torch_xla2.default_env():
-        res = torch.func.functional_call(self.pt_model, paramst, argst)[0]
+        res = torch.func.functional_call(self.pt_model_prefill, paramst, argst)[0]
     caches_res = [c.state() for c in caches]
     return torchjax.from_torch((res, caches_res))
 

@@ -3,10 +3,12 @@
 
 from typing import Any, List, Optional
 
+import collections
 import jax
 import torch
 import torch.nn.functional as F
 import functools
+from jetstream_pt import torchjax
 from jetstream_pt.model_base import ModuleBase
 from jetstream_pt.layers import (
     Attention,
@@ -18,7 +20,8 @@ from jetstream_pt.layers import (
     get_quantized_linear_layer,
 )
 from torch import nn
-
+from jax.sharding import Mesh, PartitionSpec as P
+from jax.experimental.shard_map import shard_map
 from . import model_args
 
 
@@ -134,6 +137,31 @@ class TransformerBlock(ModuleBase):
     self.hf_name("attention_norm", "input_layernorm")
     self.hf_name("ffn_norm", "post_attention_layernorm")
 
+    _ff_state_spec = collections.OrderedDict({
+        "w1.weight": P('x') ,
+        "w1.weight_scaler": P('x'),
+        "w2.weight":  P(None, 'x'),
+        "w2.weight_scaler": P(),
+        "w3.weight":  P('x'),
+        "w3.weight_scaler": P('x'),
+    })
+    self._ff = shard_map(
+      self._shard_ff,
+      mesh=self.env.mesh,
+      in_specs=(
+        _ff_state_spec,
+        P(), # ffns
+      ),
+      out_specs=P(),
+      check_rep=False,
+    )
+
+  def _shard_ff(self, states, ffns):
+    states, ffns = torchjax.to_torch((states, ffns))
+    res = torch.func.functional_call(self.feed_forward, states, (ffns, ))
+    res._elem = jax.lax.psum(res._elem, 'x')
+    return torchjax.from_torch(res)
+
   def forward(
       self,
       x: torch.Tensor,
@@ -161,7 +189,12 @@ class TransformerBlock(ModuleBase):
       ffns = self.ffn_norm(h)
 
     with jax.named_scope("ffn"):
-      out = h + self.feed_forward.forward(ffns)
+      if self.env.jpt_ffn_shmap:
+        out = h + torchjax.call_jax(
+            self._ff, self.feed_forward.state_dict(), ffns)
+        self.env.apply_sharding(out, axis=-1)
+      else:
+        out = h + self.feed_forward.forward(ffns)
       return out
 
 
@@ -253,6 +286,7 @@ class Transformer(ModuleBase):
     with jax.named_scope("transformer_tok"):
       seqlen = tokens.shape[-1]
       h = self.tok_embeddings(tokens)
+      #self.env.apply_sharding(h, axis=-1)
 
     with jax.named_scope("transformer_freq"):
       bsz, seqlen = tokens.shape
@@ -279,6 +313,7 @@ class Transformer(ModuleBase):
             ragged_batch_index,
             ragged_block_index,
         )
+        #self.env.apply_sharding(h, axis=-1)
 
     with jax.named_scope("transformer_norm"):
       h = self.norm(h)

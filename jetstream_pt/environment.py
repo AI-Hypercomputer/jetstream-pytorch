@@ -138,6 +138,8 @@ class JetEngineEnvironment:
     self.testing_seed = self._data.testing_seed
     self.ring_buffer = self._data.ring_buffer
 
+    self.jpt_ffn_shmap = False
+
     if not self.ring_buffer:
       self.lazy_cache_update = True
       self.ragged_mha = True
