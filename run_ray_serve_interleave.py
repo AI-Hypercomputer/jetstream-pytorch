@@ -40,7 +40,7 @@ flags.DEFINE_integer(
 
 
 def create_head_resource_name(generation, tpu_chips):
-  if generation == 'v5litepod':
+  if generation == "v5litepod":
     return f"TPU-{generation}-{tpu_chips}-head"
   else:
     tpu_cores = tpu_chips * 2
