@@ -466,6 +466,9 @@ class PyTorchRayWorker:
       logits = logits[0]
 
     token = np.argmax(logits[true_length - 1])
+    updated_caches = multihost_utils.process_allgather(
+        updated_caches, tiled=True
+    )
     prefix = Prefix(token, updated_caches, true_length)
     self.prefix_queue.put(prefix, block=False)
 
