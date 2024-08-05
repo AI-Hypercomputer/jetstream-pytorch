@@ -234,7 +234,7 @@ class PageKVCacheGenerate:
       self,
       cache_k: torch.Tensor,  # previous cache
       cache_v: torch.Tensor,  # previous cache
-      page_token_indices: jax.Array,  # position to store the cache
+      page_token_indices: jax.Array,  # page indices meta for the cache
       sharding,
       env=None,
   ):
