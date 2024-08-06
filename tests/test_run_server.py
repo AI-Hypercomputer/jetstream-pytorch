@@ -17,7 +17,6 @@ from unittest.mock import patch, MagicMock
 from absl import app
 from absl.testing import flagsaver
 from parameterized import parameterized, param
-from run_server import flags
 
 
 class MockServer(MagicMock):
@@ -46,6 +45,7 @@ class ServerRunTest(unittest.TestCase):
 
   def setup(self):
     """Setup."""
+    from run_server import flags
 
     f = flags.FLAGS
     # pylint: disable-next=all
