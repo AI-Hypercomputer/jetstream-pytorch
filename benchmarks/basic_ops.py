@@ -77,7 +77,7 @@ def run_case(case, warmup=2, runtimes=5, dtype=jnp.bfloat16.dtype):
     jax.block_until_ready(case.function(*args))
     end = time.perf_counter()
     if case.profiler_output is not None and i == (runtimes - 1):
-      jax.profiler.end_trace()
+      jax.profiler.stop_trace()
     stamps.append(end - start)
   return sum(stamps) / runtimes
 
@@ -115,6 +115,7 @@ multiple_of = 256
 # hidden_dim = int(2 * hidden_dim / 3)
 # hidden_dim = multiple_of * ((hidden_dim + multiple_of - 1) // multiple_of)
 hidden_dim = 11008
+BATCH = 1024
 
 @jax.jit
 @functools.partial(
@@ -173,13 +174,13 @@ allcases = [
   BenchmarkCase(
     name = 'Llama 3xffn shardmap',
     function = llama_ffn_shmap,
-    args_shape = ((8, dim), (dim, hidden_dim), (hidden_dim, dim), (dim, hidden_dim)),
+    args_shape = ((BATCH, dim), (dim, hidden_dim), (hidden_dim, dim), (dim, hidden_dim)),
     args_sharding=(P(), P(None, 'x'), P('x'), P(None, 'x')),
   ),
   BenchmarkCase(
     name = 'Llama 3xffn gspmd',
     function = llama_ffn_spmd,
-    args_shape = ((8, dim), (dim, hidden_dim), (hidden_dim, dim), (dim, hidden_dim)),
+    args_shape = ((BATCH, dim), (dim, hidden_dim), (hidden_dim, dim), (dim, hidden_dim)),
     args_sharding=(P(), P(None, 'x'), P('x'), P(None, 'x')),
   )
 ]
