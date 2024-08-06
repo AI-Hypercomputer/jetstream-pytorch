@@ -40,6 +40,7 @@ flags.DEFINE_integer(
 
 
 def create_head_resource_name(generation, tpu_chips):
+  """Create head resource name."""
   return f"TPU-{generation}-{tpu_chips}-head"
 
 
@@ -73,6 +74,7 @@ def create_engine(**kwargs):
 
 @serve.deployment
 class JetStreamDeployment:
+  """JetStream deployment."""
 
   def __init__(self, **kwargs):
     os.environ["XLA_FLAGS"] = (
@@ -111,18 +113,24 @@ class JetStreamDeployment:
 
     print("Started jetstream driver....")
 
+  # pylint: disable-next=all
   async def Decode(
-      self, request: jetstream_pb2.DecodeRequest
+      self,
+      # pylint: disable-next=all
+      request: jetstream_pb2.DecodeRequest,
+      # pylint: disable-next=all
   ) -> AsyncIterator[jetstream_pb2.DecodeResponse]:
-
+    """Async decode function."""
     return self.orchestrator.Decode(request)
 
 
 def main(_argv):
+  """Main function"""
   resource_name = create_head_resource_name(
       FLAGS.tpu_generation, FLAGS.tpu_chips
   )
   print(f"Using head resource {resource_name}")
+  # pylint: disable-next=all
   deployment = JetStreamDeployment.options(
       ray_actor_options={"resources": {resource_name: 1}}
   ).bind(

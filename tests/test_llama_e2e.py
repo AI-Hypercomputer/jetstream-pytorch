@@ -22,14 +22,13 @@ import jax.numpy as jnp
 import torch
 import torch_xla2
 from torch.utils import _pytree as pytree
+from absl.testing import parameterized
 
 from jetstream_pt.engine import PyTorchEngine
 from jetstream_pt.third_party.llama import model_exportable, model_args
 from jetstream_pt.third_party.llama.generation_original import LlamaOriginal
 from jetstream_pt import environment
 from tests import helpers
-from jetstream_pt import torchjax
-from absl.testing import parameterized
 
 
 class LlamaE2ETest(parameterized.TestCase):
@@ -43,6 +42,7 @@ class LlamaE2ETest(parameterized.TestCase):
     torch.set_default_dtype(torch_dtype)
     jax.config.update("jax_dynamic_shapes", False)
     jax.config.update("jax_traceback_filtering", "off")
+    # pylint: disable-next=all
     config = model_args.get_model_args("tiny", 128, 1, 32000, True)
     environment_data = environment.JetEngineEnvironmentData()
     environment_data.max_input_sequence_length = 128

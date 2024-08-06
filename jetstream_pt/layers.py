@@ -456,7 +456,7 @@ class AttentionKernel:
       # When GQA is enabled, it not necessary to expand
       if not (self.env.ragged_mha and n_rep > 1) and seqlen == 1:
         true_len = 2
-        #xq = torch.broadcast_to(xq, (xq.shape[0], xq.shape[1], 2, xq.shape[3]))
+        # xq = torch.broadcast_to(xq, (xq.shape[0], xq.shape[1], 2, xq.shape[3]))
         xq = torch.nn.functional.pad(
             xq, (0, 0, 0, true_len - seqlen), "constant", 0
         )
@@ -713,6 +713,7 @@ class Int8KVAttentionKernel:
       attn_out = existing_output + new_output
 
       return attn_out
+
 
 class Attention(ModuleBase):
   """Attention module."""

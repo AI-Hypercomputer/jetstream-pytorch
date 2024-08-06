@@ -12,17 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import copy
 import functools
 import unittest
 
 import jax
 import jax.numpy as jnp
-import jax.sharding as jsharding
 import torch
 import torch_xla2
-from jax.experimental import mesh_utils
-from jetstream_pt import cache_manager, layers, quantize, torchjax, environment
+from absl.testing import parameterized
+from tests import helpers
+
+
+from jetstream_pt import cache_manager, layers, torchjax, environment
 from jetstream_pt.environment import QuantizationConfig
 from jetstream_pt.layers import (
     WeightOnlyBlockwiseQuantizedLinear,
@@ -30,11 +31,7 @@ from jetstream_pt.layers import (
 )
 from jetstream_pt.quantize_model import quantize_model
 from jetstream_pt.quantize import dequantize_tensor, quantize_tensor
-from tests import helpers
-from torch.utils import _pytree as pytree
-from torch_xla2 import tensor
-import copy
-from absl.testing import parameterized
+
 
 torch.manual_seed(12345)
 
@@ -127,27 +124,27 @@ class QuantizationTest(parameterized.TestCase):
         if env.generate_cache_stacked:
           self.assertTrue(
               jnp.allclose(
-                  k._elem,
-                  new_k._elem[in_layer, :, :, in_pos : (in_pos + 1), :],
+                  k.jax(),
+                  new_k.jax()[in_layer, :, :, in_pos : (in_pos + 1), :],
                   atol=0.1,
               )
           )
           self.assertTrue(
               jnp.allclose(
-                  v._elem,
-                  new_v._elem[in_layer, :, :, in_pos : (in_pos + 1), :],
+                  v.jax(),
+                  new_v.jax()[in_layer, :, :, in_pos : (in_pos + 1), :],
                   atol=0.1,
               )
           )
         else:
           self.assertTrue(
               jnp.allclose(
-                  k._elem, new_k._elem[:, :, in_pos : (in_pos + 1), :], atol=0.1
+                  k.jax(), new_k.jax()[:, :, in_pos : (in_pos + 1), :], atol=0.1
               )
           )
           self.assertTrue(
               jnp.allclose(
-                  v._elem, new_v._elem[:, :, in_pos : (in_pos + 1), :], atol=0.1
+                  v.jax(), new_v.jax()[:, :, in_pos : (in_pos + 1), :], atol=0.1
               )
           )
 
@@ -159,6 +156,7 @@ class QuantizationTest(parameterized.TestCase):
       ("ring_buffer", True),
       ("left_aligned", False),
   )
+  # pylint: disable-next=all
   def test_kv_kernel(self, ring_buffer):
     """test kv cache quantization"""
 
@@ -254,7 +252,9 @@ class QuantizationTest(parameterized.TestCase):
 
       # Running into the issue of multiple env object always share the same quant_config.
       # Record the results and compare as a workaround.
+      # pylint: disable-next=all
       env._data.quant_config.enable_kv_quantization = True
+      # pylint: disable-next=all
       env = environment.JetEngineEnvironment(env._data)
 
       cache_int = cache_manager.Int8KVCacheGenerate(
@@ -284,6 +284,7 @@ class QuantizationTest(parameterized.TestCase):
         self.assertTrue(jnp.allclose(f.jax(), i.jax(), atol=0.01))
 
   def test_quantize_dequantize_tensor(self):
+    """Test quantize and dequantize tensor."""
 
     def quantize_dequantize_weight(w, n_bit):
       # print(f"original w {w}")
@@ -333,10 +334,9 @@ class QuantizationTest(parameterized.TestCase):
         quantize_dequantize_weight(w, bit)
 
   def test_weight_only_quant(self):
-
+    """Test weight only quantization."""
     out_features = 2048
     in_features = 2048
-    block_size = 128
 
     arg = torch.randn(2, 16, in_features).to(torch.bfloat16)
     nn_linear = torch.nn.Linear(
@@ -377,24 +377,27 @@ class QuantizationTest(parameterized.TestCase):
         in_features, out_features, quant_config=quant_config
     )
     # block_q_linear.run_fake_quantize = True
-    res, torch_res, block_diff2 = self._nn_linear_run_and_compare(
+    res, torch_res, _ = self._nn_linear_run_and_compare(
         nn_linear, block_q_linear, arg
     )
     # self._print_diff(res, torch_res)
     self.assertLess(per_channel_diff2.norm(), per_channel_diff.norm())
+    # pylint: disable-next=all
     # FIXME: Now asymmetric blockwise quant has higher error than asymmetric per-channel.
     # self.assertLess(block_diff2.norm(), per_channel_diff2.norm())
 
   def test_int4_weight_loading(self):
+    """Test int4 weight loading."""
     layer = WeightOnlyBlockwiseQuantizedLinear(1024, 2048)
     state_dict_jax = torchjax.from_torch(
         helpers.to_xla_tensor(layer.state_dict())
     )
     state_dict_jax["weight"] = state_dict_jax["weight"].astype(jnp.int4)
     state_dict_torch = torchjax.to_torch(state_dict_jax)
-    self.assertTrue(state_dict_torch["weight"]._elem.dtype == jnp.int4)
+    self.assertTrue(state_dict_torch["weight"].jax().dtype == jnp.int4)
 
   def test_blockwise_quantized_linear_sharding(self):
+    """Test blockwise quantized linear sharding."""
 
     @functools.partial(
         jax.jit,
@@ -410,19 +413,20 @@ class QuantizationTest(parameterized.TestCase):
     state_dict_jax = torchjax.from_torch(
         helpers.to_xla_tensor(layer.state_dict())
     )
-    input = jax.random.normal(
+    inputs = jax.random.normal(
         jax.random.key(0), shape=(2, 32, 1024), dtype=jnp.bfloat16
     )
 
-    def shard_and_lower(f, layer, state_dict_jax, input, shardings):
+    def shard_and_lower(f, layer, state_dict_jax, inputs, shardings):
       for k, v in state_dict_jax.items():
         if k == "weight":
           state_dict_jax[k] = v.astype(jnp.int4)
           state_dict_jax[k] = jax.device_put(v, sharding[0])
         if k == "weight_scaler":
           state_dict_jax[k] = jax.device_put(v, sharding[1])
-      pre_opt = f.lower(layer, state_dict_jax, input).as_text("hlo")
-      post_opt = f.lower(layer, state_dict_jax, input).compile().as_text()
+      # pre opt, for debugging
+      _ = f.lower(layer, state_dict_jax, inputs).as_text("hlo")
+      post_opt = f.lower(layer, state_dict_jax, inputs).compile().as_text()
       return post_opt
 
     env, _ = helpers.make_env_tiny()
@@ -432,15 +436,16 @@ class QuantizationTest(parameterized.TestCase):
         #  (sharding_by_axis(1), sharding_by_axis(0)), # bad sharding
     ]
     for sharding in shardings:
-      opt_hlo = shard_and_lower(f, layer, state_dict_jax, input, sharding)
+      opt_hlo = shard_and_lower(f, layer, state_dict_jax, inputs, sharding)
       self.assertFalse("all-to-all" in opt_hlo)
       self.assertFalse("all-reduce-scatter" in opt_hlo)
 
   def test_activation_quant_per_channel(self):
-
+    """Test activation quantization channel mode."""
     out_features = 8
     in_features = 4
-    block_size = 128
+    # Block size
+    _ = 128
 
     arg = torch.randn(2, 1, in_features).to(torch.bfloat16)
     nn_linear = torch.nn.Linear(
@@ -459,10 +464,11 @@ class QuantizationTest(parameterized.TestCase):
     self.assertGreater(self._calc_cosine_dist(res, torch_res), 0.9999)
 
   def test_quant_creator(self):
-
+    """Test quantization creator."""
     out_features = 8
     in_features = 4
-    block_size = 128
+    # Block size
+    _ = 128
 
     arg = torch.randn(2, 1, in_features).to(torch.bfloat16)
     nn_linear = torch.nn.Linear(
@@ -479,8 +485,10 @@ class QuantizationTest(parameterized.TestCase):
     self.assertGreater(self._calc_cosine_dist(res, torch_res), 0.9999)
 
   def test_3_layers(self):
+    """Test 3 layers."""
 
     class Model(torch.nn.Module):
+      """Model."""
 
       def __init__(self):
         super().__init__()
@@ -489,6 +497,7 @@ class QuantizationTest(parameterized.TestCase):
         self.linear3 = torch.nn.Linear(2048, 1024, bias=False)
 
       def forward(self, x):
+        """Forward function."""
         x = self.linear1(x)
         x = self.linear2(x)
         x = self.linear3(x)

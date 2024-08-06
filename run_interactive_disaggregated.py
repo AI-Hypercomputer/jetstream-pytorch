@@ -19,9 +19,7 @@ import time
 from typing import List
 from absl import app
 from absl import flags
-from colorama import Fore, Style
 
-import numpy as np
 import jax
 
 from jetstream.engine import token_utils
@@ -129,7 +127,6 @@ def main(argv):
   print("Load params ", time.perf_counter() - start)
 
   metadata = prefill_engine.get_tokenizer()
-  tokenizer = prefill_engine.build_tokenizer(metadata)
   vocab = token_utils.load_vocab(metadata.path, metadata.extra_ids)
   stop_tokens = [vocab.eos_id, vocab.pad_id]
   max_output_length = 1024
@@ -157,19 +154,21 @@ def main(argv):
     print(f"---- Input prompts are: {prompt}")
     print(f"---- Encoded tokens are: {tokens}")
 
-    # pylint: disable-next=all
     print(
+        # pylint: disable-next=all
         f"---- Do prefill in prefill engine pod_slice_name: {prefill_engine.pod_slice_name}"
     )
     prefill_result, _ = prefill_engine.prefill(
         params=None, padded_tokens=tokens, true_length=true_length
     )
     print(
+        # pylint: disable-next=all
         f"---- Transfer prefill result to decode engine pod_slice_name: {decode_engine.pod_slice_name}"
     )
     decode_engine.transfer(prefill_result)
-    # pylint: disable-next=all
+
     print(
+        # pylint: disable-next=all
         f"---- Do insert in decode engine pod_slice_name: {decode_engine.pod_slice_name}"
     )
     decode_state = decode_engine.insert(prefill_result, None, slot=slot)

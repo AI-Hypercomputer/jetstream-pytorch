@@ -17,32 +17,40 @@ from unittest.mock import patch, MagicMock
 from absl import app
 from absl.testing import flagsaver
 from parameterized import parameterized, param
+from run_server import flags
 
 
 class MockServer(MagicMock):
+  """Mock server."""
 
   def run(self, **kwargs):
+    """Run."""
     return self
 
   def wait_for_termination(self):
+    """Wait for termination."""
     raise SystemExit("Successfully exited test.")
 
 
 def mock_engine(**kwargs):
+  """Mock engine."""
   return kwargs
 
 
 class ServerRunTest(unittest.TestCase):
+  """Server run test."""
 
   def reset_flags(self):
+    """Reset flag."""
     flagsaver.restore_flag_values(self.original)
 
   def setup(self):
-    from run_server import flags
+    """Setup."""
 
-    FLAGS = flags.FLAGS
+    f = flags.FLAGS
+    # pylint: disable-next=all
     self.original = flagsaver.save_flag_values()
-    return FLAGS
+    return f
 
   @parameterized.expand(
       [
@@ -61,50 +69,51 @@ class ServerRunTest(unittest.TestCase):
         args (List): List to simulate sys.argv with dummy first entry at index 0.
         expected (str): model_name flag value to inspect
     """
+    # pylint: disable-next=all
     from run_server import main
 
-    FLAGS = self.setup()
+    f = self.setup()
     with self.assertRaisesRegex(SystemExit, "Successfully exited test."):
       app.run(main, args)
 
     # run_server
-    self.assertEqual(FLAGS.port, 9000)
-    self.assertEqual(FLAGS.threads, 64)
-    self.assertEqual(FLAGS.config, "InterleavedCPUTestServer")
-    self.assertEqual(FLAGS.prometheus_port, 0)
-    self.assertEqual(FLAGS.enable_jax_profiler, False)
-    self.assertEqual(FLAGS.jax_profiler_port, 9999)
+    self.assertEqual(f.port, 9000)
+    self.assertEqual(f.threads, 64)
+    self.assertEqual(f.config, "InterleavedCPUTestServer")
+    self.assertEqual(f.prometheus_port, 0)
+    self.assertEqual(f.enable_jax_profiler, False)
+    self.assertEqual(f.jax_profiler_port, 9999)
 
     # quantization configs
-    self.assertEqual(FLAGS.quantize_weights, False)
-    self.assertEqual(FLAGS.quantize_activation, False)
-    self.assertEqual(FLAGS.quantize_type, "int8_per_channel")
-    self.assertEqual(FLAGS.quantize_kv_cache, False)
+    self.assertEqual(f.quantize_weights, False)
+    self.assertEqual(f.quantize_activation, False)
+    self.assertEqual(f.quantize_type, "int8_per_channel")
+    self.assertEqual(f.quantize_kv_cache, False)
 
     # engine configs
-    self.assertEqual(FLAGS.tokenizer_path, None)
-    self.assertEqual(FLAGS.checkpoint_path, None)
-    self.assertEqual(FLAGS.bf16_enable, True)
-    self.assertEqual(FLAGS.context_length, 1024)
-    self.assertEqual(FLAGS.batch_size, 32)
-    self.assertEqual(FLAGS.size, "tiny")
-    self.assertEqual(FLAGS.max_cache_length, 1024)
-    self.assertEqual(FLAGS.shard_on_batch, False)
-    self.assertEqual(FLAGS.sharding_config, "")
-    self.assertEqual(FLAGS.ragged_mha, False)
-    self.assertEqual(FLAGS.starting_position, 512)
-    self.assertEqual(FLAGS.temperature, 1.0)
-    self.assertEqual(FLAGS.sampling_algorithm, "greedy")
-    self.assertEqual(FLAGS.nucleus_topp, 0.0)
-    self.assertEqual(FLAGS.topk, 0)
-    self.assertEqual(FLAGS.ring_buffer, True)
+    self.assertEqual(f.tokenizer_path, None)
+    self.assertEqual(f.checkpoint_path, None)
+    self.assertEqual(f.bf16_enable, True)
+    self.assertEqual(f.context_length, 1024)
+    self.assertEqual(f.batch_size, 32)
+    self.assertEqual(f.size, "tiny")
+    self.assertEqual(f.max_cache_length, 1024)
+    self.assertEqual(f.shard_on_batch, False)
+    self.assertEqual(f.sharding_config, "")
+    self.assertEqual(f.ragged_mha, False)
+    self.assertEqual(f.starting_position, 512)
+    self.assertEqual(f.temperature, 1.0)
+    self.assertEqual(f.sampling_algorithm, "greedy")
+    self.assertEqual(f.nucleus_topp, 0.0)
+    self.assertEqual(f.topk, 0)
+    self.assertEqual(f.ring_buffer, True)
 
     # profiling configs
-    self.assertEqual(FLAGS.profiling_prefill, False)
-    self.assertEqual(FLAGS.profiling_output, "")
+    self.assertEqual(f.profiling_prefill, False)
+    self.assertEqual(f.profiling_output, "")
 
     # model_name flag updates
-    self.assertEqual(FLAGS.model_name, expected)
+    self.assertEqual(f.model_name, expected)
 
     # reset back to original flags
     self.reset_flags()
@@ -112,7 +121,8 @@ class ServerRunTest(unittest.TestCase):
   @parameterized.expand([param(["test1", "--model_name", "llama3"])])
   @patch("jetstream_pt.engine.create_pytorch_engine", mock_engine)
   def test_call_server_object(self, args):
-    """tests whether running the main script from absl.app.run launches a server and waits for termination
+    """tests whether running the main script from absl.app.run launches a server
+    and waits for termination
 
     Args:
         args (List): List to simulate sys.argv with dummy first entry at index 0.
@@ -120,9 +130,10 @@ class ServerRunTest(unittest.TestCase):
     with patch(
         "jetstream.core.server_lib.run", autospec=MockServer().run
     ) as mock_server:
+      # pylint: disable-next=all
       from run_server import main
 
-      FLAGS = self.setup()
+      _ = self.setup()
       with self.assertRaises(SystemExit):
         app.run(main, args)
       self.assertEqual(mock_server.call_count, 1)

@@ -17,7 +17,6 @@ import jax
 import jax.numpy as jnp
 import torch
 import torch_xla2
-from . import helpers
 
 from jetstream_pt.third_party.llama import model_exportable
 from jetstream_pt.third_party.llama import model_original
@@ -29,6 +28,8 @@ from jetstream_pt.third_party.mixtral import config as mixtral_config
 from jetstream_pt import torchjax
 from jetstream_pt import layers
 from jetstream_pt import cache_manager
+
+from . import helpers
 
 
 class ModelComponentTest(unittest.TestCase):
@@ -77,7 +78,7 @@ class ModelComponentTest(unittest.TestCase):
 
   def _compare_cache(self, cache_torch, cache_jax):
     _, seq, _, _ = cache_torch.shape
-    cache_j = torch_xla2.tensor.j2t(cache_jax._elem)
+    cache_j = torch_xla2.tensor.j2t(cache_jax.jax())
     for s in range(seq):
       print("diff ", (cache_torch[0, s] - cache_j[0, :, s]).norm())
 
@@ -141,13 +142,14 @@ class ModelComponentTest(unittest.TestCase):
     cache_decode = self._make_one_cache_for_generate(env, pos)
 
     # insert prefilled cache entry
-    cache_decode.cache_k._elem = cache_decode.cache_k._elem.at[
-        ..., :pos, :
-    ].set(cache.cache_k._elem)
-
-    cache_decode.cache_v._elem = cache_decode.cache_v._elem.at[
-        ..., :pos, :
-    ].set(cache.cache_v._elem)
+    # pylint: disable-next=all
+    cache_decode.cache_k._elem = (
+        cache_decode.cache_k.jax().at[..., :pos, :].set(cache.cache_k.jax())
+    )
+    # pylint: disable-next=all
+    cache_decode.cache_v._elem = (
+        cache_decode.cache_v.jax().at[..., :pos, :].set(cache.cache_v.jax())
+    )
 
     # self._compare_cache(attention_orig.cache_k, cache_decode.cache_k)
     # Now do one with decode
@@ -176,6 +178,7 @@ class ModelComponentTest(unittest.TestCase):
     self.assertTrue(torch.allclose(result_torch, expected_out, atol=1e-4))
 
   def test_gemma_attention(self):
+    """Test gemma attention."""
     with jax.default_matmul_precision("float32"):
       env, model_arg = helpers.make_env_tiny(False)
 
@@ -306,12 +309,14 @@ class ModelComponentTest(unittest.TestCase):
     cache_decode = self._make_one_cache_for_generate(env, pos)
 
     # insert prefilled cache entry
-    cache_decode.cache_k._elem = cache_decode.cache_k._elem.at[
-        ..., :pos, :
-    ].set(cache.cache_k._elem)
-    cache_decode.cache_v._elem = cache_decode.cache_v._elem.at[
-        ..., :pos, :
-    ].set(cache.cache_v._elem)
+    # pylint: disable-next=all
+    cache_decode.cache_k._elem = (
+        cache_decode.cache_k.jax().at[..., :pos, :].set(cache.cache_k.jax())
+    )
+    # pylint: disable-next=all
+    cache_decode.cache_v._elem = (
+        cache_decode.cache_v.jax().at[..., :pos, :].set(cache.cache_v.jax())
+    )
 
     # Now do one with decode
     x2 = torch.randn((1, 1, model_arg.dim))
@@ -433,14 +438,16 @@ class ModelComponentTest(unittest.TestCase):
     self.assertTrue(torch.allclose(result_torch, expected_out, atol=1e-4))
 
   def test_mixtral_moe(self):
+    """Test mixtral moe module."""
     config = mixtral_config.ModelArgs()
     config.intermediate_size = 16
     config.dim = 16
     m = mixtral.ConditionalFeedForward(config)
     # random init
     states = m.state_dict()
-    for k, v in states.items():
-      states[k].normal_()
+    for _, v in states.items():
+      # pylint: disable-next=all
+      v.normal_()
     m.load_state_dict(states, assign=True)
 
     seqlen = 3
