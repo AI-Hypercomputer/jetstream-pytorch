@@ -65,7 +65,7 @@ class PageAttentnioTest(parameterized.TestCase):
       k, v = jnp.reshape(k, (1, 1, seq_len, dim)), jnp.reshape(
           k, (1, 1, seq_len, dim)
       )
-      prefill_chache.update(k, v)
+      prefill_chache.update(k, v, 0)
       prefill_caches = [prefill_chache]
       prefill_caches = [c.state() for c in prefill_caches]
 

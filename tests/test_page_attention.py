@@ -57,7 +57,7 @@ class PageAttentnioTest(parameterized.TestCase):
     prefill_chache = KVCachePrefill()
     k, v = jnp.arange(6), jnp.arange(6)
     k, v = jnp.reshape(k, (1, 1, 3, 2)), jnp.reshape(k, (1, 1, 3, 2))
-    prefill_chache.update(k, v)
+    prefill_chache.update(k, v, 0)
     prefill_caches = [prefill_chache]
     prefill_caches = [c.state() for c in prefill_caches]
 
@@ -89,7 +89,7 @@ class PageAttentnioTest(parameterized.TestCase):
     prefill_chache = KVCachePrefill()
     k, v = jnp.arange(12), jnp.arange(12)
     k, v = jnp.reshape(k, (1, 1, 6, 2)), jnp.reshape(k, (1, 1, 6, 2))
-    prefill_chache.update(k, v)
+    prefill_chache.update(k, v, 0)
     prefill_caches = [prefill_chache]
     prefill_caches = [c.state() for c in prefill_caches]
 
