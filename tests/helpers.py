@@ -6,7 +6,8 @@ from jetstream_pt.third_party.mixtral import config as mixtral_config
 from jetstream_pt import environment
 
 
-def make_env_tiny(bf16_enable=True):
+# pylint: disable-next=all
+def make_env_tiny(bf16_enable=True, env_data_update_fn=lambda _: None):
   torch_dtype = torch.bfloat16 if bf16_enable else torch.float32
   torch.set_default_dtype(torch_dtype)
   jax.config.update("jax_dynamic_shapes", False)
@@ -26,11 +27,14 @@ def make_env_tiny(bf16_enable=True):
       environment_data.cache_sequence_length,
       config.dim // config.n_heads,
   )
+  environment_data.testing = True
+  env_data_update_fn(environment_data)
   env = environment.JetEngineEnvironment(environment_data)
   env.apply_sharding = lambda *args, **kwargs: None  # don't shard on cpu
   return env, config
 
 
+# pylint: disable-next=all
 def make_mixtral_env(bf16_enable=True):
   torch_dtype = torch.bfloat16 if bf16_enable else torch.float32
   torch.set_default_dtype(torch_dtype)
@@ -55,14 +59,16 @@ def make_mixtral_env(bf16_enable=True):
   return env, config
 
 
+# pylint: disable-next=all
 def to_xla_tensor(tree):
   return torch_xla2.default_env().to_xla(tree)
 
 
+# pylint: disable-next=all
 def call_xla_model(model, weights, args):
   with jax.default_device(jax.devices("cpu")[0]):
     xla_weights, xla_inputs = to_xla_tensor((weights, args))
     with torch_xla2.default_env():
       result = torch.func.functional_call(model, xla_weights, xla_inputs)
-    result_torch = torch_xla2.tensor.j2t(result._elem)
+    result_torch = torch_xla2.tensor.j2t(result.jax())
     return result_torch

@@ -599,7 +599,7 @@ class PyTorchRayWorker:
 
       @functools.partial(jax.jit, donate_argnums=(0, 1), inline=True)
       def insert(cache, scaler, new_entry):
-        reduce_axis = (1, 3)
+        reduce_axis = (-3, -1)
         vals, scales, _ = torchjax.call_torch(
             quantize.quantize_tensor, new_entry, reduce_axis
         )

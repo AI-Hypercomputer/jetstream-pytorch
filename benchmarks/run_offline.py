@@ -32,7 +32,7 @@ logging.getLogger().setLevel(logging.ERROR)
 flags.DEFINE_string("sharegpt_path", "", "path to sharegpt json file")
 
 
-def run_prefill_time(engine, params, decode_state, seqlen):
+def run_prefill_time(engine, params, decode_state, seqlen, profiler_started):
   """Run prefill and measure time."""
   metadata = engine.get_tokenizer()
   tokenizer = engine.build_tokenizer(metadata)
@@ -53,6 +53,10 @@ def run_prefill_time(engine, params, decode_state, seqlen):
   nums = 5
   start = time.perf_counter()
   for i in range(nums):
+    if i == nums - 1 and FLAGS.profiling_prefill and not profiler_started:
+      jax.profiler.start_trace(FLAGS.profiling_output)
+      profiler_started = True
+
     prefill_result, _ = engine.prefill(
         params=params, padded_tokens=tokens, true_length=true_length
     )
@@ -60,8 +64,9 @@ def run_prefill_time(engine, params, decode_state, seqlen):
         prefill_result, decode_state, slot=jnp.int32(i)
     )
   jax.block_until_ready(decode_state)
+
   end = time.perf_counter()
-  return (end - start) / nums, decode_state
+  return (end - start) / nums, decode_state, profiler_started
 
 
 MAXTEXT_PREFILL = {
@@ -86,9 +91,10 @@ def main(argv):
   prefill_times = {}
 
   decode_state = engine.init_decode_state()
+  profiler_started = False
   for batch, _ in MAXTEXT_PREFILL.items():
-    runtime, decode_state = run_prefill_time(
-        engine, params, decode_state, batch
+    runtime, decode_state, profiler_started = run_prefill_time(
+        engine, params, decode_state, batch, profiler_started
     )
     prefill_times[batch] = runtime
 
@@ -103,10 +109,12 @@ def main(argv):
 
   profiling_output = FLAGS.profiling_output
   print("======= decode starting ===")
+
   dec_times = []
   for i in range(10):
-    if profiling_output and i == 7:
+    if profiling_output and i == 7 and not profiler_started:
       jax.profiler.start_trace(profiling_output)
+      profiler_started = True
     start = time.perf_counter()
     # pylint: disable-next=all
     decode_state, sampled_tokens = engine.generate(params, decode_state)
@@ -116,7 +124,7 @@ def main(argv):
     dec_times.append(end - start)
     print(i, "decode time", (end - start))
 
-  if profiling_output:
+  if profiler_started:
     jax.profiler.stop_trace()
 
   print("prefill ", prefill_times)

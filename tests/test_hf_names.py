@@ -4,10 +4,13 @@ from jetstream_pt.model_base import ModuleBase
 
 
 class TestModuleBase(unittest.TestCase):
+  """Test module base."""
 
   def test_get_hf_names_to_real_name(self):
+    """Test get hugginface names to real name."""
 
     class MyModule(ModuleBase):
+      """My module."""
 
       def __init__(self):
         super().__init__()
@@ -17,6 +20,9 @@ class TestModuleBase(unittest.TestCase):
         self.hf_name("linear2", "model.my_linear2")
         self.param = torch.nn.Parameter(torch.randn(10))
         self.hf_name("param", "model.param")
+
+      def forward(self):
+        """Forward function."""
 
     module = MyModule()
     expected_mapping = {
@@ -30,7 +36,10 @@ class TestModuleBase(unittest.TestCase):
     self.assertEqual(module.get_hf_names_to_real_name(), expected_mapping)
 
   def test_get_sharding_annotations(self):
+    """Test get sharding annotations."""
+
     class MyModule(ModuleBase):
+      """MyModule."""
 
       def __init__(self):
         super().__init__()
@@ -38,11 +47,18 @@ class TestModuleBase(unittest.TestCase):
         self.embedding = torch.nn.Embedding(100, 50)
         self.inner = InnerModule()
 
+      def forward(self):
+        """Forward function."""
+
     class InnerModule(ModuleBase):
+      """Inner modeule."""
 
       def __init__(self):
         super().__init__()
         self.fc = torch.nn.Linear(50, 100)
+
+      def forward(self):
+        """Forward function."""
 
     module = MyModule()
     module.annotate_sharding("linear.weight", 0)
