@@ -654,3 +654,61 @@ class Int8KVCacheGenerate:
             self.new_v_scaler,
             self.input_pos,
         )
+
+
+class PageKVCacheGenerate:
+  """Page attention kvache generator without quantization"""
+
+  def __init__(
+      self,
+      cache_k: torch.Tensor,  # previous cache
+      cache_v: torch.Tensor,  # previous cache
+      page_token_indices: jax.Array,  # page and token indices for the cache
+      sharding,
+      env=None,
+  ):
+    super().__init__()
+    self.cache_k = cache_k
+    self.cache_v = cache_v
+    self.page_token_indices = page_token_indices
+    self.sharding = sharding
+    self.env = env
+
+  def update(self, key, value):
+    """Update kv cache"""
+    keyj, valuej = torchjax.from_torch((key, value))
+
+    def _update(cache, x):
+      x = x.squeeze(2).transpose((1, 0, 2))
+      x = x[:, self.page_token_indices[2], :]
+      head, _, page_size, dim = cache.shape
+      selected_cache = cache[:, self.page_token_indices[0], :, :]
+      selected_cache = selected_cache.reshape((head, -1, dim))
+
+      selected_cache = selected_cache.at[:, self.page_token_indices[1], :].set(
+          x
+      )
+      selected_cache = selected_cache.reshape((head, -1, page_size, dim))
+
+      cache = cache.at[:, self.page_token_indices[0], :, :].set(selected_cache)
+      return cache
+
+    # pylint: disable-next=all
+    self.cache_k._elem = _update(self.cache_k._elem, keyj)
+    # pylint: disable-next=all
+    self.cache_k._elem = _update(self.cache_v._elem, valuej)
+    return self.cache_k, self.cache_v
+
+  def state(self):
+    """Get kv cache state"""
+    # pylint: disable-next=all
+    return self.cache_k.jax(), self.cache_v.jax()
+
+  @classmethod
+  def empty(cls, shape, device, bf16_enable, env):
+    """Create empty kv caches"""
+    default_dtype = jnp.bfloat16 if bf16_enable else jnp.float32
+    k = jnp.zeros(shape, device=device, dtype=default_dtype)
+    v = jnp.zeros(shape, device=device, dtype=default_dtype)
+    k, v = torchjax.to_torch((k, v))
+    return cls(k, v, None, device, env=env)
