@@ -247,10 +247,10 @@ class PageKVCacheGenerate:
 
   def update(self, key, value):
     """Update kv cache"""
-    keyj, valuej = torchjax.to_torch((key, value))
+    keyj, valuej = torchjax.from_torch((key, value))
 
     def _update(cache, x):
-      x = x.squeeze(2).transpose(1, 0).jax()
+      x = x.squeeze(2).transpose((1, 0, 2))
       x = x[:, self.page_token_indices[2], :]
       head, _, page_size, dim = cache.shape
       selected_cache = cache[:, self.page_token_indices[0], :, :]

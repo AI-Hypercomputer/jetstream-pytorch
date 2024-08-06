@@ -90,6 +90,8 @@ class PageAttentnioTest(parameterized.TestCase):
     xk, xv = jnp.arange(-1, -11, -1).reshape(5, 1, 1, 2), jnp.arange(
         -1, -11, -1
     ).reshape(5, 1, 1, 2)
+    xk = torchjax.to_torch(xk)
+    xv = torchjax.to_torch(xv)
     decode_caches = caches_obj[0].update(xk, xv)
     expected = jnp.asarray([[0, 1], [2, 3], [4, 5], [-1, -2]])
     self.assertTrue(jnp.array_equal(decode_caches[0][0][0], expected))
