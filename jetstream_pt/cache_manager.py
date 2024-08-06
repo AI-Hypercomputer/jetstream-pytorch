@@ -676,7 +676,9 @@ class PageKVCacheGenerate:
 
   def update(self, key, value):
     """Update kv cache"""
-    keyj, valuej, page_token_indicesj = torchjax.from_torch((key, value, self.page_token_indices))
+    keyj, valuej, page_token_indicesj = torchjax.from_torch(
+        (key, value, self.page_token_indices)
+    )
 
     def _update(cache, x):
       x = x.squeeze(2).transpose((1, 0, 2))
@@ -685,9 +687,7 @@ class PageKVCacheGenerate:
       selected_cache = cache[:, page_token_indicesj[0], :, :]
       selected_cache = selected_cache.reshape((head, -1, dim))
 
-      selected_cache = selected_cache.at[:, page_token_indicesj[1], :].set(
-          x
-      )
+      selected_cache = selected_cache.at[:, page_token_indicesj[1], :].set(x)
       selected_cache = selected_cache.reshape((head, -1, page_size, dim))
 
       cache = cache.at[:, page_token_indicesj[0], :, :].set(selected_cache)
