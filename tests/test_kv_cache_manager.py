@@ -80,6 +80,7 @@ class PageAttentnioTest(parameterized.TestCase):
     lens = jnp.asarray([3, 8, 0, 13, 0]).reshape(5, 1)
     pam.fill_new_pages(lens)
     page_token_indices = pam.get_page_token_indices(lens)
+    page_token_indices = torchjax.to_torch(page_token_indices)
 
     caches_obj = [
         PageKVCacheGenerate(

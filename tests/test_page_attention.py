@@ -11,7 +11,7 @@ from jetstream_pt.cache_manager import PageKVCacheGenerate, KVCachePrefill
 from absl.testing import parameterized
 
 
-class PageAttentnioTest(parameterized.TestCase):
+class PageAttentionTest(parameterized.TestCase):
 
   def _make_env(self, bf16_enable=True):
     torch_dtype = torch.bfloat16 if bf16_enable else torch.float32

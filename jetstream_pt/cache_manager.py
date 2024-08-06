@@ -663,7 +663,7 @@ class PageKVCacheGenerate:
       self,
       cache_k: torch.Tensor,  # previous cache
       cache_v: torch.Tensor,  # previous cache
-      page_token_indices: jax.Array,  # page and token indices for the cache
+      page_token_indices: torch.Tensor,  # page and token indices for the cache
       sharding,
       env=None,
   ):
@@ -676,21 +676,21 @@ class PageKVCacheGenerate:
 
   def update(self, key, value):
     """Update kv cache"""
-    keyj, valuej = torchjax.from_torch((key, value))
+    keyj, valuej, page_token_indicesj = torchjax.from_torch((key, value, self.page_token_indices))
 
     def _update(cache, x):
       x = x.squeeze(2).transpose((1, 0, 2))
-      x = x[:, self.page_token_indices[2], :]
+      x = x[:, page_token_indicesj[2], :]
       head, _, page_size, dim = cache.shape
-      selected_cache = cache[:, self.page_token_indices[0], :, :]
+      selected_cache = cache[:, page_token_indicesj[0], :, :]
       selected_cache = selected_cache.reshape((head, -1, dim))
 
-      selected_cache = selected_cache.at[:, self.page_token_indices[1], :].set(
+      selected_cache = selected_cache.at[:, page_token_indicesj[1], :].set(
           x
       )
       selected_cache = selected_cache.reshape((head, -1, page_size, dim))
 
-      cache = cache.at[:, self.page_token_indices[0], :, :].set(selected_cache)
+      cache = cache.at[:, page_token_indicesj[0], :, :].set(selected_cache)
       return cache
 
     # pylint: disable-next=all
