@@ -64,7 +64,9 @@ def run_prefill_time(engine, params, decode_state, seqlen, profiler_started):
         prefill_result, decode_state, slot=jnp.int32(i)
     )
   jax.block_until_ready(decode_state)
-
+  if profiler_started:
+      profiler_started = False
+      jax.profiler.stop_trace()
   end = time.perf_counter()
   return (end - start) / nums, decode_state, profiler_started
 
