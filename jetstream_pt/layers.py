@@ -438,7 +438,7 @@ class AttentionKernel:
             xq, (0, 0, 0, true_len - seqlen), "constant", 0
         )
 
-      if self.env.ragged_mha and seqlen == 1:
+      if self.env.ragged_mha and seqlen == 1 and keys.shape[-2] > 1:
         local_output, (local_max, local_denom) = torch_xla2.interop.call_jax(
             impl,
             xq,
@@ -589,7 +589,7 @@ class Int8KVAttentionKernel:
         )
 
       # We are not using ragged attention for prefill yet.
-      if self.env.ragged_mha and seqlen == 1:
+      if self.env.ragged_mha and seqlen == 1 and keys.shape[-2] > 1:
         local_output, (local_max, local_denom) = torch_xla2.interop.call_jax(
             impl,
             xq,
