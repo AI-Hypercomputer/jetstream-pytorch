@@ -473,7 +473,7 @@ class AttentionKernel:
             ragged_batch_index,
             ragged_block_index,
         )
-      elif self.env.flash_attention:
+      elif self.env.flash_attention and seqlen == 1:
         with torch_xla2.default_env():
           local_output, (local_max, local_denom) = self.flash_attention(
               xq, keys, values, self.layer_id, mask=local_mask
@@ -633,7 +633,7 @@ class Int8KVAttentionKernel:
             k_scaler,
             v_scaler,
         )
-      elif self.env.flash_attention:
+      elif self.env.flash_attention and seqlen == 1:
         with torch_xla2.default_env():
           local_output, (local_max, local_denom) = self.flash_attention(
               xq,
@@ -700,18 +700,18 @@ class Int8KVAttentionKernel:
       )
 
     with jax.named_scope("attn_global"):
-      global_sum = existing_denom * torch.exp(
-          existing_max
-      ) + new_denom * torch.exp(new_max)
-      existing_output = (
-          existing_output
-          * existing_denom
-          * torch.exp(existing_max)
-          / global_sum
-      )
-      new_output = new_output * new_denom * torch.exp(new_max) / global_sum
-      attn_out = existing_output + new_output
-
+      #global_sum = existing_denom * torch.exp(
+      #    existing_max
+      #) + new_denom * torch.exp(new_max)
+      #existing_output = (
+      #    existing_output
+      #    * existing_denom
+      #    * torch.exp(existing_max)
+      #    / global_sum
+      #)
+      #new_output = new_output * new_denom * torch.exp(new_max) / global_sum
+      #attn_out = existing_output + new_output
+      attn_out = existing_denom * torch.exp(existing_max - new_max) * existing_denom / new_denom + existing_output
       return attn_out
 
 
