@@ -121,6 +121,8 @@ class JetEngineEnvironmentData:
 
   testing_seed: int = 0
 
+  # The ratio between query heads and kv heads
+  n_reps: int = 0
 
 # pylint: disable-next=all
 class JetEngineEnvironment:
@@ -144,6 +146,12 @@ class JetEngineEnvironment:
       self.flash_attention = True
       self.generate_cache_stacked = True
       self.new_cache_stacked = True
+    else:
+      self.lazy_cache_update = False
+      self.ragged_mha = False
+      self.flash_attention = False
+      self.generate_cache_stacked = False
+      self.new_cache_stacked = False
 
     if self.testing:
       self.lazy_cache_update = self._data.lazy_cache_update

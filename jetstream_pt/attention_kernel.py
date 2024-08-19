@@ -557,8 +557,7 @@ def ragged_mha(
     )(q, k, v, layer, start, end, *replicated_inputs)
   return out, (m, l)
 
-
-def dense_attention(xq, keys, values, k_scaler=None, v_scaler=None, mask=None):
+def _dense_attention(xq, keys, values, k_scaler=None, v_scaler=None, mask=None):
   """The vanilla attention kernel implementation."""
 
   bsz, _, _, head_dim = xq.shape
@@ -584,8 +583,32 @@ def dense_attention(xq, keys, values, k_scaler=None, v_scaler=None, mask=None):
     output = torch.einsum("ikjm,ikml->ikjl", scores, values)
   return output
 
+def reshape_heads(xq, keys):
+  bq, hq, tq, dq = xq.shape
+  hkv = keys.shape[-3]
+  rep = hq // hkv
+  if rep > 1:
+    xq = xq.reshape(bq, hkv, rep, tq, dq).reshape(bq, hkv, rep * tq, dq)
+  return xq, rep
 
-def flash_attention(
+def reshape_outputs(rep, o, m=None, d=None):
+  bq, hqo, tqo, dq = o.shape
+  tq = tqo // rep
+  hq = hqo * rep
+  o = o.reshape(bq, hqo, rep, tq, dq).reshape(bq, hq, tq, dq)
+  if m is not None and d is not None:
+    m = m.reshape(bq, hqo, rep, tq, 1).reshape(bq, hq, tq, 1)
+    d = d.reshape(bq, hqo, rep, tq, 1).reshape(bq, hq, tq, 1)
+  return o, (m, d)
+
+  
+def dense_attention(xq, keys, values, k_scaler=None, v_scaler=None, mask=None):
+  xq, rep = reshape_heads(xq, keys)
+  output = _dense_attention(xq, keys, values, k_scaler, v_scaler, mask)
+  output, _ = reshape_outputs(rep, output)
+  return output
+
+def _flash_attention(
     xq,
     keys,
     values,
@@ -636,6 +659,19 @@ def flash_attention(
 
   return o, (logits_max, denominator)
 
+def flash_attention(
+    xq,
+    keys,
+    values,
+    layer,
+    k_scaler=None,
+    v_scaler=None,
+    mask=None,
+    normalize_var=True,
+):
+  xq, rep = reshape_heads(xq, keys)
+  o, (logits_max, denominator) = _flash_attention(xq, keys, values, k_scaler, v_scaler, mask)
+  return reshape_outputs(rep, o, logits_max, denominator)
 
 class RaggedAttentionKernel:
   """Ragged attention kernel."""

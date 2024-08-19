@@ -365,29 +365,6 @@ def apply_rotary_emb(
   return xq_out.type_as(xq), xk_out.type_as(xk)
 
 
-def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
-  """torch.repeat_interleave(x, dim=2, repeats=n_rep)."""
-
-  *_, bs, n_kv_heads, slen, head_dim = x.shape
-  stacked = x.ndim == 5
-
-  if n_rep == 1:
-    return x
-
-  if stacked:
-    layer = x.shape[0]
-    return (
-        x[:, :, :, None, :, :]
-        .expand(layer, bs, n_kv_heads, n_rep, slen, head_dim)
-        .reshape(layer, bs, n_kv_heads * n_rep, slen, head_dim)
-    )
-  return (
-      x[:, :, None, :, :]
-      .expand(bs, n_kv_heads, n_rep, slen, head_dim)
-      .reshape(bs, n_kv_heads * n_rep, slen, head_dim)
-  )
-
-
 class AttentionKernel:
 
   def __init__(self, env, layer_id):
@@ -473,7 +450,7 @@ class AttentionKernel:
             ragged_batch_index,
             ragged_block_index,
         )
-      elif self.env.flash_attention:
+      elif self.env.flash_attention and seqlen == 1:
         with torch_xla2.default_env():
           local_output, (local_max, local_denom) = self.flash_attention(
               xq, keys, values, self.layer_id, mask=local_mask
@@ -506,9 +483,9 @@ class AttentionKernel:
     with jax.named_scope("attn_insert_cache"):
       orig_keys, orig_values = cache.update(xk, xv, self.layer_id)
       # We are not using ragged attention for prefill yet.
-      if not self.env.ragged_mha or seqlen > 1:
-        orig_keys = repeat_kv(orig_keys, n_rep)
-        orig_values = repeat_kv(orig_values, n_rep)
+      # if not self.env.ragged_mha or seqlen > 1:
+      #   orig_keys = repeat_kv(orig_keys, n_rep)
+      #   orig_values = repeat_kv(orig_values, n_rep)
 
     # print(f"attention kernel xq {xq.shape} seqlen {seqlen} keys {keys.shape} mask {mask.shape}")
     with jax.named_scope("attn_qkv"):
@@ -522,9 +499,9 @@ class AttentionKernel:
 
     # For flash attention, existing output contains the existing kv cache generated logits
     with jax.named_scope("attn_new_qkv"):
-      if not self.env.ragged_mha or seqlen > 1:
-        xk = repeat_kv(xk, n_rep)
-        xv = repeat_kv(xv, n_rep)
+      # if not self.env.ragged_mha or seqlen > 1:
+      #   xk = repeat_kv(xk, n_rep)
+      #   xv = repeat_kv(xv, n_rep)
       new_output, (new_max, new_denom) = attend(xq, xk, xv, None)
 
     with jax.named_scope("attn_global"):
@@ -633,7 +610,7 @@ class Int8KVAttentionKernel:
             k_scaler,
             v_scaler,
         )
-      elif self.env.flash_attention:
+      elif self.env.flash_attention and seqlen == 1:
         with torch_xla2.default_env():
           local_output, (local_max, local_denom) = self.flash_attention(
               xq,
@@ -677,9 +654,9 @@ class Int8KVAttentionKernel:
           new_v_scaler,
       ) = cache.update(xk, xv, self.layer_id)
       # We are not using ragged attention for prefill yet.
-      if not self.env.ragged_mha or seqlen > 1:
-        orig_keys = repeat_kv(orig_keys, n_rep)
-        orig_values = repeat_kv(orig_values, n_rep)
+      # if not self.env.ragged_mha or seqlen > 1:
+      #   orig_keys = repeat_kv(orig_keys, n_rep)
+      #   orig_values = repeat_kv(orig_values, n_rep)
     with jax.named_scope("attn_qkv"):
       existing_output, (existing_max, existing_denom) = attend(
           xq, orig_keys, orig_values, k_scaler, v_scaler, mask
@@ -692,9 +669,9 @@ class Int8KVAttentionKernel:
     # For flash attention, existing output contains the existing kv cache generated logits
     with jax.named_scope("attn_new_qkv"):
       # At this point, flash attention or ragged attention must have been enabled
-      if not self.env.ragged_mha or seqlen > 1:
-        new_key = repeat_kv(new_key, n_rep)
-        new_value = repeat_kv(new_value, n_rep)
+      # if not self.env.ragged_mha or seqlen > 1:
+      #   new_key = repeat_kv(new_key, n_rep)
+      #   new_value = repeat_kv(new_value, n_rep)
       new_output, (new_max, new_denom) = attend(
           xq, new_key, new_value, new_k_scaler, new_v_scaler, None
       )
