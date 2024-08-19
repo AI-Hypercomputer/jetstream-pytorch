@@ -45,6 +45,7 @@ class ServerRunTest(unittest.TestCase):
 
   def setup(self):
     """Setup."""
+     # pylint: disable-next=all
     from run_server import flags
 
     f = flags.FLAGS

@@ -27,6 +27,7 @@ def make_env_tiny(bf16_enable=True, env_data_update_fn=lambda _: None):
       environment_data.cache_sequence_length,
       config.dim // config.n_heads,
   )
+  environment_data.n_reps = config.n_heads // config.n_kv_heads
   environment_data.testing = True
   env_data_update_fn(environment_data)
   env = environment.JetEngineEnvironment(environment_data)
@@ -54,6 +55,7 @@ def make_mixtral_env(bf16_enable=True):
       environment_data.cache_sequence_length,
       config.dim // config.n_head,
   )
+  environment_data.n_reps = config.n_head // config.n_local_heads
   env = environment.JetEngineEnvironment(environment_data)
   env.apply_sharding = lambda *args, **kwargs: None  # don't shard on cpu
   return env, config

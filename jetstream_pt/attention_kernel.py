@@ -557,6 +557,7 @@ def ragged_mha(
     )(q, k, v, layer, start, end, *replicated_inputs)
   return out, (m, l)
 
+
 def _dense_attention(xq, keys, values, k_scaler=None, v_scaler=None, mask=None):
   """The vanilla attention kernel implementation."""
 
@@ -583,7 +584,9 @@ def _dense_attention(xq, keys, values, k_scaler=None, v_scaler=None, mask=None):
     output = torch.einsum("ikjm,ikml->ikjl", scores, values)
   return output
 
+
 def reshape_heads(xq, keys):
+  """Reshapes the query head for GQA"""
   bq, hq, tq, dq = xq.shape
   hkv = keys.shape[-3]
   rep = hq // hkv
@@ -591,7 +594,9 @@ def reshape_heads(xq, keys):
     xq = xq.reshape(bq, hkv, rep, tq, dq).reshape(bq, hkv, rep * tq, dq)
   return xq, rep
 
+
 def reshape_outputs(rep, o, m=None, d=None):
+  """Reshapes back the attention output for GQA"""
   bq, hqo, tqo, dq = o.shape
   tq = tqo // rep
   hq = hqo * rep
@@ -601,12 +606,14 @@ def reshape_outputs(rep, o, m=None, d=None):
     d = d.reshape(bq, hqo, rep, tq, 1).reshape(bq, hq, tq, 1)
   return o, (m, d)
 
-  
+
 def dense_attention(xq, keys, values, k_scaler=None, v_scaler=None, mask=None):
+  """The vanilla attention kernel implementation."""
   xq, rep = reshape_heads(xq, keys)
   output = _dense_attention(xq, keys, values, k_scaler, v_scaler, mask)
   output, _ = reshape_outputs(rep, output)
   return output
+
 
 def _flash_attention(
     xq,
@@ -659,6 +666,7 @@ def _flash_attention(
 
   return o, (logits_max, denominator)
 
+
 def flash_attention(
     xq,
     keys,
@@ -669,9 +677,13 @@ def flash_attention(
     mask=None,
     normalize_var=True,
 ):
+  """Flash attention kernel."""
   xq, rep = reshape_heads(xq, keys)
-  o, (logits_max, denominator) = _flash_attention(xq, keys, values, k_scaler, v_scaler, mask)
+  o, (logits_max, denominator) = _flash_attention(
+      xq, keys, values, k_scaler, v_scaler, mask
+  )
   return reshape_outputs(rep, o, logits_max, denominator)
+
 
 class RaggedAttentionKernel:
   """Ragged attention kernel."""
