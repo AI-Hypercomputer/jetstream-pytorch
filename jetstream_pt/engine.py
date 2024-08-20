@@ -216,11 +216,12 @@ class PyTorchEngine(engine_api.Engine):
         for _ in self.pt_model.layers
     ]
     mask = jnp.full(
-        (1, 1, tokens.shape[1], tokens.shape[1]),
+        (1, self.env.n_reps, tokens.shape[1], tokens.shape[1]),
         float("-inf"),
         dtype=self.default_dtype,
     )
     mask = jnp.triu(mask, k=1)
+    mask = mask.reshape(1, 1, -1, tokens.shape[1])
     start = jnp.zeros((tokens.shape[0],), dtype=jnp.int32)
     args = (tokens, input_indexes, caches, mask, start)
 
@@ -970,6 +971,7 @@ def create_pytorch_engine(
     )
     env_data.model_type = model_name + "-" + param_size
     env_data.num_layers = args.n_layers
+    env_data.n_reps = args.n_heads // args.n_kv_heads
     env = JetEngineEnvironment(env_data)
     pt_model = llama_model.Transformer(args, env)
   elif model_name == "gemma":
@@ -982,6 +984,7 @@ def create_pytorch_engine(
     )
     env_data.model_type = model_name + "-" + param_size
     env_data.num_layers = args.num_hidden_layers
+    env_data.n_reps = args.num_attention_heads // args.num_key_value_heads
     env = JetEngineEnvironment(env_data)
     print(f"Enviroment variables: {vars(env)}")
     pt_model = gemma_model.GemmaModel(args, env)
@@ -995,6 +998,7 @@ def create_pytorch_engine(
         args.dim // args.n_head,
     )
     env_data.num_layers = args.n_layer
+    env_data.n_reps = args.n_heads // args.n_local_heads
     env = JetEngineEnvironment(env_data)
     pt_model = mixtral_model.Transformer(args, env)
   else:

@@ -42,17 +42,21 @@ class ModelComponentTest(unittest.TestCase):
     jax.config.update("jax_enable_x64", False)
     torch.set_default_dtype(torch.float32)
 
-  def _prefill_mask(self, seqlen, start_pos):
+  def _prefill_mask(self, seqlen, start_pos, env):
     mask = torch.full((seqlen, seqlen), float("-inf"))
 
     mask = torch.triu(mask, diagonal=1)
-
     # When performing key-value caching, we compute the attention scores
     # only for the new sequence. Thus, the matrix of scores is of size
     # (seqlen, cache_len + seqlen), and the only masked entries are (i, j) for
     # j > cache_len + i, since row i corresponds to token cache_len + i.
-    mask = torch.hstack([torch.zeros((seqlen, start_pos)), mask])
-    return mask
+    orig_mask = torch.hstack([torch.zeros((seqlen, start_pos)), mask])
+
+    mask = mask.repeat((env.n_reps, 1))
+    our_mask = torch.hstack(
+        [torch.zeros((seqlen * env.n_reps, start_pos)), mask]
+    )
+    return orig_mask, our_mask
 
   def _make_freqs_cis(self, model_arg, seqlen, start_pos):
     freqs_cis = model_original.precompute_freqs_cis(
@@ -117,8 +121,8 @@ class ModelComponentTest(unittest.TestCase):
     )  # (batch, seqlen, embedding dim)
     start_pos = 0
     freqs_cis = self._make_freqs_cis(model_arg, seqlen, start_pos)
-    mask = self._prefill_mask(seqlen, start_pos)
-    inputs_orig = (x, start_pos, freqs_cis, mask)
+    orig_mask, our_mask = self._prefill_mask(seqlen, start_pos, env)
+    inputs_orig = (x, start_pos, freqs_cis, orig_mask)
 
     expected_out = attention_orig(*inputs_orig)
 
@@ -127,7 +131,7 @@ class ModelComponentTest(unittest.TestCase):
     input_ours = (
         x,
         freqs_cis,
-        mask,
+        our_mask,
         cache,
     )
 
@@ -236,11 +240,17 @@ class ModelComponentTest(unittest.TestCase):
       )  # (batch, seqlen, embedding dim)
       start_pos = 0
       freqs_cis = self._make_freqs_cis(model_arg, seqlen, start_pos)
-      mask = self._prefill_mask(seqlen, start_pos)
+      orig_mask, our_mask = self._prefill_mask(seqlen, start_pos, env)
       kv_write_indexes = torch.arange(0, seqlen)
       cache_k = torch.zeros((batch, seqlen, num_kv_heads, head_dim))
       cache_v = torch.zeros((batch, seqlen, num_kv_heads, head_dim))
-      inputs_orig = (x, freqs_cis, kv_write_indexes, (cache_k, cache_v), mask)
+      inputs_orig = (
+          x,
+          freqs_cis,
+          kv_write_indexes,
+          (cache_k, cache_v),
+          orig_mask,
+      )
 
       expected_out = attention_orig(*inputs_orig)
 
@@ -249,7 +259,7 @@ class ModelComponentTest(unittest.TestCase):
       input_ours = (
           x,
           freqs_cis,
-          mask,
+          our_mask,
           cache,
       )
 
@@ -284,8 +294,8 @@ class ModelComponentTest(unittest.TestCase):
     )  # (batch, seqlen, embedding dim)
     start_pos = 0
     freqs_cis = self._make_freqs_cis(model_arg, seqlen, start_pos)
-    mask = self._prefill_mask(seqlen, start_pos)
-    inputs_orig = (x, start_pos, freqs_cis, mask)
+    orig_mask, our_mask = self._prefill_mask(seqlen, start_pos, env)
+    inputs_orig = (x, start_pos, freqs_cis, orig_mask)
 
     expected_out = block_orig(*inputs_orig)
 
@@ -294,7 +304,7 @@ class ModelComponentTest(unittest.TestCase):
     input_ours = (
         x,
         freqs_cis,
-        mask,
+        our_mask,
         cache,
     )
 
@@ -356,7 +366,7 @@ class ModelComponentTest(unittest.TestCase):
     seqlen = 32
     x = torch.randint(0, 32000, (1, seqlen))  # (batch, seqlen, embedding dim)
     start_pos = 0
-    mask = self._prefill_mask(seqlen, start_pos)
+    _, our_mask = self._prefill_mask(seqlen, start_pos, env)
     inputs_orig = (x, start_pos)
 
     expected_out = model_orig(*inputs_orig)
@@ -367,7 +377,7 @@ class ModelComponentTest(unittest.TestCase):
         x,
         input_pos,
         caches,
-        mask,
+        our_mask,
     )
 
     result_torch = helpers.call_xla_model(model_ours, state_dict, input_ours)
@@ -417,7 +427,7 @@ class ModelComponentTest(unittest.TestCase):
     seqlen = 32
     x = torch.randint(0, 32000, (1, seqlen))  # (batch, seqlen, embedding dim)
     start_pos = 0
-    mask = self._prefill_mask(seqlen, start_pos)
+    _, our_mask = self._prefill_mask(seqlen, start_pos, env)
     input_pos = torch.arange(0, seqlen)
     inputs_orig = (x, input_pos)
 
@@ -430,7 +440,7 @@ class ModelComponentTest(unittest.TestCase):
         x,
         input_pos,
         caches,
-        mask,
+        our_mask,
     )
     result_torch = helpers.call_xla_model(model_ours, new_dict, input_ours)
 
