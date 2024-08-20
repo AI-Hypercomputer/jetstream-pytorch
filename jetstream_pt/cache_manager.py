@@ -19,6 +19,7 @@ import torch
 import torch_xla2
 
 from jetstream_pt import torchjax
+from jetstream_pt.page_attention_manager import PageAttentionManager
 
 
 # pylint: disable-next=all
@@ -663,6 +664,7 @@ class PageKVCacheGenerate:
       self,
       cache_k: torch.Tensor,  # previous cache
       cache_v: torch.Tensor,  # previous cache
+      page_attention_manager: PageAttentionManager,
       page_token_indices: torch.Tensor,  # page and token indices for the cache
       sharding,
       env=None,
@@ -670,11 +672,13 @@ class PageKVCacheGenerate:
     super().__init__()
     self.cache_k = cache_k
     self.cache_v = cache_v
+    self.page_attention_manager = page_attention_manager
     self.page_token_indices = page_token_indices
     self.sharding = sharding
     self.env = env
+    self.stacked = False
 
-  def update(self, key, value):
+  def update(self, key, value, layer_id=0):
     """Update kv cache"""
     keyj, valuej, page_token_indicesj = torchjax.from_torch(
         (key, value, self.page_token_indices)
@@ -691,6 +695,7 @@ class PageKVCacheGenerate:
       selected_cache = selected_cache.reshape((head, -1, page_size, dim))
 
       cache = cache.at[:, page_token_indicesj[0], :, :].set(selected_cache)
+      cache = jax.lax.with_sharding_constraint(cache, self.sharding)
       return cache
 
     # pylint: disable-next=all
@@ -702,13 +707,16 @@ class PageKVCacheGenerate:
   def state(self):
     """Get kv cache state"""
     # pylint: disable-next=all
-    return self.cache_k.jax(), self.cache_v.jax()
+    return torchjax.from_torch((self.cache_k, self.cache_v))
+  
+  def finalize(self):
+    return
 
   @classmethod
-  def empty(cls, shape, device, bf16_enable, env):
+  def empty(cls, shape, device, env):
     """Create empty kv caches"""
-    default_dtype = jnp.bfloat16 if bf16_enable else jnp.float32
+    default_dtype = jnp.bfloat16 if env.bf16_enable else jnp.float32
     k = jnp.zeros(shape, device=device, dtype=default_dtype)
     v = jnp.zeros(shape, device=device, dtype=default_dtype)
     k, v = torchjax.to_torch((k, v))
-    return cls(k, v, None, device, env=env)
+    return cls(k, v, None, None, device, env=env)

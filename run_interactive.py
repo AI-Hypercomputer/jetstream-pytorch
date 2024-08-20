@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import functools
+import humanize
 import os
 import random
 import time
@@ -47,8 +49,13 @@ def main(argv):
 
   if profiling_prefill:
     jax.profiler.start_trace(profiling_output)
+  
+  print(f"--------------------------> after load_params") 
+  print_mem_usage()  
 
   decode_state = engine.init_decode_state()
+  print(f"--------------------------> after init_decode_state") 
+  print_mem_usage()  
 
   if profiling_prefill:
     jax.profiler.stop_trace()
@@ -79,8 +86,12 @@ def main(argv):
     prefill_result, _ = engine.prefill(
         params=params, padded_tokens=tokens, true_length=true_length
     )
+    print(f"--------------------------> after prefill_result") 
+    #print_mem_usage()  
     # pylint: disable-next=all
     decode_state = engine.insert(prefill_result, decode_state, slot=slot)
+    print(f"--------------------------> after insert") 
+    #print_mem_usage()
 
     if profiling_prefill:
       jax.profiler.stop_trace()
@@ -91,9 +102,13 @@ def main(argv):
     while True:
       if profiling_output:
         jax.profiler.start_trace(profiling_output)
-
-      decode_state, result_tokens = engine.generate(params, decode_state)
-      result_tokens = result_tokens.convert_to_numpy()
+      
+      print(f"--------------------------> before generate")  
+      #print_mem_usage()
+      decode_state = engine.generate(params, decode_state)
+      # result_tokens = result_tokens.convert_to_numpy()
+      print(f"--------------------------> after generate")  
+      #print_mem_usage()
 
       if profiling_output:
         jax.profiler.stop_trace()
@@ -102,7 +117,7 @@ def main(argv):
           tokenizer=tokenizer,
           slot=slot,
           slot_max_length=max_output_length,
-          result_tokens=result_tokens,
+          result_tokens=None,
           complete=complete,
       )
       if complete[0]:
@@ -115,6 +130,17 @@ def main(argv):
     print("---- All output text.")
     print(tokenizer.decode(sampled_tokens_list))
 
+def print_mem_usage():
+  """Print current mem usage"""
+  fmt_size = functools.partial(humanize.naturalsize, binary=True)
+
+  for d in jax.local_devices():
+    stats = d.memory_stats()
+    used = stats["bytes_in_use"]
+    limit = stats["bytes_limit"]
+    print(
+        f"memory using {fmt_size(used)} / {fmt_size(limit)} ({used/limit:%}) on {d}"
+    )
 
 if __name__ == "__main__":
   os.environ["TF_CPP_MIN_LOG_LEVEL"] = "0"

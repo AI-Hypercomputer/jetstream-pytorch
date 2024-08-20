@@ -37,6 +37,7 @@ from jetstream_pt import cache_manager
 from jetstream_pt import quantize
 from jetstream_pt import torchjax
 from jetstream_pt.environment import JetEngineEnvironment, JetEngineEnvironmentData, QuantizationConfig
+from jetstream_pt.page_attention_manager import PageAttentionManager
 from jetstream_pt.third_party.llama import model_exportable as llama_model, model_args
 from jetstream_pt.third_party.gemma import config as gemma_config, model as gemma_model
 from jetstream_pt.third_party.mixtral import config as mixtral_config, model as mixtral_model
@@ -74,12 +75,17 @@ class DecodeState:
   input_pos: jax.Array  # [batch_size, 1] input pos for each slot
   mask: jax.Array  # [batch_size, seqlen] -inf for invalid; 0 for valid
 
+@struct.dataclass
+# pylint: disable-next=all
+class DecodeStateTest:
+  tokens: jax.Array  # [batch_size, seqlen]
+
 
 # NOTE model specific
 
 
 # pylint: disable-next=all
-class PyTorchEngine(engine_api.Engine):
+class PyTorchEngine():
   """Wraps functions to the Jet Engine API format."""
 
   def __init__(
@@ -99,6 +105,17 @@ class PyTorchEngine(engine_api.Engine):
     self.replicated = env.sharding_by_axis(-1)  # replicated
 
     self.cache_sharding = self.env.cache_sharding
+    self.prefill_cache_sharding = self.env.prefill_cache_sharding
+    if self.env.page_attention:
+      max_pages_per_sequence = self.env._data.cache_sequence_length // self.env._data.page_size
+      assert self.env._data.cache_sequence_length % self.env._data.page_size == 0, f"cache_sequence_length {self.env._data.cache_sequence_length} should divide page_size {self.env._data.page_size}" 
+      
+      self.page_attention_manager = PageAttentionManager(
+      batch_size=self.env.batch_size, 
+      total_num_pages=self.env._data.total_num_pages,
+      page_size=self.env._data.page_size,
+      max_pages_per_sequence=max_pages_per_sequence)
+          
 
     jax.config.update("jax_enable_x64", False)
 
@@ -111,11 +128,46 @@ class PyTorchEngine(engine_api.Engine):
         donate_argnums=(0, 1),
         out_shardings=self.get_decode_state_sharding(),
     )
-    self.generate = jax.jit(
-        self.generate,
+    # self.generate = jax.jit(
+    #     self.generate_impl,
+    #     donate_argnums=(1,),
+    #     out_shardings=(self.get_decode_state_sharding(), None),
+    # )
+    
+    if self.env.page_attention:
+      self._insert_page_attention_jit = jax.jit(
+        self._insert_page_attention,
+        donate_argnums=(0, 1),
+        out_shardings=self.get_decode_state_sharding(),
+        )   
+      self.insert = self.insert_page_attention_with_reservation
+      # self.generate_jit=jax.jit(
+      #   self.generate_impl,
+      #   donate_argnums=(1,),
+      #   out_shardings=(self.get_decode_state_sharding(), None),
+      #   )
+      
+      # self.generate_jit=jax.jit(
+      #   self.generate_impl,
+      #   donate_argnums=(1,),
+      #   out_shardings=(DecodeState(
+      #     self.replicated,
+      #     self.cache_sharding,
+      #     self.replicated,
+      #     self.replicated,
+      #     self.replicated,
+      #     self.replicated,
+      #     self.replicated,
+      #     self.replicated,
+      #     ), None),)
+
+      self.generate_jit=jax.jit(
+        self.generate_impl,
         donate_argnums=(1,),
-        out_shardings=(self.get_decode_state_sharding(), None),
-    )
+        out_shardings=self.get_decode_state_sharding_test(),)      
+      # self._call_model_generate=jax.jit(self._call_model_generate)
+      self.generate = self.generate_page_attention
+    
     # self._insert_wrap = jax.jit(self._insert_wrap, donate_argnums=(0, 1),
     #                              out_shardings=self.get_decode_state_sharding())
 
@@ -161,6 +213,7 @@ class PyTorchEngine(engine_api.Engine):
       input_pos,
       ragged_batch_index,
       ragged_block_index,
+      page_token_indices,
   ):
     if self.env.quant_config.enable_kv_quantization:
       caches_obj = [
@@ -171,6 +224,13 @@ class PyTorchEngine(engine_api.Engine):
               list(zip(caches, cache_scales))
           )
       ]
+    elif self.env.page_attention:
+      caches_obj = [
+          cache_manager.PageKVCacheGenerate(
+              k, v, self.page_attention_manager, page_token_indices, self.cache_sharding, env=self.env
+          )
+          for k, v in torchjax.to_torch(caches)
+      ]      
     else:
       caches_obj = [
           cache_manager.KVCacheGenerate(
@@ -527,6 +587,52 @@ class PyTorchEngine(engine_api.Engine):
         mask,
     )
 
+  def _insert_page_attention(
+      self,
+      prefix: Prefix,
+      decode_state: DecodeState,
+      slot: int,
+      num_pages: int,
+      update_indexes: jax.Array,
+      tep_kv: jax.Array,
+  ):
+    caches = self.page_attention_manager.insert_prefill_cache(prefill_caches=prefix.caches,
+              decode_caches=decode_state.caches,
+              slot=slot,
+              seq_len=prefix.seq_len,
+              num_pages=num_pages,
+              update_indexes=update_indexes,
+              tep_kv=tep_kv,
+              sharding=self.cache_sharding,
+              )
+
+    current_pos = prefix.seq_len
+
+    pos = current_pos - prefix.seq_len
+    tokens = decode_state.tokens.at[slot].set(prefix.token)
+
+    x = jnp.arange(0, self.env.cache_sequence_length)
+    cond = jnp.logical_and(x < current_pos, x >= pos)
+    mask_insert = jnp.where(cond, 0, float("-inf"))
+    mask = decode_state.mask.at[slot].set(mask_insert)
+    start = decode_state.start.at[slot].set(
+        pos % self.env.cache_sequence_length
+    )
+
+    input_pos = decode_state.input_pos.at[slot].set(prefix.seq_len)
+    scales = None
+    lens = decode_state.lens.at[slot].set(1)
+    return DecodeState(
+        tokens,
+        caches,
+        scales,
+        decode_state.current_position,
+        lens,
+        start,
+        input_pos,
+        mask,
+    )
+
   def insert(
       self,
       prefix: Prefix,
@@ -546,9 +652,23 @@ class PyTorchEngine(engine_api.Engine):
           decode_state,
           slot,
       )
+    elif self.env.page_attention:
+      return self._insert_page_attention(prefix, decode_state, slot)      
     # Left aligned, starts from 0, guaranteed no wrap
     else:
       return self._insert_no_wrap(prefix, decode_state, slot)
+ 
+  def insert_page_attention_with_reservation(
+      self,
+      prefix: Prefix,
+      decode_state: DecodeState,
+      slot: int,
+  ) -> DecodeState:
+    num_pages, update_indexes = self.page_attention_manager.reserve_pages_insert(slot, prefix.seq_len)
+    _, kv_heads, _, dim = prefix.caches[0][0].shape
+    tep_kv = jnp.zeros((kv_heads, num_pages * self.page_attention_manager.page_size, dim), dtype=self.default_dtype, device=self.prefill_cache_sharding)
+    return self._insert_page_attention_jit(prefix, decode_state, slot, num_pages, update_indexes, tep_kv)
+    
 
   def precompute_ragged_block_indices(self, decode_state: DecodeState):
     """Precompute the ragged attention block indices. Ragged attention iterates the grid
@@ -607,10 +727,129 @@ class PyTorchEngine(engine_api.Engine):
     )
     return b_next, i_next
 
-  def generate(
+  # def generate_page_attention(
+  #     self, params: Any, decode_state: DecodeState
+  # ) -> tuple[DecodeState, engine_api.ResultTokens]:
+  #   self.page_attention_manager.fill_new_pages(decode_state.lens)
+  #   page_token_indices = self.page_attention_manager.get_page_token_indices(decode_state.lens)
+  #   return self.generate_jit(params, decode_state, page_token_indices)
+
+  # def generate(
+  #     self, params: Any, decode_state: DecodeState, page_token_indices=None,
+  # ) -> tuple[DecodeState, engine_api.ResultTokens]:
+  #   return None, None
+    
+  # def generate_impl(
+  #     self, params: Any, decode_state: DecodeState, page_token_indices=None,
+  # ) -> tuple[DecodeState, engine_api.ResultTokens]:
+  #   # seq_len = padded_tokens.shape[0]
+  #   if self.env.page_attention:
+  #     # page_token_indices = decode_state.page_token_indices 
+  #     page_token_indices = torchjax.to_torch(page_token_indices)    
+  #   pos = decode_state.current_position
+  #   if self.env.ring_buffer:
+  #     input_indexes = jnp.full((1,), pos)
+  #   else:
+  #     input_indexes = decode_state.input_pos
+
+  #   ragged_batch_index, ragged_block_index = (
+  #       self.precompute_ragged_block_indices(decode_state)
+  #   )
+  #   ragged_batch_index, ragged_block_index = ragged_batch_index.reshape(
+  #       (-1)
+  #   ), ragged_block_index.reshape((-1))
+
+  #   def update_mask():
+  #     if self.env.ring_buffer:
+  #       return decode_state.mask.at[:, decode_state.current_position].set(0)
+
+  #     batch = jnp.arange(self.env.batch_size)
+  #     return decode_state.mask.at[batch, decode_state.input_pos].set(0)
+
+  #   mask = decode_state.mask
+  #   if not self.env.lazy_cache_update:
+  #     mask = update_mask()
+  #   logits, new_caches, new_scales = self._call_model_generate(
+  #       params,
+  #       decode_state.tokens,
+  #       input_indexes,
+  #       decode_state.caches,
+  #       decode_state.cache_scales,
+  #       mask,
+  #       decode_state.start,
+  #       decode_state.input_pos,
+  #       ragged_batch_index,
+  #       ragged_block_index,
+  #       page_token_indices,
+  #   )
+
+  #   if self.env.lazy_cache_update:
+  #     # fill mask later, now use flash attention
+  #     mask = update_mask()
+
+  #   next_token = self._sampling(logits, self.env.batch_size)
+  #   if self.env.ring_buffer:
+  #     input_pos = decode_state.input_pos + 1
+  #     lens = decode_state.lens + 1
+  #   else:
+  #     input_pos = jnp.where(
+  #         decode_state.input_pos == 0,
+  #         0,
+  #         decode_state.input_pos + 1 % self.env.cache_len,
+  #     )
+  #     lens = jnp.where(
+  #         decode_state.lens == 0, 0, decode_state.lens + 1 % self.env.cache_len
+  #     )
+
+  #   data = jnp.concatenate(
+  #       [
+  #           decode_state.tokens,
+  #           jnp.ones_like(next_token),
+  #           lens,
+  #       ],
+  #       axis=-1,
+  #   )
+
+  #   # [0] is the batch dimension, [1] normally should be 1
+  #   length = next_token.shape[1]
+  #   result_tokens = engine_api.ResultTokens(
+  #       data=data,
+  #       tokens_idx=(0, length),
+  #       valid_idx=(length, 2 * length),
+  #       length_idx=(2 * length, 2 * length + 1),
+  #       samples_per_slot=1,
+  #   )
+
+  #   new_decode_state = DecodeState(
+  #       next_token,
+  #       new_caches,
+  #       new_scales,
+  #       (decode_state.current_position + 1) % self.env.cache_sequence_length,
+  #       lens,
+  #       decode_state.start,
+  #       input_pos,
+  #       mask,
+  #   )
+  #   return new_decode_state, result_tokens
+ 
+
+  def generate_page_attention(
       self, params: Any, decode_state: DecodeState
-  ) -> tuple[DecodeState, engine_api.ResultTokens]:
+  ) -> DecodeStateTest:
+    self.page_attention_manager.fill_new_pages(decode_state.lens)
+    page_token_indices = self.page_attention_manager.get_page_token_indices(decode_state.lens)
+    decode_state = self.generate_jit(params, decode_state, page_token_indices)
+    #decode_state = self.generate_impl(params, decode_state, page_token_indices)
+    return decode_state
+
+    
+  def generate_impl(
+      self, params: Any, decode_state: DecodeState, page_token_indices=None,
+  ) -> DecodeStateTest:
     # seq_len = padded_tokens.shape[0]
+    if self.env.page_attention:
+      # page_token_indices = decode_state.page_token_indices 
+      page_token_indices = torchjax.to_torch(page_token_indices)    
     pos = decode_state.current_position
     if self.env.ring_buffer:
       input_indexes = jnp.full((1,), pos)
@@ -645,6 +884,7 @@ class PyTorchEngine(engine_api.Engine):
         decode_state.input_pos,
         ragged_batch_index,
         ragged_block_index,
+        page_token_indices,
     )
 
     if self.env.lazy_cache_update:
@@ -652,6 +892,7 @@ class PyTorchEngine(engine_api.Engine):
       mask = update_mask()
 
     next_token = self._sampling(logits, self.env.batch_size)
+    # next_token = jnp.zeros((48, 1), dtype=jnp.int32, device=self.replicated)
     if self.env.ring_buffer:
       input_pos = decode_state.input_pos + 1
       lens = decode_state.lens + 1
@@ -684,17 +925,17 @@ class PyTorchEngine(engine_api.Engine):
         samples_per_slot=1,
     )
 
-    new_decode_state = DecodeState(
+    new_decode_state = DecodeStateTest(
         next_token,
-        new_caches,
-        new_scales,
-        (decode_state.current_position + 1) % self.env.cache_sequence_length,
-        lens,
-        decode_state.start,
-        input_pos,
-        mask,
+        # new_caches,
+        # new_scales,
+        # (decode_state.current_position + 1) % self.env.cache_sequence_length,
+        # lens,
+        # decode_state.start,
+        # input_pos,
+        # mask,
     )
-    return new_decode_state, result_tokens
+    return new_decode_state  
 
   # pylint: disable-next=all
   def get_tokenizer(self) -> tokenizer_pb2.TokenizerParameters:
@@ -804,7 +1045,7 @@ class PyTorchEngine(engine_api.Engine):
     """Returns the shardings necessary to transfer data between engines."""
     return Prefix(
         self.replicated,
-        self.replicated if self.env.shard_on_batch else self.cache_sharding,
+        self.replicated if self.env.shard_on_batch else self.prefill_cache_sharding if self.env.page_attention else self.cache_sharding,
         self.replicated,
     )
 
@@ -820,6 +1061,19 @@ class PyTorchEngine(engine_api.Engine):
         self.replicated,
         self.replicated,
     )
+
+  def get_decode_state_sharding_test(self) -> DecodeStateTest:
+    """Gets the shardings corresponding to the decode state."""
+    return DecodeStateTest(
+        self.replicated,
+        # self.cache_sharding,
+        # self.replicated,
+        # self.replicated,
+        # self.replicated,
+        # self.replicated,
+        # self.replicated,
+        # self.replicated,
+    )    
 
   def get_prefix_sequence_ddim(self) -> Any:
     """Returns the index of the sequence dim in the prefix type."""
@@ -877,6 +1131,8 @@ def create_pytorch_engine(
     generate_cache_stacked=False,
     new_cache_stacked=False,
     lazy_cache_update=False,
+    total_num_pages=0,
+    page_size=64,
 ) -> PyTorchEngine:
   """Returns: The pytorch engine."""
 
@@ -951,6 +1207,8 @@ def create_pytorch_engine(
       generate_cache_stacked=generate_cache_stacked,
       new_cache_stacked=new_cache_stacked,
       lazy_cache_update=lazy_cache_update,
+      total_num_pages=total_num_pages,
+      page_size=page_size,
   )
 
   if shard_on_batch and sharding_config:
@@ -967,6 +1225,11 @@ def create_pytorch_engine(
         args.n_kv_heads,
         max_cache_length,
         args.dim // args.n_heads,
+    ) if env_data.total_num_pages == 0 else (
+        args.n_kv_heads,
+        env_data.total_num_pages,
+        env_data.page_size,
+        args.head_dim,
     )
     env_data.model_type = model_name + "-" + param_size
     env_data.num_layers = args.n_layers

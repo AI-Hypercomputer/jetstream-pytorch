@@ -65,6 +65,13 @@ class JetEngineEnvironmentData:
       "head_dim",
   )
 
+  prefill_attention_kv_axis_names: Tuple[str, ...] = (
+      "batch",
+      "num_attn_heads",
+      "sequence_length",
+      "head_dim",
+  )  
+
   # Shape of cache len(cache_shape) == len(attention_kv_axis_names)
   cache_shape: Tuple[int, ...] = ()
 
@@ -96,6 +103,12 @@ class JetEngineEnvironmentData:
 
   # Ring buffer
   ring_buffer: bool = True
+
+  # total number of pages per layer
+  total_num_pages: int = 0
+
+  # page size per page
+  page_size: int = 64  
 
   flash_attention: bool = False
 
@@ -137,6 +150,10 @@ class JetEngineEnvironment:
     self.testing = self._data.testing
     self.testing_seed = self._data.testing_seed
     self.ring_buffer = self._data.ring_buffer
+    print(f"----------> ring_buffer: {self.ring_buffer}")
+    self.page_attention = self._data.total_num_pages > 0
+    print(f"----------> page_attention: {self.page_attention}")
+    self.prefill_attention_kv_axis_names = self._data.prefill_attention_kv_axis_names
 
     if not self.ring_buffer:
       self.lazy_cache_update = True
@@ -151,6 +168,15 @@ class JetEngineEnvironment:
       self.flash_attention = self._data.flash_attention
       self.generate_cache_stacked = self._data.generate_cache_stacked
       self.new_cache_stacked = self._data.new_cache_stacked
+   
+    if self.page_attention:
+      self.lazy_cache_update = False
+      self.ragged_mha = False
+      self.flash_attention = False
+      self.generate_cache_stacked = False
+      self.new_cache_stacked = False
+      
+        
 
     self.default_type = jnp.bfloat16 if self._data.bf16_enable else jnp.float32
 
@@ -180,12 +206,22 @@ class JetEngineEnvironment:
           "sequence_length",
           "head_dim",
       )
+    elif self.page_attention:
+      self.attention_kv_axis_names = (
+          "num_attn_heads", # kv_heads
+          "total_num_pages",
+          "pages_size",
+          "head_dim",
+      )        
     if data.shard_on_batch:
       self.kv_cache_shard_axis = "batch"
     else:
       self.kv_cache_shard_axis = "num_attn_heads"
 
     self.cache_sharding_axis = self.attention_kv_axis_names.index(
+        self.kv_cache_shard_axis
+    )
+    self.prefill_cache_sharding_axis = self.prefill_attention_kv_axis_names.index(
         self.kv_cache_shard_axis
     )
 
@@ -195,6 +231,7 @@ class JetEngineEnvironment:
       self.cache_sharding_axis = len(self.cache_shape) - 1
 
     self.cache_sharding = self.sharding_by_axis(self.cache_sharding_axis)
+    self.prefill_cache_sharding = self.sharding_by_axis(self.prefill_cache_sharding_axis)
     self._load_sharding_config()
 
   def _load_sharding_config(self):
@@ -250,6 +287,12 @@ class JetEngineEnvironment:
                 self.cache_shape, self.cache_sharding, env=self
             )
         )
+      elif self.page_attention:
+        caches.append(
+            cache_manager.PageKVCacheGenerate.empty(
+                self.cache_shape, self.cache_sharding, env=self
+            )
+        )        
       else:
         caches.append(
             cache_manager.KVCacheGenerate.empty(
