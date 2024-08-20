@@ -18,6 +18,8 @@ import jax.numpy as jnp
 import torch
 import torch_xla2
 
+from absl.testing import parameterized
+
 from jetstream_pt.third_party.llama import model_exportable
 from jetstream_pt.third_party.llama import model_original
 from jetstream_pt.third_party.gemma import model_original as gemma_orig
@@ -32,7 +34,7 @@ from jetstream_pt import cache_manager
 from . import helpers
 
 
-class ModelComponentTest(unittest.TestCase):
+class ModelComponentTest(parameterized.TestCase):
   """Test diff between original model and xla model for transformer,
   transformer block, attention and other component in model"""
 
@@ -75,7 +77,7 @@ class ModelComponentTest(unittest.TestCase):
     if ring_buffer:
       cond = jnp.logical_and(x <= pos, x >= pos - seqlen)
     else:
-      # Left aligned buffer we postpone the cache update
+      # Left aligned buffer we postpone the cache update therefore mask out pos
       cond = jnp.logical_and(x < pos, x >= pos - seqlen)
     res = jnp.where(cond, 0, float("-inf"))
     return torchjax.to_torch(res)
@@ -98,10 +100,33 @@ class ModelComponentTest(unittest.TestCase):
     )
     return cache_decode
 
+  @parameterized.named_parameters(
+      ("ring_buffer", "ring"),
+      ("non_ring_buffer_flash_attention", "flash"),
+      ("non_ring_buffer_ragged_attention", "ragged"),
+  )
   # pylint: disable-next=all
-  def test_attention(self):
+  def test_attention(self, attn_type):
     torch.manual_seed(0)
     env, model_arg = helpers.make_env_tiny(False)
+    if attn_type == "ring":
+      env.lazy_cache_update = False
+      env.ragged_mha = False
+      env.flash_attention = False
+      self.generate_cache_stacked = False
+      env.ring_buffer = True
+    elif attn_type == "flash":
+      env.lazy_cache_update = True
+      env.ragged_mha = True
+      env.flash_attention = True
+      self.generate_cache_stacked = True
+      env.ring_buffer = False
+    elif attn_type == "flash":
+      env.lazy_cache_update = True
+      env.ragged_mha = False
+      env.flash_attention = True
+      self.generate_cache_stacked = True
+      env.ring_buffer = False
 
     attention_orig = model_original.Attention(model_arg)
     attention_ours = layers.Attention(
@@ -167,10 +192,14 @@ class ModelComponentTest(unittest.TestCase):
     )
     expected_out = attention_orig(*inputs_orig2)
     cache_decode.input_pos = [pos]  # next position to update
-    mask = self._generate_mask(env.cache_sequence_length, pos, seqlen)
+    mask = self._generate_mask(
+        env.cache_sequence_length, pos, seqlen, env.ring_buffer
+    )
     mask = mask.reshape(1, 1, 1, -1)  # seq dim is the last one
     freqs_cis = freqs_cis.reshape(batch, 1, -1)
-    input_ours2 = (x2, freqs_cis, mask, cache_decode)
+    start = torch.tensor([0] * batch, dtype=torch.int)
+    end = torch.tensor([pos] * batch, dtype=torch.int)
+    input_ours2 = (x2, freqs_cis, mask, cache_decode, start, end)
     result_torch = helpers.call_xla_model(
         attention_ours, attention_orig.state_dict(), input_ours2
     )

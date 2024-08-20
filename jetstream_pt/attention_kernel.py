@@ -558,33 +558,6 @@ def ragged_mha(
   return out, (m, l)
 
 
-def _dense_attention(xq, keys, values, k_scaler=None, v_scaler=None, mask=None):
-  """The vanilla attention kernel implementation."""
-
-  bsz, _, _, head_dim = xq.shape
-  with jax.named_scope("attn_mat1"):
-    ## Attention start
-    # scores = torch.einsum(jnp.einsum, "ijkl,ikml->ikjm", xq, keys) / math.sqrt(self.head_dim)
-    scores = torch.einsum("ikjl,ikml->ikjm", xq, keys) / math.sqrt(head_dim)
-    if k_scaler is not None:
-      scores = scores * (k_scaler.reshape(bsz, 1, 1, keys.shape[2]))
-    if mask is not None:
-      # if mask.shape != (1,1,16,16):
-      #   breakpoint()
-      scores = scores + mask  # (bs, n_local_heads, seqlen, max_seqlen)
-  with jax.named_scope("attn_soft"):
-    scores = F.softmax(scores.float(), dim=-1).type_as(xq)
-    if v_scaler is not None:
-      scores = scores * v_scaler.reshape((bsz, 1, 1, keys.shape[2]))
-
-  with jax.named_scope("attn_mat2"):
-    # output = torch.einsum(
-    #    "ikjm,ikml->ikjl", scores, values
-    # )  # (bs, n_local_heads, seqlen, head_dim)
-    output = torch.einsum("ikjm,ikml->ikjl", scores, values)
-  return output
-
-
 def reshape_heads(xq, keys):
   """Reshapes the query head for GQA"""
   bq, hq, tq, dq = xq.shape
@@ -605,6 +578,29 @@ def reshape_outputs(rep, o, m=None, d=None):
     m = m.reshape(bq, hqo, rep, tq, 1).reshape(bq, hq, tq, 1)
     d = d.reshape(bq, hqo, rep, tq, 1).reshape(bq, hq, tq, 1)
   return o, (m, d)
+
+
+def _dense_attention(xq, keys, values, k_scaler=None, v_scaler=None, mask=None):
+  """The vanilla attention kernel implementation."""
+
+  bsz, _, _, head_dim = xq.shape
+  with jax.named_scope("attn_mat1"):
+    ## Attention start
+    scores = torch.einsum("ikjl,ikml->ikjm", xq, keys) / math.sqrt(head_dim)
+    if k_scaler is not None:
+      scores = scores * (k_scaler.reshape(bsz, 1, 1, keys.shape[2]))
+    if mask is not None:
+      scores = scores + mask  # (bs, n_local_heads, seqlen, max_seqlen
+  with jax.named_scope("attn_soft"):
+    scores = F.softmax(scores.float(), dim=-1).type_as(xq)
+    if v_scaler is not None:
+      scores = scores * v_scaler.reshape((bsz, 1, 1, keys.shape[2]))
+
+  with jax.named_scope("attn_mat2"):
+    output = torch.einsum(
+        "ikjm,ikml->ikjl", scores, values
+    )  # (bs, n_local_heads, seqlen, head_dim)
+  return output
 
 
 def dense_attention(xq, keys, values, k_scaler=None, v_scaler=None, mask=None):
@@ -680,7 +676,14 @@ def flash_attention(
   """Flash attention kernel."""
   xq, rep = reshape_heads(xq, keys)
   o, (logits_max, denominator) = _flash_attention(
-      xq, keys, values, k_scaler, v_scaler, mask
+      xq=xq,
+      keys=keys,
+      values=values,
+      layer=layer,
+      k_scaler=k_scaler,
+      v_scaler=v_scaler,
+      mask=mask,
+      normalize_var=normalize_var,
   )
   return reshape_outputs(rep, o, logits_max, denominator)
 
