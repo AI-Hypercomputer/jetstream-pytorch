@@ -433,7 +433,6 @@ class AttentionKernel:
       # When GQA is enabled, it not necessary to expand
       if not (self.env.ragged_mha and n_rep > 1) and seqlen == 1:
         true_len = 2
-        # xq = torch.broadcast_to(xq, (xq.shape[0], xq.shape[1], 2, xq.shape[3]))
         xq = torch.nn.functional.pad(
             xq, (0, 0, 0, true_len - seqlen), "constant", 0
         )
@@ -449,15 +448,28 @@ class AttentionKernel:
             end,
             ragged_batch_index,
             ragged_block_index,
+            None,  # k_scaler
+            None,  # v_scaler
         )
       elif self.env.flash_attention and seqlen == 1:
         with torch_xla2.default_env():
           local_output, (local_max, local_denom) = self.flash_attention(
-              xq, keys, values, self.layer_id, mask=local_mask
+              xq=xq,
+              keys=keys,
+              values=values,
+              layer=self.layer_id,
+              k_scaler=None,
+              v_scaler=None,
+              mask=local_mask,
           )
       else:
         local_output = self.dense_attention(
-            xq, keys, values, None, None, local_mask
+            xq=xq,
+            keys=keys,
+            values=values,
+            k_scaler=None,
+            v_scaler=None,
+            mask=local_mask,
         )
         local_max = None
         local_denom = None
@@ -474,9 +486,6 @@ class AttentionKernel:
         if local_denom is not None:
           local_denom = local_denom[:, :, 0:seqlen, :]
 
-      # print(f"attention kernel local_output {local_output.shape} seqlen {seqlen}")
-      # if local_max is not None and local_denom is not None:
-      #   print(f"local_max {local_max.shape} local_denom {local_denom.shape}")
       self.env.apply_sharding(local_output, axis=self.q_shard_axis)
       return local_output, (local_max, local_denom)
 
@@ -486,7 +495,7 @@ class AttentionKernel:
     # print(f"attention kernel xq {xq.shape} seqlen {seqlen} keys {keys.shape} mask {mask.shape}")
     with jax.named_scope("attn_qkv"):
       existing_output, (existing_max, existing_denom) = attend(
-          xq, orig_keys, orig_values, mask
+          xq=xq, keys=orig_keys, values=orig_values, local_mask=mask
       )
     # Updating cache during each step still has very large impact on latency.
     # For non flash attention or prefill, existing output contains everything
@@ -495,23 +504,20 @@ class AttentionKernel:
 
     # For flash attention, existing output contains the existing kv cache generated logits
     with jax.named_scope("attn_new_qkv"):
-      new_output, (new_max, new_denom) = attend(xq, xk, xv, None)
+      new_output, (new_max, new_denom) = attend(
+          xq=xq, keys=xk, values=xv, local_mask=None
+      )
 
     with jax.named_scope("attn_global"):
-      # print(f"existing_output {existing_output} existing_max {existing_max} existing_denom {existing_denom}")
-      # print(f"new_output {new_output} new_max {new_max} new_denom {new_denom}")
-
-      global_sum = existing_denom * torch.exp(
-          existing_max
-      ) + new_denom * torch.exp(new_max)
-      existing_output = (
-          existing_output
-          * existing_denom
-          * torch.exp(existing_max)
-          / global_sum
-      )
-      new_output = new_output * new_denom * torch.exp(new_max) / global_sum
-      attn_out = existing_output + new_output
+      global_max = torch.max(existing_max, new_max)
+      alpha = torch.exp(existing_max - global_max)
+      beta = torch.exp(new_max - global_max)
+      global_denom = alpha * existing_denom + beta * new_denom
+      # global_denom = torch.where(global_denom == 0.0, 1.0, global_denom)
+      attn_out = (
+          existing_denom * alpha * existing_output
+          + beta * new_output * new_denom
+      ) / global_denom
 
       return attn_out
 
@@ -588,7 +594,6 @@ class Int8KVAttentionKernel:
             xq, (0, 0, 0, true_len - seqlen), "constant", 0
         )
 
-      # We are not using ragged attention for prefill yet.
       if self.env.ragged_mha and seqlen == 1 and keys.shape[-2] > 1:
         local_output, (local_max, local_denom) = torch_xla2.interop.call_jax(
             impl,
@@ -606,17 +611,22 @@ class Int8KVAttentionKernel:
       elif self.env.flash_attention and seqlen == 1:
         with torch_xla2.default_env():
           local_output, (local_max, local_denom) = self.flash_attention(
-              xq,
-              keys,
-              values,
-              self.layer_id,
-              k_scaler,
-              v_scaler,
+              xq=xq,
+              keys=keys,
+              values=values,
+              layer=self.layer_id,
+              k_scaler=k_scaler,
+              v_scaler=v_scaler,
               mask=local_mask,
           )
       else:
         local_output = self.dense_attention(
-            xq, keys, values, k_scaler, v_scaler, local_mask
+            xq=xq,
+            keys=keys,
+            values=values,
+            k_scaler=k_scaler,
+            v_scaler=v_scaler,
+            mask=local_mask,
         )
         local_max = None
         local_denom = None
@@ -648,7 +658,12 @@ class Int8KVAttentionKernel:
       ) = cache.update(xk, xv, self.layer_id)
     with jax.named_scope("attn_qkv"):
       existing_output, (existing_max, existing_denom) = attend(
-          xq, orig_keys, orig_values, k_scaler, v_scaler, mask
+          xq=xq,
+          keys=orig_keys,
+          values=orig_values,
+          k_scaler=k_scaler,
+          v_scaler=v_scaler,
+          local_mask=mask,
       )
 
     # For non flash attention or prefill, existing output contains everything
@@ -663,18 +678,15 @@ class Int8KVAttentionKernel:
       )
 
     with jax.named_scope("attn_global"):
-      global_sum = existing_denom * torch.exp(
-          existing_max
-      ) + new_denom * torch.exp(new_max)
-      existing_output = (
-          existing_output
-          * existing_denom
-          * torch.exp(existing_max)
-          / global_sum
-      )
-      new_output = new_output * new_denom * torch.exp(new_max) / global_sum
-      attn_out = existing_output + new_output
-
+      global_max = torch.max(existing_max, new_max)
+      alpha = torch.exp(existing_max - global_max)
+      beta = torch.exp(new_max - global_max)
+      global_denom = alpha * existing_denom + beta * new_denom
+      # global_denom = torch.where(global_denom == 0.0, 1.0, global_denom)
+      attn_out = (
+          existing_denom * alpha * existing_output
+          + beta * new_output * new_denom
+      ) / global_denom
       return attn_out
 
 
@@ -800,16 +812,16 @@ class Attention(ModuleBase):
     # if cache is not None and cache.cache_k is not None:
     # print(f"xq {xq.shape} xk {xk.shape} cache shape {cache.cache_k.shape}")
     output = self.attention_kernel(
-        xq,
-        xk,
-        xv,
-        mask,
+        xq=xq,
+        xk=xk,
+        xv=xv,
+        mask=mask,
         # cache[self.layer_id],
-        cache,
-        start,
-        end,
-        ragged_batch_index,
-        ragged_block_index,
+        cache=cache,
+        start=start,
+        end=end,
+        ragged_batch_index=ragged_batch_index,
+        ragged_block_index=ragged_block_index,
     ).type_as(xq)
     # print(f"output {output.shape}")
     output = output.transpose(-3, -2).contiguous().view(bsz, seqlen, -1)
