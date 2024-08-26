@@ -52,24 +52,7 @@ def create_engine(**kwargs):
   os.environ["TF_CPP_MIN_LOG_LEVEL"] = "0"
 
   start = time.perf_counter()
-  engine = ray_engine.create_pytorch_ray_engine(
-      model_name=kwargs["model_name"],
-      tokenizer_path=kwargs["tokenizer_path"],
-      ckpt_path=kwargs["ckpt_path"],
-      bf16_enable=kwargs["bf16_enable"],
-      param_size=kwargs["param_size"],
-      context_length=kwargs["context_length"],
-      batch_size=kwargs["batch_size"],
-      quantize_weights=kwargs["quantize_weights"],
-      quantize_kv=kwargs["quantize_kv"],
-      max_cache_length=kwargs["max_cache_length"],
-      sharding_config=kwargs["sharding_config"],
-      num_hosts=kwargs["num_hosts"],
-      worker_chips=kwargs["worker_chips"],
-      tpu_chips=kwargs["tpu_chips"],
-      enable_jax_profiler=kwargs["enable_jax_profiler"],
-      jax_profiler_port=kwargs["jax_profiler_port"],
-  )
+  engine = ray_engine.create_pytorch_ray_engine(**kwargs)
 
   print("Initialize engine", time.perf_counter() - start)
   return engine
