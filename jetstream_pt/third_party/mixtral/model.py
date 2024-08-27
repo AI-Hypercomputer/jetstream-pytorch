@@ -52,8 +52,8 @@ class Transformer(ModuleBase):
 
     self.hf_name("norm", "model.norm")
     self.hf_name("layers", "model.layers")
-    self.hf_name('output', 'lm_head')
-    self.hf_name('tok_embeddings', 'model.embed_tokens')
+    self.hf_name("output", "lm_head")
+    self.hf_name("tok_embeddings", "model.embed_tokens")
 
     self.annotate_sharding("tok_embeddings.weight", 1)
     self.annotate_sharding("output.weight", 0)
@@ -154,12 +154,12 @@ class Transformer(ModuleBase):
   @classmethod
   def from_hf_model_id(cls, model_id, env):
     name = {
-      "mistralai/Mixtral-8x7B-v0.1": "Mixtral-8x7B-v0.1",
-      "mistralai/Mixtral-8x7B-Instruct-v0.1": "Mixtral-8x7B-v0.1",
+        "mistralai/Mixtral-8x7B-v0.1": "Mixtral-8x7B-v0.1",
+        "mistralai/Mixtral-8x7B-Instruct-v0.1": "Mixtral-8x7B-v0.1",
     }.get(model_id)
     assert name
     args = ModelArgs.from_name(name)
-    args.device = 'meta'
+    args.device = "meta"
     model = cls(args, env)
     return model
 

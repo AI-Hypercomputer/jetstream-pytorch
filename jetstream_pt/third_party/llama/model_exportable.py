@@ -80,7 +80,6 @@ class FeedForward(ModuleBase):
       self.annotate_sharding("w2.weight_scaler", 0)
       self.annotate_sharding("w3.weight_scaler", 0)
 
-
   def forward(self, x):
     result = self.w2(F.silu(self.w1(x)) * self.w3(x))
     return result

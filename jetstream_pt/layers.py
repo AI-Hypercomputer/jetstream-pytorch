@@ -319,16 +319,16 @@ def get_quantized_embedding_layer(config: "QuantizationConfig"):
   else:
     return Int8Embedding
 
+
 def create_quantized_from_nn_embedding(
     float_embedding: nn.Embedding, config: "QuantizationConfig"
 ):
   clazz_ = get_quantized_embedding_layer(config)
   obj = clazz_(
-    float_embedding.num_embeddings,
-    float_embedding.embedding_dim,
+      float_embedding.num_embeddings,
+      float_embedding.embedding_dim,
   )
-  weights, scaler, _ = quantize_tensor(
-    float_embedding.weight, 1)
+  weights, scaler, _ = quantize_tensor(float_embedding.weight, 1)
   obj.weight = weights
   obj.scaler = scaler
   return obj

@@ -7,11 +7,11 @@ from absl import app, flags
 from jetstream.core import server_lib
 from jetstream.core.config_lib import ServerConfig, MetricsServerConfig
 import torch
+from transformers import AutoTokenizer
 
 from jetstream_pt import fetch_models
 from jetstream_pt import environment, engine, quantize_model, torchjax
 from jetstream_pt import config
-from transformers import AutoTokenizer
 
 
 FLAGS = flags.FLAGS
@@ -31,7 +31,7 @@ def shard_weights(env, weights, weight_shardings):
     sharding = env.sharding_by_axis(weight_shardings.get(key, -1))
     with jax.default_device(jax.devices("cpu")[0]):
       arr = torch_xla2.tensor.t2j(val)
-    
+
     print("SHARDING", key, sharding)
     arr = jax.device_put(arr, sharding)
     sharded[key] = torchjax.to_torch(arr)
@@ -56,7 +56,6 @@ def create_engine(devices):
   if quant_config.enable_weight_quantization:
     quantize_model.quantize_model(model, quant_config)
 
-  import pdb; pdb.set_trace()
   weight_shardings = model.get_sharding_annotations()
   sharded_weights = shard_weights(env, model.state_dict(), weight_shardings)
 

@@ -39,7 +39,7 @@ class ModelInfo:
   num_layers: int
   num_heads: int
   head_dim: int
-  n_reps: int # repeatition for GQA
+  n_reps: int  # repeatition for GQA
 
 
 _llama2_7 = ModelInfo(llama_model.Transformer, 32, 32, 128, 1)
