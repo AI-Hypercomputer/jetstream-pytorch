@@ -36,6 +36,7 @@ from torch.utils import _pytree as pytree
 from jetstream_pt import cache_manager
 from jetstream_pt import quantize
 from jetstream_pt import torchjax
+from jetstream_pt.hf_tokenizer import HFTokenizerAdapter
 from jetstream_pt.environment import JetEngineEnvironment, JetEngineEnvironmentData, QuantizationConfig
 from jetstream_pt.third_party.llama import model_exportable as llama_model, model_args
 from jetstream_pt.third_party.gemma import config as gemma_config, model as gemma_model
@@ -705,6 +706,8 @@ class PyTorchEngine(engine_api.Engine):
   def build_tokenizer(
       self, metadata: tokenizer_pb2.TokenizerParameters  # pylint: disable=all
   ) -> tokenizer_api.Tokenizer:
+    if self.env.hf_tokenizer is not None:
+      return HFTokenizerAdapter(self.env.hf_tokenizer)
     if "llama-3" in self.env.model_type:
       return token_utils.TikToken(metadata)
 

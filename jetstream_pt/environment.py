@@ -141,6 +141,10 @@ class JetEngineEnvironment:
     self.testing_seed = self._data.testing_seed
     self.ring_buffer = self._data.ring_buffer
 
+    # If not None, then use this tokenizer without
+    # trying to create new ones.
+    self.hf_tokenizer = None
+
     if not self.ring_buffer:
       self.lazy_cache_update = True
       self.ragged_mha = True
