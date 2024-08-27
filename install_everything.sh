@@ -28,6 +28,7 @@ pip install flax
 pip install tensorflow-text
 pip install tensorflow
 pip install huggingface_hub
+pip install transformers
 
 pip install ray[default]==2.33.0
 # torch cpu
