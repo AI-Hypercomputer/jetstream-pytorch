@@ -7,6 +7,7 @@ from absl import app, flags
 from jetstream.core import server_lib
 from jetstream.core.config_lib import ServerConfig, MetricsServerConfig
 import torch
+from transformers import AutoTokenizer
 
 from jetstream_pt import fetch_models
 from jetstream_pt import environment, engine, quantize_model, torchjax
@@ -25,13 +26,13 @@ flags.DEFINE_integer("threads", 64, "number of worker threads in thread pool")
 
 def shard_weights(env, weights, weight_shardings):
   """Shard weights according to weight_shardings"""
-  for k, v in weight_shardings.items():
-    print("SHARDING", k, v)
   sharded = {}
   for key, val in weights.items():
     sharding = env.sharding_by_axis(weight_shardings.get(key, -1))
     with jax.default_device(jax.devices("cpu")[0]):
       arr = torch_xla2.tensor.t2j(val)
+
+    print("SHARDING", key, sharding)
     arr = jax.device_put(arr, sharding)
     sharded[key] = torchjax.to_torch(arr)
   return sharded
@@ -48,16 +49,15 @@ def create_engine(devices):
       FLAGS.max_output_length,
       quant_config.enable_weight_quantization,
   )
+  tokenizer = AutoTokenizer.from_pretrained(FLAGS.model_id)
   env = environment.JetEngineEnvironment(env_data)
+  env.hf_tokenizer = tokenizer
   model = fetch_models.instantiate_model_from_repo_id(FLAGS.model_id, env)
+  if quant_config.enable_weight_quantization:
+    quantize_model.quantize_model(model, quant_config)
 
   weight_shardings = model.get_sharding_annotations()
   sharded_weights = shard_weights(env, model.state_dict(), weight_shardings)
-
-  if quant_config.enable_weight_quantization:
-    model.load_state_dict(sharded_weights, assign=True, strict=False)
-    quantize_model.quantize_model(model, quant_config)
-    sharded_weights = model.state_dict()
 
   return engine.PyTorchEngine(
       pt_model=model,
