@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import dataclasses
-from typing import Tuple
+from typing import Tuple, Any
 
 import jax
 import jax.numpy as jnp
@@ -140,6 +140,10 @@ class JetEngineEnvironment:
     self.testing = self._data.testing
     self.testing_seed = self._data.testing_seed
     self.ring_buffer = self._data.ring_buffer
+
+    # If not None, then use this tokenizer without 
+    # trying to create new ones.
+    self.hf_tokenizer = None
 
     if not self.ring_buffer:
       self.lazy_cache_update = True

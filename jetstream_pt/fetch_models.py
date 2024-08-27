@@ -12,6 +12,7 @@ from jetstream_pt.environment import (
     QuantizationConfig,
 )
 from jetstream_pt.third_party.llama import model_exportable as llama_model
+from jetstream_pt.third_party.mixtral import model as mixtral_model
 
 FLAGS = flags.FLAGS
 
@@ -38,12 +39,15 @@ class ModelInfo:
   num_layers: int
   num_heads: int
   head_dim: int
+  n_reps: int # repeatition for GQA
 
 
-_llama2_7 = ModelInfo(llama_model.Transformer, 32, 32, 128)
-_llama2_13 = ModelInfo(llama_model.Transformer, 40, 40, 128)
-_llama2_70 = ModelInfo(llama_model.Transformer, 80, 8, 128)
-_llama3_8 = ModelInfo(llama_model.Transformer, 32, 8, 128)
+_llama2_7 = ModelInfo(llama_model.Transformer, 32, 32, 128, 1)
+_llama2_13 = ModelInfo(llama_model.Transformer, 40, 40, 128, 1)
+_llama2_70 = ModelInfo(llama_model.Transformer, 80, 8, 128, 4)
+_llama3_8 = ModelInfo(llama_model.Transformer, 32, 8, 128, 4)
+
+_mixtral_87 = ModelInfo(mixtral_model.Transformer, 32, 8, 128, 4)
 
 
 model_id_to_class = {
@@ -57,8 +61,8 @@ model_id_to_class = {
     "google/gemma-2b-it": None,
     "google/gemma-7b": None,
     "google/gemma-7b-it": None,
-    "mistralai/Mixtral-8x7B-v0.1": None,
-    "mistralai/Mixtral-8x7B-Instruct-v0.1": None,
+    "mistralai/Mixtral-8x7B-v0.1": _mixtral_87,
+    "mistralai/Mixtral-8x7B-Instruct-v0.1": _mixtral_87,
 }
 
 
@@ -107,6 +111,7 @@ def construct_env_data_from_model_id(
       else input_length + output_length
   )
 
+  model_info = model_id_to_class.get(repo_id)
   env_data = JetEngineEnvironmentData(
       tokenizer_path=tokenizer_path,
       checkpoint_path=checkpoint_path,
@@ -119,8 +124,8 @@ def construct_env_data_from_model_id(
       bf16_enable=True,
       sharding_config_path="",
       shard_on_batch=shard_on_batch,
+      n_reps=model_info.n_reps,
   )
-  model_info = model_id_to_class.get(repo_id)
   env_data.cache_shape = (
       batch_size,
       model_info.num_heads,

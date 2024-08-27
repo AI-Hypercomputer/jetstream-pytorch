@@ -21,12 +21,14 @@ import torch.nn as nn
 from torch import Tensor
 from torch.nn import functional as F
 from .config import ModelArgs, find_multiple
+from jetstream_pt import quantize
 from jetstream_pt.layers import Attention, get_quantized_linear_layer, get_quantized_embedding_layer
+from jetstream_pt.model_base import ModuleBase
 
 import jax
 
 
-class Transformer(nn.Module):
+class Transformer(ModuleBase):
 
   def __init__(self, config: ModelArgs, env) -> None:
     super().__init__()
@@ -37,6 +39,7 @@ class Transformer(nn.Module):
     self.tok_embeddings = Embedding(
         config.vocab_size, config.dim, device=config.device
     )
+
     self.layers = nn.ModuleList(
         TransformerBlock(config, env, layer_id)
         for layer_id in range(config.n_layer)
@@ -46,6 +49,14 @@ class Transformer(nn.Module):
     self.output = LinearLayer(
         config.dim, config.vocab_size, bias=False, device=config.device
     )
+
+    self.hf_name("norm", "model.norm")
+    self.hf_name("layers", "model.layers")
+    self.hf_name('output', 'lm_head')
+    self.hf_name('tok_embeddings', 'model.embed_tokens')
+
+    self.annotate_sharding("tok_embeddings.weight", 1)
+    self.annotate_sharding("output.weight", 0)
 
     self.max_batch_size = -1
     self.max_seq_length = -1
@@ -140,8 +151,20 @@ class Transformer(nn.Module):
         "output.weight": "ColumnParallelLinear",
     }
 
+  @classmethod
+  def from_hf_model_id(cls, model_id, env):
+    name = {
+      "mistralai/Mixtral-8x7B-v0.1": "Mixtral-8x7B-v0.1",
+      "mistralai/Mixtral-8x7B-Instruct-v0.1": "Mixtral-8x7B-v0.1",
+    }.get(model_id)
+    assert name
+    args = ModelArgs.from_name(name)
+    args.device = 'meta'
+    model = cls(args, env)
+    return model
 
-class TransformerBlock(nn.Module):
+
+class TransformerBlock(ModuleBase):
 
   def __init__(self, config: ModelArgs, env, layer_id) -> None:
     super().__init__()
@@ -154,9 +177,36 @@ class TransformerBlock(nn.Module):
         device=config.device,
         layer_id=layer_id,
     )
+    self.hf_name("attention", "self_attn")
+    self.attention.hf_name("wq", "q_proj")
+    self.attention.hf_name("wk", "k_proj")
+    self.attention.hf_name("wv", "v_proj")
+    self.attention.hf_name("wo", "o_proj")
+
+    self.attention.annotate_sharding("wq", 0)
+    self.attention.annotate_sharding("wk", 0)
+    self.attention.annotate_sharding("wv", 0)
+    self.attention.annotate_sharding("wo", 1)
+
     self.block_sparse_moe = MOEFeedForward(config, config.device, env)
     self.ffn_norm = RMSNorm(config.dim, config.norm_eps)
     self.attention_norm = RMSNorm(config.dim, config.norm_eps)
+
+    self.hf_name("attention_norm", "input_layernorm")
+    self.hf_name("ffn_norm", "post_attention_layernorm")
+    self._register_load_state_dict_pre_hook(self.load_hook)
+
+  def load_hook(self, state_dict, prefix, *args):
+    if prefix + "block_sparse_moe.experts" in state_dict:
+      w1s, w2s, w3s = [], [], []
+      for i in range(8):
+        exp_prefix = f"{prefix}block_sparse_moe.experts.{i}."
+        w1s.append(state_dict.pop(exp_prefix + ".w1"))
+        w2s.append(state_dict.pop(exp_prefix + ".w2"))
+        w3s.append(state_dict.pop(exp_prefix + ".w3"))
+      state_dict[prefix + "block_sparse_moe.cond_ffn.w1"] = torch.cat(w1s)
+      state_dict[prefix + "block_sparse_moe.cond_ffn.w2"] = torch.cat(w2s)
+      state_dict[prefix + "block_sparse_moe.cond_ffn.w3"] = torch.cat(w3s)
 
   def forward(
       self,
@@ -189,7 +239,7 @@ class TransformerBlock(nn.Module):
     return out
 
 
-class Int8ConditionalFeedForward(nn.Module):
+class Int8ConditionalFeedForward(ModuleBase):
 
   def __init__(self, config):
     super().__init__()
@@ -215,12 +265,20 @@ class Int8ConditionalFeedForward(nn.Module):
     self.register_buffer("w2", w2)
     self.register_buffer("w3", w3)
 
+    self.annotate_sharding("w1", 1)
+    self.annotate_sharding("w2", 2)
+    self.annotate_sharding("w3", 1)
+
     w1_scaler = torch.empty(config.num_experts, config.intermediate_size)
     w2_scaler = torch.empty(config.num_experts, config.dim)
     w3_scaler = torch.empty(config.num_experts, config.intermediate_size)
+
     self.register_buffer("w1_scaler", w1_scaler)
     self.register_buffer("w2_scaler", w2_scaler)
     self.register_buffer("w3_scaler", w3_scaler)
+    self.annotate_sharding("w1_scaler", 1)
+    self.annotate_sharding("w2_scaler", -1)
+    self.annotate_sharding("w3_scaler", 1)
 
   def forward(self, x: Tensor, expert_indices: Tensor) -> Tensor:
     seq_len = x.shape[0]
@@ -266,7 +324,7 @@ class Int8ConditionalFeedForward(nn.Module):
       return expert_outs[seq_indexes, expert_indices]
 
 
-class ConditionalFeedForward(nn.Module):
+class ConditionalFeedForward(ModuleBase):
 
   def __init__(self, config):
     super().__init__()
@@ -280,6 +338,10 @@ class ConditionalFeedForward(nn.Module):
     self.w3 = nn.Parameter(
         torch.empty(config.num_experts, config.intermediate_size, config.dim)
     )
+    self.annotate_sharding("w1", 1)
+    self.annotate_sharding("w2", 2)
+    self.annotate_sharding("w3", 1)
+    self.config = config
 
   def forward(self, x: Tensor, expert_indices: Tensor) -> Tensor:
     seq_len = x.shape[0]
@@ -317,8 +379,22 @@ class ConditionalFeedForward(nn.Module):
       seq_indexes = torch.arange(seqlen).unsqueeze(1)
       return expert_outs[seq_indexes, expert_indices]
 
+  def get_quantized_version(self):
+    """Return quantized version of this class."""
+    quant_version = Int8ConditionalFeedForward(self.config)
+    w1, w1_scaler, _ = quantize.quantize_tensor(self.w1, 2)
+    w2, w2_scaler, _ = quantize.quantize_tensor(self.w2, 1)
+    w3, w3_scaler, _ = quantize.quantize_tensor(self.w3, 2)
+    quant_version.w1 = w1
+    quant_version.w2 = w2
+    quant_version.w3 = w3
+    quant_version.w1_scaler = w1_scaler
+    quant_version.w2_scaler = w2_scaler
+    quant_version.w3_scaler = w3_scaler
+    return quant_version
 
-class MOEFeedForward(nn.Module):
+
+class MOEFeedForward(ModuleBase):
 
   def __init__(self, config, device, env) -> None:
     super().__init__()
@@ -352,7 +428,7 @@ class MOEFeedForward(nn.Module):
     return expert_outs
 
 
-class RMSNorm(nn.Module):
+class RMSNorm(ModuleBase):
 
   def __init__(self, dim: int, eps: float = 1e-5):
     super().__init__()
