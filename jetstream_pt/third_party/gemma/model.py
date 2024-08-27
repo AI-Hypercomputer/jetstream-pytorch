@@ -21,6 +21,7 @@ from typing import Any, List
 from . import config as gemma_config
 
 from jetstream_pt import layers
+from jetstream_pt.model_base import ModuleBase
 import jax
 
 
@@ -63,7 +64,7 @@ def apply_rotary_emb(x: torch.Tensor, freqs_cis: torch.Tensor) -> torch.Tensor:
   return x_out
 
 
-class GemmaAttention(nn.Module):
+class GemmaAttention(ModuleBase):
 
   def __init__(
       self,
@@ -131,6 +132,19 @@ class GemmaAttention(nn.Module):
         **linear_kwargs,
     )
 
+    self.hf_name("wk", "k_proj")
+    self.hf_name("wv", "v_proj")
+    self.hf_name("wq", "q_proj")
+    self.annotate_sharding("wk.weight", 0)
+    self.annotate_sharding("wv.weight", 0)
+    self.annotate_sharding("wq.weight", 0)
+    self.annotate_sharding("o_proj.weight", 1)
+    if Linear != torch.nn.Linear:
+      self.annotate_sharding("wk.weight_scaler", 0)
+      self.annotate_sharding("wv.weight_scaler", 0)
+      self.annotate_sharding("wq.weight_scaler", 0)
+      self.annotate_sharding("o_proj.weight_scaler", -1)
+
     Kernel = (
         layers.Int8KVAttentionKernel
         if env.quant_config.enable_kv_quantization
@@ -195,7 +209,7 @@ class GemmaAttention(nn.Module):
     return output
 
 
-class RMSNorm(torch.nn.Module):
+class RMSNorm(ModuleBase):
 
   def __init__(
       self,
@@ -221,7 +235,7 @@ class RMSNorm(torch.nn.Module):
     return output
 
 
-class GemmaMLP(nn.Module):
+class GemmaMLP(ModuleBase):
 
   def __init__(
       self,
@@ -262,6 +276,17 @@ class GemmaMLP(nn.Module):
         **linear_kwargs,
     )
 
+    self.annotate_sharding("gate_proj.weight", 0)
+    self.annotate_sharding('up_proj.weight', 0)
+    self.annotate_sharding('down_proj.weight', 1)
+    self.annotate_sharding("gate_proj.bias", 0)
+    self.annotate_sharding('up_proj.bias', 0)
+    self.annotate_sharding('down_proj.bias', -1)
+    if Linear != torch.nn.Linear:
+      self.annotate_sharding("gate_proj.weight_scaler", 0)
+      self.annotate_sharding("up_proj.weight_scaler", 0)
+      self.annotate_sharding("down_proj.weight_scaler", -1)
+
   def forward(self, x):
     gate = self.gate_proj(x)
     gate = F.gelu(gate, approximate="tanh")
@@ -271,7 +296,7 @@ class GemmaMLP(nn.Module):
     return outputs
 
 
-class GemmaDecoderLayer(nn.Module):
+class GemmaDecoderLayer(ModuleBase):
 
   def __init__(self, config: gemma_config.GemmaConfig, env, layer_id):
     super().__init__()
@@ -333,7 +358,7 @@ class GemmaDecoderLayer(nn.Module):
     return hidden_states
 
 
-class GemmaModel(nn.Module):
+class GemmaModel(ModuleBase):
 
   def __init__(self, config: gemma_config.GemmaConfig, env):
     super().__init__()
@@ -356,6 +381,10 @@ class GemmaModel(nn.Module):
     self.embedder = Embedding(
         config.vocab_size, config.hidden_size, device=config.device
     )
+    self.hf_name("embedder", "model.embed_tokens")
+    self.hf_name("layers", "model.layers")
+    self.hf_name("norm", "model.norm")
+
     rope_theta = getattr(config, "rope_theta", 10000)
     freqs_cis = precompute_freqs_cis(
         config.head_dim, config.max_position_embeddings * 2, theta=rope_theta
@@ -430,3 +459,17 @@ class GemmaModel(nn.Module):
     return {
         "embedder.weight": "embedder.weight_scaler",
     }
+
+  @classmethod
+  def from_hf_model_id(cls, model_id, env):
+    name = {
+        "google/gemma-2b": "2b",
+        "google/gemma-2b-it": "2b",
+        "google/gemma-7b": "7b",
+        "google/gemma-7b-it": "7b",
+    }.get(model_id)
+    assert name
+    args = gemma_config.get_model_config(name)
+    args.device = "meta"
+    model = cls(args, env)
+    return model
