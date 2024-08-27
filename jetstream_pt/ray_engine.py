@@ -220,6 +220,7 @@ def create_pytorch_ray_engine(
     decode_pod_slice_name: str = None,
     enable_jax_profiler: bool = False,
     jax_profiler_port: int = 9999,
+    **kwargs,
 ) -> Union[
     PyTorchRayEngine, Tuple[List[PyTorchRayEngine], List[PyTorchRayEngine]]
 ]:
