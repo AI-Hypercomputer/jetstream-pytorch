@@ -99,6 +99,7 @@ class TransformerBlock(ModuleBase):
     self.n_heads = args.n_heads
     self.dim = args.dim
     self.head_dim = args.dim // args.n_heads
+    self.args = args
 
     self.attention = Attention(
         args.n_heads,
@@ -124,6 +125,8 @@ class TransformerBlock(ModuleBase):
     self.ffn_norm = RMSNorm(args.dim, eps=args.norm_eps, device=args.device)
 
     self.hf_name("attention", "self_attn")
+    # We dont want to rename q_proj and k_proj; this is done in 
+    # _load_attention_hf_weights
     self.attention.hf_name("wq", "q_proj")
     self.attention.hf_name("wk", "k_proj")
     self.attention.hf_name("wv", "v_proj")
@@ -137,6 +140,20 @@ class TransformerBlock(ModuleBase):
     self.hf_name("feed_forward", "mlp")
     self.hf_name("attention_norm", "input_layernorm")
     self.hf_name("ffn_norm", "post_attention_layernorm")
+    self.attention._register_load_state_dict_pre_hook(
+      self._load_attention_hf_weights)
+
+  def _load_attention_hf_weights(self, state_dict, prefix, *args):
+    def transform(val, n_heads):
+      dim1, dim2 = val.shape
+      return val.reshape(n_heads, 2, dim1 // n_heads // 2, dim2).transpose(1, 2).reshape(dim1, dim2)
+    qname  = prefix + "wq.weight"
+    kname = prefix + "wk.weight"
+    if qname in state_dict:
+      state_dict[prefix + 'wq.weight'] = transform(state_dict[qname], self.n_heads)
+    if kname in state_dict:
+      state_dict[prefix + 'wk.weight'] = transform(state_dict[kname], self.args.n_kv_heads or self.n_heads)
+
 
   def forward(
       self,

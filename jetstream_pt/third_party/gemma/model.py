@@ -418,6 +418,7 @@ class GemmaModel(ModuleBase):
       freqs_cis = freqs_cis.reshape(bsz, seqlen, -1)
 
     hidden_states = self.embedder(tokens)
+    #jax.debug.print('after embedding {}', hidden_states[-1]._elem)
     hidden_states = hidden_states * (self.config.hidden_size**0.5)
 
     end = None if start is None else (start + input_pos) % self.env.cache_len
@@ -434,6 +435,7 @@ class GemmaModel(ModuleBase):
           ragged_batch_index=ragged_batch_index,
           ragged_block_index=ragged_block_index,
       )
+      #jax.debug.print('hidden after layer {}: {}', i, hidden_states[-1]._elem)
     hidden_states = self.norm(hidden_states)
 
     embedder_weight = self.embedder.weight

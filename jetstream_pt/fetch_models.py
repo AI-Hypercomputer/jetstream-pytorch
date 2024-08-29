@@ -172,7 +172,12 @@ def instantiate_model_from_repo_id(
       val = weights.pop(name)
       weights[updated] = val
 
-  model.load_state_dict(weights, assign=True, strict=False)
+
+  for name in list(weights.keys()):
+    if 'inv_freq' in name:
+      weights.pop(name)
+  weights['freqs_cis'] = model.freqs_cis
+  model.load_state_dict(weights, assign=True, strict=True)
 
   return model
   ## QQ do i need to set the weights onto the model?

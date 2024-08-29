@@ -328,9 +328,9 @@ def create_quantized_from_nn_embedding(
       float_embedding.num_embeddings,
       float_embedding.embedding_dim,
   )
-  weights, scaler, _ = quantize_tensor(float_embedding.weight, 1)
+  weights, scaler, _ = quantize_tensor(float_embedding.weight, 0)
   obj.weight = weights
-  obj.scaler = scaler
+  obj.weight_scaler = scaler 
   return obj
 
 
