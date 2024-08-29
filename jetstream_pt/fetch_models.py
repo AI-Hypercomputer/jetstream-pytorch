@@ -166,18 +166,10 @@ def instantiate_model_from_repo_id(
   env.device = "meta"
   model = model_info.model_class.from_hf_model_id(repo_id, env)
   weights = _load_weights(model_dir)
-  updated_keys = model.get_hf_names_to_real_name()
-  for name, updated in updated_keys.items():
-    if name in weights:
-      val = weights.pop(name)
-      weights[updated] = val
+  weights = model.convert_hf_weights(weights)
 
 
-  for name in list(weights.keys()):
-    if 'inv_freq' in name:
-      weights.pop(name)
-  weights['freqs_cis'] = model.freqs_cis
-  model.load_state_dict(weights, assign=True, strict=True)
+  model.load_state_dict(weights, assign=True, strict=False)
 
   return model
   ## QQ do i need to set the weights onto the model?
@@ -198,11 +190,11 @@ def _hf_download(
         local_dir=dest_directory,
         local_dir_use_symlinks=False,
         token=hf_token,
-        allow_patterns=[
-            "model-?????-of-?????.safetensors",
-            "*.json",
-            "*.model",
-        ],
+        # allow_patterns=[
+        #     "model-?????-of-?????.safetensors",
+        #     "*.json",
+        #     "*.model",
+        # ],
     )
   except HTTPError as e:
     if e.response.status_code == 401:

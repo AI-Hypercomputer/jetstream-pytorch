@@ -12,7 +12,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+import collections
+import copy
 from dataclasses import dataclass
 from typing import Optional, List, Any
 
@@ -163,6 +164,32 @@ class Transformer(ModuleBase):
     model = cls(args, env)
     return model
 
+  def convert_hf_weights(self, hf_weights):
+    updated_weights = super().convert_hf_weights(hf_weights)
+    # key is layer id, weight name
+    groupped_by_experts = collections.defaultdict(lambda: [None] * 8)
+  
+
+    updated = copy.copy(hf_weights)
+    for key, value in hf_weights.items():
+      if 'block_sparse_moe.experts' in key:
+        #  0       1   2     3              4     5  6   7
+        #"model.layers.0.block_sparse_moe.experts.0.w1.weight"
+        updated.pop(key)
+        name_pieces = key.split('.')
+        assert len(name_pieces) == 8
+        layer_id = int(name_pieces[2])
+        expert_id = int(name_pieces[5])
+        weight_name = name_pieces[6]
+        groupped_by_experts[(layer_id, weight_name)][expert_id] = value
+
+
+    for (layer_id, weight_name), ws in groupped_by_experts.items():
+      name = f"model.layers.{layer_id}.block_sparse_moe.cond_ffn.{weight_name}"
+      updated[name] = torch.stack(ws)
+    res = super().convert_hf_weights(updated)
+    return res
+
 
 class TransformerBlock(ModuleBase):
 
@@ -177,6 +204,7 @@ class TransformerBlock(ModuleBase):
         device=config.device,
         layer_id=layer_id,
     )
+    self.config = config
     self.hf_name("attention", "self_attn")
     self.attention.hf_name("wq", "q_proj")
     self.attention.hf_name("wk", "k_proj")
@@ -194,19 +222,20 @@ class TransformerBlock(ModuleBase):
 
     self.hf_name("attention_norm", "input_layernorm")
     self.hf_name("ffn_norm", "post_attention_layernorm")
-    self._register_load_state_dict_pre_hook(self.load_hook)
+    
+    self.attention._register_load_state_dict_pre_hook(
+      self._load_attention_hf_weights)
 
-  def load_hook(self, state_dict, prefix, *args):
-    if prefix + "block_sparse_moe.experts" in state_dict:
-      w1s, w2s, w3s = [], [], []
-      for i in range(8):
-        exp_prefix = f"{prefix}block_sparse_moe.experts.{i}."
-        w1s.append(state_dict.pop(exp_prefix + ".w1"))
-        w2s.append(state_dict.pop(exp_prefix + ".w2"))
-        w3s.append(state_dict.pop(exp_prefix + ".w3"))
-      state_dict[prefix + "block_sparse_moe.cond_ffn.w1"] = torch.cat(w1s)
-      state_dict[prefix + "block_sparse_moe.cond_ffn.w2"] = torch.cat(w2s)
-      state_dict[prefix + "block_sparse_moe.cond_ffn.w3"] = torch.cat(w3s)
+  def _load_attention_hf_weights(self, state_dict, prefix, *args):
+    def transform(val, n_heads):
+      dim1, dim2 = val.shape
+      return val.reshape(n_heads, 2, dim1 // n_heads // 2, dim2).transpose(1, 2).reshape(dim1, dim2)
+    qname  = prefix + "wq.weight"
+    kname = prefix + "wk.weight"
+    if qname in state_dict:
+      state_dict[prefix + 'wq.weight'] = transform(state_dict[qname], self.config.n_head)
+    if kname in state_dict:
+      state_dict[prefix + 'wk.weight'] = transform(state_dict[kname], self.config.n_local_heads or self.config.n_head)
 
   def forward(
       self,
@@ -383,14 +412,14 @@ class ConditionalFeedForward(ModuleBase):
     """Return quantized version of this class."""
     quant_version = Int8ConditionalFeedForward(self.config)
     w1, w1_scaler, _ = quantize.quantize_tensor(self.w1, 2)
-    w2, w2_scaler, _ = quantize.quantize_tensor(self.w2, 1)
+    w2, w2_scaler, _ = quantize.quantize_tensor(self.w2, 2)
     w3, w3_scaler, _ = quantize.quantize_tensor(self.w3, 2)
     quant_version.w1 = w1
     quant_version.w2 = w2
     quant_version.w3 = w3
-    quant_version.w1_scaler = w1_scaler
-    quant_version.w2_scaler = w2_scaler
-    quant_version.w3_scaler = w3_scaler
+    quant_version.w1_scaler = w1_scaler.squeeze(2)
+    quant_version.w2_scaler = w2_scaler.squeeze(2)
+    quant_version.w3_scaler = w3_scaler.squeeze(2)
     return quant_version
 
 
