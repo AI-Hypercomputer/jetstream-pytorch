@@ -47,7 +47,7 @@ class AttrProperty:
 
 class ModuleBase(torch.nn.Module, metaclass=abc.ABCMeta):
   """nn Module that allows attaching properties.
-  
+
   This class currently serves 2 goals:
   1. Allow model to specify alternative names for submodules / weights
      this is needed so that it can *also* load HuggingFace checkpoints
@@ -85,7 +85,9 @@ class ModuleBase(torch.nn.Module, metaclass=abc.ABCMeta):
     """Set sharding name for a attribute or submodule."""
     self.attr_to_property[name].sharding_axis = axis
 
-  def convert_hf_weights(self, hf_weights: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+  def convert_hf_weights(
+      self, hf_weights: Dict[str, torch.Tensor]
+  ) -> Dict[str, torch.Tensor]:
     """Load state_dict with hg weights."""
     weights = {}
     updated_keys = self.get_hf_names_to_real_name()
@@ -94,9 +96,8 @@ class ModuleBase(torch.nn.Module, metaclass=abc.ABCMeta):
         weights[updated] = hf_weights[name]
 
     for name in list(weights.keys()):
-      if 'inv_freq' in name:
+      if "inv_freq" in name:
         weights.pop(name)
-    if hasattr(self, 'freqs_cis'):
-      weights['freqs_cis'] = self.freqs_cis
+    if hasattr(self, "freqs_cis"):
+      weights["freqs_cis"] = self.freqs_cis
     return weights
-

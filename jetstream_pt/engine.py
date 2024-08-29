@@ -230,7 +230,6 @@ class PyTorchEngine(engine_api.Engine):
     with self._lock:
       with torch_xla2.default_env():
         res = torch.func.functional_call(self.pt_model, paramst, argst)[0]
-        jax.debug.print('Prefill result {}', res._elem)
     caches_res = [c.state() for c in caches]
     return torchjax.from_torch((res, caches_res))
 
@@ -283,7 +282,6 @@ class PyTorchEngine(engine_api.Engine):
         self.env.temperature,
     )
     token_out = jnp.reshape(token, (1, 1))
-    jax.debug.print('TOKEN is {}', token_out)
     data = jnp.concatenate(
         [
             token_out,  # First token

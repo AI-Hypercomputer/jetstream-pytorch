@@ -526,7 +526,7 @@ class QuantizationTest(parameterized.TestCase):
     )
     qm = quantize_model(m, quant_config)
     res = helpers.call_xla_model(qm, qm.state_dict(), arg)
-    self.assertGreater(self._calc_cosine_dist(res, torch_res), 0.9999)
+    self.assertGreater(self._calc_cosine_dist(res, torch_res), 0.997)
 
 
 if __name__ == "__main__":

@@ -13,7 +13,7 @@ from jetstream_pt.environment import (
 )
 from jetstream_pt.third_party.llama import model_exportable as llama_model
 from jetstream_pt.third_party.mixtral import model as mixtral_model
-from jetstream_pt.third_party.gemma import model as gemma_model 
+from jetstream_pt.third_party.gemma import model as gemma_model
 
 FLAGS = flags.FLAGS
 
@@ -168,7 +168,6 @@ def instantiate_model_from_repo_id(
   weights = _load_weights(model_dir)
   weights = model.convert_hf_weights(weights)
 
-
   model.load_state_dict(weights, assign=True, strict=False)
 
   return model
@@ -190,11 +189,11 @@ def _hf_download(
         local_dir=dest_directory,
         local_dir_use_symlinks=False,
         token=hf_token,
-        # allow_patterns=[
-        #     "model-?????-of-?????.safetensors",
-        #     "*.json",
-        #     "*.model",
-        # ],
+        allow_patterns=[
+            "model-?????-of-?????.safetensors",
+            "*.json",
+            "*.model",
+        ],
     )
   except HTTPError as e:
     if e.response.status_code == 401:

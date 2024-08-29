@@ -330,7 +330,7 @@ def create_quantized_from_nn_embedding(
   )
   weights, scaler, _ = quantize_tensor(float_embedding.weight, 0)
   obj.weight = weights
-  obj.weight_scaler = scaler 
+  obj.weight_scaler = scaler
   return obj
 
 

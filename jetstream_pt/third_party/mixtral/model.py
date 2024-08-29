@@ -165,24 +165,35 @@ class Transformer(ModuleBase):
     return model
 
   def convert_hf_weights(self, hf_weights):
-    updated_weights = super().convert_hf_weights(hf_weights)
-    # key is layer id, weight name
-    groupped_by_experts = collections.defaultdict(lambda: [None] * 8)
-  
 
+    def transform(val, n_heads):
+      dim1, dim2 = val.shape
+      return (
+          val.reshape(n_heads, 2, dim1 // n_heads // 2, dim2)
+          .transpose(1, 2)
+          .reshape(dim1, dim2)
+      )
+
+    groupped_by_experts = collections.defaultdict(lambda: [None] * 8)
     updated = copy.copy(hf_weights)
     for key, value in hf_weights.items():
-      if 'block_sparse_moe.experts' in key:
+      if "block_sparse_moe.experts" in key:
         #  0       1   2     3              4     5  6   7
-        #"model.layers.0.block_sparse_moe.experts.0.w1.weight"
+        # "model.layers.0.block_sparse_moe.experts.0.w1.weight"
         updated.pop(key)
-        name_pieces = key.split('.')
+        name_pieces = key.split(".")
         assert len(name_pieces) == 8
         layer_id = int(name_pieces[2])
         expert_id = int(name_pieces[5])
         weight_name = name_pieces[6]
         groupped_by_experts[(layer_id, weight_name)][expert_id] = value
 
+      if "q_proj" in key:
+        updated[key] = transform(value, self.config.n_head)
+      if "k_proj" in key:
+        updated[key] = transform(
+            value, self.config.n_local_heads or self.config.n_head
+        )
 
     for (layer_id, weight_name), ws in groupped_by_experts.items():
       name = f"model.layers.{layer_id}.block_sparse_moe.cond_ffn.{weight_name}"
@@ -222,20 +233,6 @@ class TransformerBlock(ModuleBase):
 
     self.hf_name("attention_norm", "input_layernorm")
     self.hf_name("ffn_norm", "post_attention_layernorm")
-    
-    self.attention._register_load_state_dict_pre_hook(
-      self._load_attention_hf_weights)
-
-  def _load_attention_hf_weights(self, state_dict, prefix, *args):
-    def transform(val, n_heads):
-      dim1, dim2 = val.shape
-      return val.reshape(n_heads, 2, dim1 // n_heads // 2, dim2).transpose(1, 2).reshape(dim1, dim2)
-    qname  = prefix + "wq.weight"
-    kname = prefix + "wk.weight"
-    if qname in state_dict:
-      state_dict[prefix + 'wq.weight'] = transform(state_dict[qname], self.config.n_head)
-    if kname in state_dict:
-      state_dict[prefix + 'wk.weight'] = transform(state_dict[kname], self.config.n_local_heads or self.config.n_head)
 
   def forward(
       self,

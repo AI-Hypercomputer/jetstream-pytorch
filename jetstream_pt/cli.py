@@ -59,7 +59,7 @@ def create_engine(devices):
   model = fetch_models.instantiate_model_from_repo_id(FLAGS.model_id, env)
   if quant_config.enable_weight_quantization:
     quantize_model.quantize_model(model, quant_config)
-    print('====== model =======')
+    print("====== model =======")
     print(model)
 
   weight_shardings = model.get_sharding_annotations()
@@ -81,11 +81,7 @@ def list_model():
 
 def serve():
   """Run gRPC server."""
-  if FLAGS.model_id == "":
-    print("Please specify model_id with --model_id")
-    print("valid model ids are:")
-    list_model()
-    sys.exit(1)
+  _check_model_id()
   devices = server_lib.get_devices()
   print(f"devices: {devices}")
 
@@ -110,23 +106,27 @@ def serve():
   jetstream_server.wait_for_termination()
 
 
-def interactive():
-  """Run interactive"""
+def _check_model_id():
   if FLAGS.model_id == "":
     print("Please specify model_id with --model_id")
     print("valid model ids are:")
     list_model()
     sys.exit(1)
+
+
+def interactive():
+  """Run interactive"""
+  _check_model_id()
   devices = server_lib.get_devices()
   print(f"devices: {devices}")
-  engine = create_engine(devices)
+  pt_engine = create_engine(devices)
 
   start = time.perf_counter()
-  params = engine.load_params()
+  params = pt_engine.load_params()
   print("Load params ", time.perf_counter() - start)
 
-  metadata = engine.get_tokenizer()
-  tokenizer = engine.build_tokenizer(metadata)
+  metadata = pt_engine.get_tokenizer()
+  tokenizer = pt_engine.build_tokenizer(metadata)
   max_output_length = 1024
 
   profiling_output = FLAGS.profiling_output
@@ -139,7 +139,7 @@ def interactive():
   if profiling_prefill:
     jax.profiler.start_trace(profiling_output)
 
-  decode_state = engine.init_decode_state()
+  decode_state = pt_engine.init_decode_state()
 
   if profiling_prefill:
     jax.profiler.stop_trace()
@@ -167,11 +167,11 @@ def interactive():
     if profiling_prefill:
       jax.profiler.start_trace(profiling_output)
 
-    prefill_result, _ = engine.prefill(
+    prefill_result, _ = pt_engine.prefill(
         params=params, padded_tokens=tokens, true_length=true_length
     )
     # pylint: disable-next=all
-    decode_state = engine.insert(prefill_result, decode_state, slot=slot)
+    decode_state = pt_engine.insert(prefill_result, decode_state, slot=slot)
 
     if profiling_prefill:
       jax.profiler.stop_trace()
@@ -183,7 +183,7 @@ def interactive():
       if profiling_output:
         jax.profiler.start_trace(profiling_output)
 
-      decode_state, result_tokens = engine.generate(params, decode_state)
+      decode_state, result_tokens = pt_engine.generate(params, decode_state)
       result_tokens = result_tokens.convert_to_numpy()
 
       if profiling_output:
@@ -214,18 +214,13 @@ def main(argv):
 
   if argv[1] == "list":
     list_model()
-    return
-
   elif argv[1] == "serve":
     serve()
-    return
-
   elif argv[1] == "interactive":
     interactive()
-    return
   else:
     print(
-      "Invalid arguments. please specify 'list', 'serve', or 'interactive'."
+        "Invalid arguments. please specify 'list', 'serve', or 'interactive'."
     )
 
 

@@ -18,7 +18,9 @@ class HFTokenizerAdapter(tokenizer_api.Tokenizer):
           if padding is used.
     """
     res = self.tokenizer.encode(s, add_special_tokens=False)
-    return token_utils.pad_tokens(res, self.bos_id, self.pad_id, jax_padding=True)
+    return token_utils.pad_tokens(
+        res, self.bos_id, self.pad_id, jax_padding=True
+    )
 
   def decode(self, token_ids: list[int], **kwargs) -> str:
     """Processess input token ids to generate a string.
