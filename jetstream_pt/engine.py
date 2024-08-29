@@ -283,6 +283,7 @@ class PyTorchEngine(engine_api.Engine):
         self.env.temperature,
     )
     token_out = jnp.reshape(token, (1, 1))
+    jax.debug.print('TOKEN is {}', token_out)
     data = jnp.concatenate(
         [
             token_out,  # First token
