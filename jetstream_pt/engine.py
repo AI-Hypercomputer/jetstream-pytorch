@@ -14,7 +14,7 @@
 
 """Implement Jet Engine API."""
 
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union, Callable
 import threading
 import functools
 import os
@@ -256,6 +256,7 @@ class PyTorchEngine(engine_api.Engine):
       existing_prefix: Optional[Prefix] = None,
       padded_tokens: PrefillInputs,  # PrefillInputs[jax.Array],
       true_length: int,
+      sampler: Optional[Callable[[Any], Any]] = None,
   ) -> Tuple[Prefix, engine_api.ResultTokens]:
     if isinstance(padded_tokens, jax.Array):
       batched_token = padded_tokens.reshape(1, -1)
@@ -273,14 +274,17 @@ class PyTorchEngine(engine_api.Engine):
     )
     if len(logits.shape) == 3:  # b, seqlen, num words
       logits = logits[0]  # seqlen, num words
-    token = sampling_utils.sampling(
-        logits[true_length - 1],
-        self.rng,
-        self.env.sampling_algorithm,
-        self.env.topk,
-        self.env.nucleus_topp,
-        self.env.temperature,
-    )
+    if sampler:
+      token = sampler(logits[true_length - 1])
+    else:
+      token = sampling_utils.sampling(
+          logits[true_length - 1],
+          self.rng,
+          self.env.sampling_algorithm,
+          self.env.topk,
+          self.env.nucleus_topp,
+          self.env.temperature,
+      )
     token_out = jnp.reshape(token, (1, 1))
     data = jnp.concatenate(
         [
@@ -610,7 +614,7 @@ class PyTorchEngine(engine_api.Engine):
     return b_next, i_next
 
   def generate(
-      self, params: Any, decode_state: DecodeState
+      self, params: Any, decode_state: DecodeState, sampler = None
   ) -> tuple[DecodeState, engine_api.ResultTokens]:
     # seq_len = padded_tokens.shape[0]
     pos = decode_state.current_position
@@ -653,7 +657,10 @@ class PyTorchEngine(engine_api.Engine):
       # fill mask later, now use flash attention
       mask = update_mask()
 
-    next_token = self._sampling(logits, self.env.batch_size)
+    if sampler:
+      next_token = sampler(logits[:, -1])
+    else:
+      next_token = self._sampling(logits, self.env.batch_size)
     if self.env.ring_buffer:
       input_pos = decode_state.input_pos + 1
       lens = decode_state.lens + 1
