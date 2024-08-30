@@ -18,8 +18,12 @@ dependencies = [
     "google-jetstream @ {root:uri}/deps/JetStream",
 ]
 
+
 requires-python = ">=3.10"
 license = {file = "LICENSE"}
+
+[project.scripts]
+jpt = "jetstream_pt.cli:main"
 
 [tool.hatch.metadata]
 allow-direct-references = true

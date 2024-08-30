@@ -38,15 +38,18 @@ class ModelInfo:
   model_class: torch.nn.Module
   # information needed to allocate cache
   num_layers: int
+  # number of kv heads
   num_heads: int
+  
   head_dim: int
   n_reps: int  # repeatition for GQA
 
 
 _llama2_7 = ModelInfo(llama_model.Transformer, 32, 32, 128, 1)
 _llama2_13 = ModelInfo(llama_model.Transformer, 40, 40, 128, 1)
-_llama2_70 = ModelInfo(llama_model.Transformer, 80, 8, 128, 4)
+_llama2_70 = ModelInfo(llama_model.Transformer, 80, 8, 128, 8)
 _llama3_8 = ModelInfo(llama_model.Transformer, 32, 8, 128, 4)
+_llama3_70 = _llama2_70
 
 _mixtral_87 = ModelInfo(mixtral_model.Transformer, 32, 8, 128, 4)
 
@@ -59,8 +62,12 @@ model_id_to_class = {
     "meta-llama/Llama-2-7b-hf": _llama2_7,
     "meta-llama/Llama-2-13b-chat-hf": _llama2_13,
     "meta-llama/Llama-2-13b-hf": _llama2_13,
+    "meta-llama/Llama-2-70b-hf": _llama2_70,
+    "meta-llama/Llama-2-70b-chat-hf": _llama2_70,
     "meta-llama/Meta-Llama-3-8B": _llama3_8,
     "meta-llama/Meta-Llama-3-8B-Instruct": _llama3_8,
+    "meta-llama/Meta-Llama-3-70B": _llama3_70,
+    "meta-llama/Meta-Llama-3-70B-Instruct": _llama3_70,
     "google/gemma-2b": _gemma_2b,
     "google/gemma-2b-it": _gemma_2b,
     "google/gemma-7b": _gemma_7b,
