@@ -2,7 +2,7 @@
 """This version contains modification to make it easier to trace and support batch."""
 
 from typing import Any, List, Optional
-
+import copy
 import jax
 import torch
 import torch.nn.functional as F
@@ -99,6 +99,7 @@ class TransformerBlock(ModuleBase):
     self.n_heads = args.n_heads
     self.dim = args.dim
     self.head_dim = args.dim // args.n_heads
+    self.args = args
 
     self.attention = Attention(
         args.n_heads,
@@ -360,8 +361,23 @@ class Transformer(ModuleBase):
   def drop_weight(self, key):
     return key.startswith("model")
 
-  def shard_weights(self, weights_dict):
-    """Shards the weights
+  def convert_hf_weights(self, hf_weights):
 
-    Assumes the weights_dict is a list of XLATensor2
-    """
+    def transform(val, n_heads):
+      dim1, dim2 = val.shape
+      return (
+          val.reshape(n_heads, 2, dim1 // n_heads // 2, dim2)
+          .transpose(1, 2)
+          .reshape(dim1, dim2)
+      )
+
+    updated = copy.copy(hf_weights)
+
+    for key, value in hf_weights.items():
+      if "q_proj" in key:
+        updated[key] = transform(value, self.params.n_heads)
+      if "k_proj" in key:
+        updated[key] = transform(
+            value, self.params.n_kv_heads or self.params.n_heads
+        )
+    return super().convert_hf_weights(updated)

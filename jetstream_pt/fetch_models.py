@@ -13,6 +13,7 @@ from jetstream_pt.environment import (
 )
 from jetstream_pt.third_party.llama import model_exportable as llama_model
 from jetstream_pt.third_party.mixtral import model as mixtral_model
+from jetstream_pt.third_party.gemma import model as gemma_model
 
 FLAGS = flags.FLAGS
 
@@ -49,6 +50,9 @@ _llama3_8 = ModelInfo(llama_model.Transformer, 32, 8, 128, 4)
 
 _mixtral_87 = ModelInfo(mixtral_model.Transformer, 32, 8, 128, 4)
 
+_gemma_2b = ModelInfo(gemma_model.GemmaModel, 18, 1, 256, 8)
+_gemma_7b = ModelInfo(gemma_model.GemmaModel, 28, 16, 256, 1)
+
 
 model_id_to_class = {
     "meta-llama/Llama-2-7b-chat-hf": _llama2_7,
@@ -57,10 +61,10 @@ model_id_to_class = {
     "meta-llama/Llama-2-13b-hf": _llama2_13,
     "meta-llama/Meta-Llama-3-8B": _llama3_8,
     "meta-llama/Meta-Llama-3-8B-Instruct": _llama3_8,
-    "google/gemma-2b": None,
-    "google/gemma-2b-it": None,
-    "google/gemma-7b": None,
-    "google/gemma-7b-it": None,
+    "google/gemma-2b": _gemma_2b,
+    "google/gemma-2b-it": _gemma_2b,
+    "google/gemma-7b": _gemma_7b,
+    "google/gemma-7b-it": _gemma_7b,
     "mistralai/Mixtral-8x7B-v0.1": _mixtral_87,
     "mistralai/Mixtral-8x7B-Instruct-v0.1": _mixtral_87,
 }
@@ -162,11 +166,7 @@ def instantiate_model_from_repo_id(
   env.device = "meta"
   model = model_info.model_class.from_hf_model_id(repo_id, env)
   weights = _load_weights(model_dir)
-  updated_keys = model.get_hf_names_to_real_name()
-  for name, updated in updated_keys.items():
-    if name in weights:
-      val = weights.pop(name)
-      weights[updated] = val
+  weights = model.convert_hf_weights(weights)
 
   model.load_state_dict(weights, assign=True, strict=False)
 

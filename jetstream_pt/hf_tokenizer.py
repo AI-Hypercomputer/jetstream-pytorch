@@ -1,4 +1,4 @@
-from jetstream.engine import tokenizer_api
+from jetstream.engine import tokenizer_api, token_utils
 
 
 class HFTokenizerAdapter(tokenizer_api.Tokenizer):
@@ -17,7 +17,10 @@ class HFTokenizerAdapter(tokenizer_api.Tokenizer):
         true_length: Actual length of the non-padded sequence
           if padding is used.
     """
-    return self(s)
+    res = self.tokenizer.encode(s, add_special_tokens=False)
+    return token_utils.pad_tokens(
+        res, self.bos_id, self.pad_id, jax_padding=True
+    )
 
   def decode(self, token_ids: list[int], **kwargs) -> str:
     """Processess input token ids to generate a string.
@@ -27,7 +30,7 @@ class HFTokenizerAdapter(tokenizer_api.Tokenizer):
     Returns:
       str: String generated from the token ids.
     """
-    return self.decode(token_ids)
+    return self.tokenizer.decode(token_ids)
 
   @property
   def pad_id(self) -> int:
@@ -47,4 +50,4 @@ class HFTokenizerAdapter(tokenizer_api.Tokenizer):
   @property
   def stop_tokens(self) -> set[int]:
     """ID of the stop token."""
-    return {self.eos_id, self.pad_id}
+    return {self.eos_id}

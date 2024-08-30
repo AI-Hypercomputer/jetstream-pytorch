@@ -1,12 +1,16 @@
+from typing import List
+import random
 import sys
-
+import time
 # import torch_xla2 first!
 import torch_xla2  # pylint: disable
 import jax
 from absl import app, flags
+from jetstream.engine import token_utils
 from jetstream.core import server_lib
 from jetstream.core.config_lib import ServerConfig, MetricsServerConfig
 import torch
+import numpy as np
 from transformers import AutoTokenizer
 
 from jetstream_pt import fetch_models
@@ -55,9 +59,12 @@ def create_engine(devices):
   model = fetch_models.instantiate_model_from_repo_id(FLAGS.model_id, env)
   if quant_config.enable_weight_quantization:
     quantize_model.quantize_model(model, quant_config)
+    print("====== model =======")
+    print(model)
 
   weight_shardings = model.get_sharding_annotations()
   sharded_weights = shard_weights(env, model.state_dict(), weight_shardings)
+  env_data.quant_config = quant_config
 
   return engine.PyTorchEngine(
       pt_model=model,
@@ -74,11 +81,7 @@ def list_model():
 
 def serve():
   """Run gRPC server."""
-  if FLAGS.model_id == "":
-    print("Please specify model_id with --model_id")
-    print("valid model ids are:")
-    list_model()
-    sys.exit(1)
+  _check_model_id()
   devices = server_lib.get_devices()
   print(f"devices: {devices}")
 
@@ -103,9 +106,105 @@ def serve():
   jetstream_server.wait_for_termination()
 
 
+def _check_model_id():
+  if FLAGS.model_id == "":
+    print("Please specify model_id with --model_id")
+    print("valid model ids are:")
+    list_model()
+    sys.exit(1)
+
+
 def interactive():
   """Run interactive"""
-  raise RuntimeError("Not implemented")
+  _check_model_id()
+  devices = server_lib.get_devices()
+  print(f"devices: {devices}")
+  pt_engine = create_engine(devices)
+
+  start = time.perf_counter()
+  params = pt_engine.load_params()
+  print("Load params ", time.perf_counter() - start)
+
+  metadata = pt_engine.get_tokenizer()
+  tokenizer = pt_engine.build_tokenizer(metadata)
+  max_output_length = 1024
+
+  profiling_output = FLAGS.profiling_output
+  profiling_prefill = (
+      FLAGS.profiling_prefill
+      and profiling_output is not None
+      and profiling_output != ""
+  )
+
+  if profiling_prefill:
+    jax.profiler.start_trace(profiling_output)
+
+  decode_state = pt_engine.init_decode_state()
+
+  if profiling_prefill:
+    jax.profiler.stop_trace()
+
+  prompts: List[str] = [
+      # pylint: disable-next=all
+      "I believe the meaning of life is",
+      # pylint: disable-next=all
+      "To add an element to an ArrayList of a specific class type in Java, you can follow the following steps:\n\n1. Create an instance of the class to be added.\n2. Get a reference to the ArrayList.\n3. Call the `add()` method on the ArrayList, passing the instance of the class as the argument.\n\nHere's an example of how to add an object of type `Person` to an ArrayList of type `ArrayList<Person>`:\n```csharp\n// Create a new instance of the Person class\nPerson person = new Person(\"John\", 25);\n\n// Get a reference to the ArrayList\nArrayList<Person> peopleList = new ArrayList<>();\n\n// Add the person object to the ArrayList\npeopleList.add(person);\n```\nIn this example, the `Person` class is assumed to have a constructor that takes two arguments: a String for the person's name, and an int for their age. You can substitute your own class and constructor as necessary.",
+      # pylint: disable-next=all
+      "<s>[INST] <<SYS>>\nYou are an AI assistant. User will you give you a task. Your goal is to complete the task as faithfully as you can. While performing the task think step-by-step and justify your steps.\n<</SYS>>\n\nQuestion 1: What is commercial real estate finance?\nQuestion 2: What are Commercial Real Estate services?\nOptions are:\n[a]. no.\n[b]. yes.\nWould the answer to these two questions be the same? [/INST]",
+      # pylint: disable-next=all
+      "<s>[INST] <<SYS>>\nYou are an AI assistant that helps people find information. Provide a detailed answer so user don\u2019t need to search outside to understand the answer.\n<</SYS>>\n\nUse reasoning to lead to the answer of the following question:\nWhere are you likely to find water underneath?\nOptions:\n- toilet\n- sink\n- jar\n- bridge\n- house\n Reasoning process: [/INST",
+      # pylint: disable-next=all
+      "<s>[INST] <<SYS>>\nYou are an AI assistant. You will be given a task. You must generate a detailed and long answer.\n<</SYS>>\n\nContinue the following story.\n\nKay didn't have shoes that fit her feet properly. She only wore sneakers, because the \nChoose from: [I] shoes  fitted badly. [II] sneakers  fitted badly. [/INST]",
+  ]
+  for prompt in prompts:
+    slot = random.randint(0, FLAGS.batch_size - 1)
+    tokens, true_length = tokenizer.encode(prompt)
+
+    print(f"---- Input prompts are: {prompt}")
+    print(f"---- Encoded tokens are: {tokens}")
+
+    # pylint: disable-next=all
+    if profiling_prefill:
+      jax.profiler.start_trace(profiling_output)
+
+    prefill_result, _ = pt_engine.prefill(
+        params=params, padded_tokens=tokens, true_length=true_length
+    )
+    # pylint: disable-next=all
+    decode_state = pt_engine.insert(prefill_result, decode_state, slot=slot)
+
+    if profiling_prefill:
+      jax.profiler.stop_trace()
+
+    sampled_tokens_list = []
+    print(f"---- Streaming decode started on #slot{slot}.")
+    complete = np.zeros((1,), dtype=np.bool_)
+    while True:
+      if profiling_output:
+        jax.profiler.start_trace(profiling_output)
+
+      decode_state, result_tokens = pt_engine.generate(params, decode_state)
+      result_tokens = result_tokens.convert_to_numpy()
+
+      if profiling_output:
+        jax.profiler.stop_trace()
+
+      output, complete = token_utils.process_result_tokens(
+          tokenizer=tokenizer,
+          slot=slot,
+          slot_max_length=max_output_length,
+          result_tokens=result_tokens,
+          complete=complete,
+      )
+      if complete[0]:
+        break
+      token_ids = output[0].token_ids
+      sampled_tokens_list.extend(token_ids)
+
+    print("---- All output tokens.")
+    print(sampled_tokens_list)
+    print("---- All output text.")
+    print(tokenizer.decode(sampled_tokens_list))
 
 
 def main(argv):
@@ -115,15 +214,14 @@ def main(argv):
 
   if argv[1] == "list":
     list_model()
-    return
-
-  if argv[1] == "serve":
+  elif argv[1] == "serve":
     serve()
-    return
-
-  if argv[1] == "interative":
+  elif argv[1] == "interactive":
     interactive()
-    return
+  else:
+    print(
+        "Invalid arguments. please specify 'list', 'serve', or 'interactive'."
+    )
 
 
 if __name__ == "__main__":

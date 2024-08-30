@@ -516,6 +516,18 @@ class QuantizationTest(parameterized.TestCase):
     res = helpers.call_xla_model(qm, qm.state_dict(), arg)
     self.assertGreater(self._calc_cosine_dist(res, torch_res), 0.9999)
 
+  def test_embedding(self):
+    m = torch.nn.Embedding(1000, 100)
+    arg = torch.randint(0, 1000, [2]).to(torch.int32)
+    torch_res = m(arg)
+    quant_config = QuantizationConfig(
+        enable_weight_quantization=True,
+        enable_activation_quantization=False,
+    )
+    qm = quantize_model(m, quant_config)
+    res = helpers.call_xla_model(qm, qm.state_dict(), arg)
+    self.assertGreater(self._calc_cosine_dist(res, torch_res), 0.997)
+
 
 if __name__ == "__main__":
   unittest.main()
