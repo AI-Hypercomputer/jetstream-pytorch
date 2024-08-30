@@ -70,6 +70,7 @@ class PyTorchRayEngine(engine_api.Engine):
       existing_prefix: Optional[Prefix] = None,
       padded_tokens: np.ndarray,  # PrefillInputs[np.ndarray],
       true_length: int,
+      sampler=None,
   ) -> Tuple[Prefix, engine_api.ResultTokens]:
     if self.is_disaggregated:
       return self.prefill_impl(
@@ -144,7 +145,10 @@ class PyTorchRayEngine(engine_api.Engine):
     return None
 
   def generate(
-      self, params: Any, decode_state: DecodeState
+      self,
+      params: Any,
+      decode_state: DecodeState,
+      sampler=None,
   ) -> tuple[None, engine_api.ResultTokens]:
     if self.is_disaggregated:
       return self.generate_impl(params=params, decode_state=decode_state)

@@ -614,7 +614,7 @@ class PyTorchEngine(engine_api.Engine):
     return b_next, i_next
 
   def generate(
-      self, params: Any, decode_state: DecodeState, sampler = None
+      self, params: Any, decode_state: DecodeState, sampler=None
   ) -> tuple[DecodeState, engine_api.ResultTokens]:
     # seq_len = padded_tokens.shape[0]
     pos = decode_state.current_position
