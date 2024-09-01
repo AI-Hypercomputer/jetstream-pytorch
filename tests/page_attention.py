@@ -239,7 +239,6 @@ def test_sharded_multi_page_grouped_query_attention( q_kv_head_ratio: int):
         num_kv_heads=num_kv_heads,
     )
 
-    mesh = jax.sharding.Mesh(np.array(jax.devices()), axis_names=('kv_head',))
     print(f"mesh shape:{mesh.shape}")
     q_pspec = jax.sharding.NamedSharding(mesh, P(None, 'kv_head', None))
     kv_pspec = jax.sharding.NamedSharding(mesh, P('kv_head', None, None, None))
@@ -282,9 +281,18 @@ def test_sharded_multi_page_grouped_query_attention( q_kv_head_ratio: int):
           atol=atol,
           rtol=rtol,
       )
+      return o_sharded
 
     with mesh:
-      run()  # warm up
+      return run()  # warm up
+
+mesh = jax.sharding.Mesh(np.array(jax.devices()), axis_names=('kv_head',))
+
+def next_tokens(logits):
+  return jnp.argmax(logits, axis=-1)
+
+token_sharding = jax.sharding.NamedSharding(mesh, P())
+next_tokens = jax.jit(next_tokens, out_shardings=token_sharding)
 
 def print_mem_usage():
   """Print current mem usage"""
@@ -300,4 +308,6 @@ def print_mem_usage():
 devvices = jax.local_devices()
 print_mem_usage()
 #test_multi_page_grouped_query_attention(2, dtype=jnp.bfloat16)  
-test_sharded_multi_page_grouped_query_attention(2)
+logits = test_sharded_multi_page_grouped_query_attention(2)
+tokens = next_tokens(logits)
+print(tokens)

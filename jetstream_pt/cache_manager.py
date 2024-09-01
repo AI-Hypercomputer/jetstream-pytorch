@@ -259,6 +259,7 @@ class KVCacheGenerate:
       self.cache_v._elem = (
           self.cache_v.jax().at[..., self.input_pos, :].set(valuej)
       )
+      # print(self.cache_k.jax()[0, :, 0:self.input_pos, : ])
       return self.cache_k, self.cache_v
 
     # Non lazy cache update, non ring buffer, generate cache stacked
@@ -701,7 +702,7 @@ class PageKVCacheGenerate:
     # pylint: disable-next=all
     self.cache_k._elem = _update(self.cache_k._elem, keyj)
     # pylint: disable-next=all
-    self.cache_k._elem = _update(self.cache_v._elem, valuej)
+    self.cache_v._elem = _update(self.cache_v._elem, valuej)
     return self.cache_k, self.cache_v
 
   def state(self):

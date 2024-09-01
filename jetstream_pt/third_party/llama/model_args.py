@@ -46,8 +46,8 @@ def get_arg(
         "vocab_size": 32000,
         "multiple_of": 32,
         "n_heads": 64,
-        "n_kv_heads": 8,
-        "n_layers": 3,
+        "n_kv_heads": 64,
+        "n_layers": 1,
         "norm_eps": 1e-05,
     }
   elif model_name == "llama-2-7b":

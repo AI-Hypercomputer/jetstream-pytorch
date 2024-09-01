@@ -566,7 +566,7 @@ def ragged_mha(
 def dense_attention(xq, keys, values, k_scaler=None, v_scaler=None, mask=None):
   """The vanilla attention kernel implementation."""
 
-  bsz, _, _, head_dim = xq.shape
+  bsz, _, seq_len, head_dim = xq.shape
   with jax.named_scope("attn_mat1"):
     ## Attention start
     # scores = torch.einsum(jnp.einsum, "ijkl,ikml->ikjm", xq, keys) / math.sqrt(self.head_dim)
@@ -587,6 +587,9 @@ def dense_attention(xq, keys, values, k_scaler=None, v_scaler=None, mask=None):
     #    "ikjm,ikml->ikjl", scores, values
     # )  # (bs, n_local_heads, seqlen, head_dim)
     output = torch.einsum("ikjm,ikml->ikjl", scores, values)
+    xq, keys, values, mask, output2 = torchjax.from_torch((xq, keys, values, mask, output))
+    # if seq_len == 1:
+    #   jnp.savez("/home/fanhai/data/test/dense.npy", xq=xq, keys=keys, values=values, mask=mask, output2=output2)
   return output
 
 
@@ -722,11 +725,17 @@ def call_paged_attention(env, xq, keys, values, seq_lens, page_indices):
   paged_attention_impl = functools.partial(
       paged_attention,
       pages_per_compute_block=env.block_size // env.page_size,
+      #mask_value=float("-inf")
   )
   sharded_paged_attention_impl = shard_kv_heads(
       paged_attention_impl,
       env.mesh,
       kv_head_mesh_axis_name='x',
-  )  
+  ) 
+  xq = jax.lax.convert_element_type(xq, jnp.float32) 
+  keys = jax.lax.convert_element_type(keys, jnp.float32)
+  values = jax.lax.convert_element_type(values, jnp.float32)
   output = sharded_paged_attention_impl(xq, keys, values, seq_lens, page_indices)
+
+  # jnp.savez("/home/fanhai/data/test/paged_attention.npy", xq=xq, keys=keys, values=values, seq_lens=seq_lens, page_indices=page_indices, output=output)
   return torchjax.to_torch(output)

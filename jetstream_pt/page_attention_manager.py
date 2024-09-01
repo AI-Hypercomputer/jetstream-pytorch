@@ -143,18 +143,17 @@ class PageAttentionManager:
 
   # pylint: disable-next=all
   def get_page_token_indices(self, lens: jax.Array) -> jax.Array:
-
-    assert lens.shape == (
-        self.batch_size,
-        1,
-    ), f"len shape: {lens.shape} not equals batch size: {self.batch_size, 1}"
+    # assert lens.shape == (
+    #     self.batch_size,
+    #     1,
+    # ), f"len shape: {lens.shape} not equals batch size: {self.batch_size, 1}"
     update_page_indices = []
     token_scale_indices = []
     batch_slots = []
     offset = 0
     
     for slot in range(self.batch_size):
-      seq_len = lens[slot][0]
+      seq_len = lens[slot]
       num_pages = seq_len // self.page_size + 1
       token_pos = seq_len % self.page_size
       page_index = self.page_indices[slot, num_pages - 1]
@@ -164,7 +163,7 @@ class PageAttentionManager:
       token_scale_indices.append(offset + token_pos)
       batch_slots.append(slot)
       offset += self.page_size
-    self.lengths = jnp.squeeze(jnp.where(lens == 0, 0, lens + 1), axis=1)  
+    self.lengths = jnp.where(lens == 0, 0, lens + 1) 
     return jnp.stack(
         (
             jnp.asarray(update_page_indices),
@@ -172,7 +171,25 @@ class PageAttentionManager:
             jnp.asarray(batch_slots),
         )
     )
+    
+  def get_compress_kv_cache(
+      self,
+      decode_caches: List[Tuple[jax.Array, jax.Array]],
+      slot: int,
+  ) -> List[Tuple[jax.Array, jax.Array]]:
+    lens = self.lengths[slot]
+    indices = self.page_indices[slot]
+    return [(self._compress_cache(k, lens, indices), self._compress_cache(v, lens, indices)) for k, v in decode_caches]
 
+
+  def _compress_cache(self, cache: jax.Array, lens: int, indices: jax.Array):
+    head, _, page_size, dim = cache.shape
+    selected_cache = cache[:, indices, :, :]
+    selected_cache = selected_cache.reshape((head, -1, dim))
+    selected_cache = selected_cache[:, 0:lens, :]
+    return selected_cache
+  
+  
   # pylint: disable-next=all
   def pad_sequences(self, array, pad_width=10):
     padding_config = [

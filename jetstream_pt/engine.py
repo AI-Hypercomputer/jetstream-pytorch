@@ -123,16 +123,18 @@ class PyTorchEngine():
         self.prefill,
         out_shardings=(self.get_prefix_destination_sharding(), None),
     )
-    self.insert = jax.jit(
-        self.insert,
-        donate_argnums=(0, 1),
-        out_shardings=self.get_decode_state_sharding(),
-    )
+    # self.insert = jax.jit(
+    #     self.insert,
+    #     donate_argnums=(0, 1),
+    #     out_shardings=self.get_decode_state_sharding(),
+    # )
+    self.insert = self.insert
     # self.generate = jax.jit(
     #     self.generate_impl,
     #     donate_argnums=(1,),
     #     out_shardings=(self.get_decode_state_sharding(), None),
     # )
+    self.generate = self.generate_impl
     
     if self.env.page_attention:
       self._insert_page_attention_jit = jax.jit(
@@ -161,10 +163,10 @@ class PyTorchEngine():
       #     self.replicated,
       #     ), None),)
 
-      self.generate_jit=jax.jit(
-        self.generate_impl,
-        donate_argnums=(1,),
-        out_shardings=self.get_decode_state_sharding_test(),)      
+      # self.generate_jit=jax.jit(
+      #   self.generate_impl,
+      #   donate_argnums=(1,),
+      #   out_shardings=self.get_decode_state_sharding_test(),)      
       # self._call_model_generate=jax.jit(self._call_model_generate)
       self.generate = self.generate_page_attention
     
@@ -835,17 +837,17 @@ class PyTorchEngine():
 
   def generate_page_attention(
       self, params: Any, decode_state: DecodeState
-  ) -> DecodeStateTest:
-    self.page_attention_manager.fill_new_pages(decode_state.lens)
-    page_token_indices = self.page_attention_manager.get_page_token_indices(decode_state.lens)
-    decode_state = self.generate_jit(params, decode_state, page_token_indices)
-    #decode_state = self.generate_impl(params, decode_state, page_token_indices)
-    return decode_state
+  ) -> tuple[DecodeState, engine_api.ResultTokens]:
+    self.page_attention_manager.fill_new_pages(decode_state.input_pos)
+    page_token_indices = self.page_attention_manager.get_page_token_indices(decode_state.input_pos)
+    # decode_state = self.generate_jit(params, decode_state, page_token_indices)
+    new_decode_state, result_tokens = self.generate_impl(params, decode_state, page_token_indices)
+    return new_decode_state, result_tokens
 
     
   def generate_impl(
       self, params: Any, decode_state: DecodeState, page_token_indices=None,
-  ) -> DecodeStateTest:
+  ) -> DecodeState:
     # seq_len = padded_tokens.shape[0]
     if self.env.page_attention:
       # page_token_indices = decode_state.page_token_indices 
@@ -925,17 +927,17 @@ class PyTorchEngine():
         samples_per_slot=1,
     )
 
-    new_decode_state = DecodeStateTest(
+    new_decode_state = DecodeState(
         next_token,
-        # new_caches,
-        # new_scales,
-        # (decode_state.current_position + 1) % self.env.cache_sequence_length,
-        # lens,
-        # decode_state.start,
-        # input_pos,
-        # mask,
+        new_caches,
+        new_scales,
+        (decode_state.current_position + 1) % self.env.cache_sequence_length,
+        lens,
+        decode_state.start,
+        input_pos,
+        mask,
     )
-    return new_decode_state  
+    return new_decode_state, result_tokens 
 
   # pylint: disable-next=all
   def get_tokenizer(self) -> tokenizer_pb2.TokenizerParameters:
