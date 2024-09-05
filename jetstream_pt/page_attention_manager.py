@@ -27,7 +27,7 @@ class PageAttentionManager:
     self.unused_pages = queue.Queue()
     self.batch_size = batch_size
     self.page_indices = jnp.full(
-        (batch_size, max_pages_per_sequence), -1, dtype=jnp.int32
+        (batch_size, max_pages_per_sequence), 0, dtype=jnp.int32
     )
     self.lengths = jnp.zeros(batch_size, dtype=jnp.int32)
     self.page_size = page_size
@@ -209,5 +209,5 @@ class PageAttentionManager:
         break
       self.unused_pages.put(index, block=False)
 
-    self.page_indices = self.page_indices.at[slot, :].set(jnp.asarray([-1]))
+    self.page_indices = self.page_indices.at[slot, :].set(jnp.asarray([0]))
     return None

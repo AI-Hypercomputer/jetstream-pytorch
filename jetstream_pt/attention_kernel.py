@@ -588,8 +588,11 @@ def dense_attention(xq, keys, values, k_scaler=None, v_scaler=None, mask=None):
     # )  # (bs, n_local_heads, seqlen, head_dim)
     output = torch.einsum("ikjm,ikml->ikjl", scores, values)
     xq, keys, values, mask, output2 = torchjax.from_torch((xq, keys, values, mask, output))
+    xq, keys, values, mask, output2 = xq.astype(jnp.float32), keys.astype(jnp.float32), values.astype(jnp.float32), mask.astype(jnp.float32), output2.astype(jnp.float32)
+    shape = xq.shape
+    
     # if seq_len == 1:
-    #   jnp.savez("/home/fanhai/data/test/dense.npy", xq=xq, keys=keys, values=values, mask=mask, output2=output2)
+    #   jnp.savez("/home/fanhai/data/test/dense.npy", xq=xq, keys=keys, values=values, mask=mask, output=output2)
   return output
 
 

@@ -66,16 +66,23 @@ def shard_kv_heads(
   )
 
   out_specs = P(None, kv_head_mesh_axis_name, None)  # q
-
-  return jax.jit(
-      shard_map.shard_map(
-          paged_attention_impl,
-          mesh=mesh,
-          in_specs=in_specs,
-          out_specs=out_specs,
-          check_rep=False,
-      )
+  return  shard_map.shard_map(
+      paged_attention_impl,
+      mesh=mesh,
+      in_specs=in_specs,
+      out_specs=out_specs,
+      check_rep=False,
   )
+
+  # return jax.jit(
+  #     shard_map.shard_map(
+  #         paged_attention_impl,
+  #         mesh=mesh,
+  #         in_specs=in_specs,
+  #         out_specs=out_specs,
+  #         check_rep=False,
+  #     )
+  # )
 
 
 def get_data(step:int=0):
@@ -89,8 +96,7 @@ def get_data(step:int=0):
   page_indices = get_page_indices()
   return xq, keys, values, seq_lens, page_indices
 
-def get_dense_data(xq, keys, values, seq_lens, page_indices):
-  n_heads = 8
+def get_dense_data(xq, keys, values, seq_lens, page_indices, n_heads=8):
   total_num_pages = 256
   page_size = 64
   batch_size = 1
@@ -260,6 +266,55 @@ def test_torch_dense_attention():
     
     return ak.dense_attention(xq, keys, values, mask=mask)
 
+def test_torch_dense_attention_with_saved_data():
+    loaded_data = jnp.load("/home/fanhai/data/test/paged_attention1.npy.npz")
+    xq = loaded_data['xq']
+    keys = loaded_data['keys']
+    values = loaded_data['values']
+    seq_lens = loaded_data['seq_lens']
+    page_indices = loaded_data['page_indices']
+    output = loaded_data['output']
+    print(f"output result: {output[0, 0, 0:10]}")
+    print(f"output result1: {output[0, 0, 0:10]}") 
+    
+    q_pspec = jax.sharding.NamedSharding(mesh, P(None, 'x', None))
+    kv_pspec = jax.sharding.NamedSharding(mesh, P('x', None, None, None))
+    replicated = jax.sharding.NamedSharding(mesh, P())
+    xq = jax.device_put(xq, q_pspec)
+    keys = jax.device_put(keys, kv_pspec)
+    values = jax.device_put(values, kv_pspec) 
+    seq_lens = jax.device_put(seq_lens, replicated)
+    page_indices = jax.device_put(page_indices, replicated)
+    xq, keys, values, mask = get_dense_data(xq, keys, values, seq_lens, page_indices, n_heads=32)
+    
+        
+    xq, keys, values, mask = torchjax.to_torch((xq, keys, values, mask))
+    
+    return ak.dense_attention(xq, keys, values, mask=mask)
+ 
+ 
+def test_dense_attention_with_saved_data():
+    loaded_data = jnp.load("/home/fanhai/data/test/paged_attention1.npy.npz")
+    xq = loaded_data['xq']
+    keys = loaded_data['keys']
+    values = loaded_data['values']
+    seq_lens = loaded_data['seq_lens']
+    page_indices = loaded_data['page_indices']
+    output = loaded_data['output']
+    print(f"output result: {output[0, 0, 0:10]}")
+    print(f"output result1: {output[0, 1, 0:10]}") 
+    q_pspec = jax.sharding.NamedSharding(mesh, P(None, 'x', None))
+    kv_pspec = jax.sharding.NamedSharding(mesh, P('x', None, None, None))
+    replicated = jax.sharding.NamedSharding(mesh, P())
+    xq = jax.device_put(xq, q_pspec)
+    keys = jax.device_put(keys, kv_pspec)
+    values = jax.device_put(values, kv_pspec) 
+    seq_lens = jax.device_put(seq_lens, replicated)
+    page_indices = jax.device_put(page_indices, replicated) 
+    xq, keys, values, mask = get_dense_data(xq, keys, values, seq_lens, page_indices, n_heads=32)
+    
+    output = dense_attention(xq, keys, values, mask=mask) 
+    return output.squeeze(2) 
 
 def test_sharded_multi_page_grouped_query_attention_with_saved_data( ):
     loaded_data = jnp.load("/home/fanhai/data/test/paged_attention1.npy.npz")
@@ -269,6 +324,8 @@ def test_sharded_multi_page_grouped_query_attention_with_saved_data( ):
     seq_lens = loaded_data['seq_lens']
     page_indices = loaded_data['page_indices']
     output = loaded_data['output']
+    print(f"output : {output[0, 0, 0:10]}")
+    print(f"output : {output[0, 0, 0:10]}")
  
 
     page_size = 64
@@ -278,9 +335,15 @@ def test_sharded_multi_page_grouped_query_attention_with_saved_data( ):
     print(f"mesh shape:{mesh.shape}")
     q_pspec = jax.sharding.NamedSharding(mesh, P(None, 'x', None))
     kv_pspec = jax.sharding.NamedSharding(mesh, P('x', None, None, None))
+    replicated = jax.sharding.NamedSharding(mesh, P())
     q_sharded = jax.device_put(xq, q_pspec)
     k_pages_sharded = jax.device_put(keys, kv_pspec)
     v_pages_sharded = jax.device_put(values, kv_pspec)
+    seq_lens = jax.device_put(seq_lens, replicated)
+    page_indices = jax.device_put(page_indices, replicated)
+    # jax.debug.visualize_array_sharding(q_sharded)
+    # jax.debug.visualize_array_sharding(k_pages_sharded)
+    # jax.debug.visualize_array_sharding(v_pages_sharded)
 
     paged_attention_impl = functools.partial(
         multi_page_grouped_query_attention_fully_pipelined,
@@ -303,15 +366,50 @@ def test_sharded_multi_page_grouped_query_attention_with_saved_data( ):
       return o_sharded
 
     with mesh:
-      return run()  # warm up  
+      result = run()  # warm up
+      print(f"output result: {result[0, 0, 0:10]}")
+      print(f"output result1: {result[0, 1, 0:10]}")
+      print(f"array equal: {jnp.array_equal(result, output)}")
+      return result
   
 
-jax.config.update("jax_traceback_filtering", "off")    
-mesh = jax.sharding.Mesh(np.array(jax.devices()), axis_names=('x',))
-output = test_sharded_multi_page_grouped_query_attention()
-# output = test_dense_attention()
-#output = test_torch_dense_attention()–
-# output = test_sharded_multi_page_grouped_query_attention_with_saved_data()
+def test_compare_attention_saved_data():
+    p_loaded_data = jnp.load("/home/fanhai/data/test/paged_attention1.npy.npz")
 
+    p_output = p_loaded_data['output']
+    
+    print(f"p_output : {p_output[0, 0, 0:10]}")
+    print(f"p_output : {p_output[0, 1, 0:10]}")
+    
+    loaded_data = jnp.load("/home/fanhai/data/test/dense.npy.npz")
+    xq = loaded_data['xq']
+    keys = loaded_data['keys']
+    values = loaded_data['values']
+    output = loaded_data['output']
+    output = output[:, :, 0, :]
+    print(f"output : {output[0, 0, 0:10]}")
+    print(f"output : {output[0, 1, 0:10]}")
+    print(f"array equal: {jnp.array_equal(p_output, output)}")    
+    
+    
+
+    
+jax.config.update("jax_traceback_filtering", "off")   
+jax.config.update("jax_enable_x64", False) 
+jax.config.update("jax_dynamic_shapes", False)
+jax.config.update("jax_debug_nans", True)
+mesh = jax.sharding.Mesh(np.array(jax.devices()), axis_names=('x',))
+output = None
+# output = test_sharded_multi_page_grouped_query_attention()
+# output = test_dense_attention()
+#output = test_torch_dense_attention()
+# output = test_torch_dense_attention_with_saved_data()
+# output = test_dense_attention_with_saved_data()
+output = test_sharded_multi_page_grouped_query_attention_with_saved_data()
+
+
+#test_compare_attention_saved_data()
+print(f"result : {output[0, 0, 0:10]}")
+print(f"result : {output[0, 1, 0:10]}")
 print(output.shape)
-print(output)
+# print(output)
