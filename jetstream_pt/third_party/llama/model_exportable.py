@@ -385,5 +385,5 @@ class Transformer(ModuleBase):
             value, self.params.n_kv_heads or self.params.n_heads
         )
     res = super().convert_hf_weights(updated)
-    res['freqs_cis'] = self.freqs_cis
+    res["freqs_cis"] = self.freqs_cis
     return res

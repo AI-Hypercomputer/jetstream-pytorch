@@ -40,7 +40,7 @@ class ModelInfo:
   num_layers: int
   # number of kv heads
   num_kv_heads: int
-  
+
   head_dim: int
   n_reps: int  # repeatition for GQA
 

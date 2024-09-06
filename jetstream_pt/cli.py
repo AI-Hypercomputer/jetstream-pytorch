@@ -208,6 +208,8 @@ def interactive():
 
 
 def main():
+  """Main function."""
+
   def main_real(argv):
     """Entry point"""
     if len(argv) < 2:
@@ -223,6 +225,7 @@ def main():
       print(
           "Invalid arguments. please specify 'list', 'serve', or 'interactive'."
       )
+
   app.run(main_real)
   return 0
 
