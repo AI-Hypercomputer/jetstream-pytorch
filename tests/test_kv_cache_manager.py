@@ -14,6 +14,7 @@ from absl.testing import parameterized
 
 P = jax.sharding.PartitionSpec
 
+
 class PageAttentnioTest(parameterized.TestCase):
 
   def _make_env(self, bf16_enable=True):
@@ -56,9 +57,7 @@ class PageAttentnioTest(parameterized.TestCase):
     shape = (1, 20, 4, 2)
     decode_caches = []
     decode_caches.append(
-        PageKVCacheGenerate.empty(
-            shape=shape, device=None, env=env
-        )
+        PageKVCacheGenerate.empty(shape=shape, device=None, env=env)
     )
     decode_caches = [c.state() for c in decode_caches]
 
@@ -78,12 +77,12 @@ class PageAttentnioTest(parameterized.TestCase):
       tep_kv = jnp.zeros((kv_heads, num_pages * 4, dim), dtype=jnp.bfloat16)
 
       caches = pam.insert_prefill_cache(
-        prefill_caches=prefill_caches,
-        decode_caches=decode_caches,
-        update_indexes=update_indexes,
-        tep_kv=tep_kv,
-        sharding=env.sharding,
-        )
+          prefill_caches=prefill_caches,
+          decode_caches=decode_caches,
+          update_indexes=update_indexes,
+          tep_kv=tep_kv,
+          sharding=env.sharding,
+      )
 
       return caches
 
@@ -91,7 +90,7 @@ class PageAttentnioTest(parameterized.TestCase):
     decode_caches = _insert_prefill(8, 2, 1)
     decode_caches = _insert_prefill(13, 2, 3)
 
-    lens = jnp.asarray([3, 8, 0, 13, 0]).reshape(5, 1)
+    lens = jnp.asarray([3, 8, 0, 13, 0])
     pam.fill_new_pages(lens)
     page_token_indices = pam.get_page_token_indices(lens)
     page_token_indices = torchjax.to_torch(page_token_indices)

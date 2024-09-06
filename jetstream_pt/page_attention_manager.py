@@ -166,8 +166,8 @@ class PageAttentionManager:
       batch_slots.append(slot)
       offset += self.page_size
     self.lengths = jnp.where(lens == 0, 0, lens + 1)
-    update_page_indices = jnp.asarray(update_page_indices).squeeze(1)
-    token_scale_indices = jnp.asarray(token_scale_indices).squeeze(1)
+    update_page_indices = jnp.asarray(update_page_indices)
+    token_scale_indices = jnp.asarray(token_scale_indices)
     batch_slots = jnp.asarray(batch_slots)
     return jnp.stack(
         (

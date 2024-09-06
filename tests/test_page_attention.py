@@ -176,7 +176,7 @@ class PageAttentionTest(parameterized.TestCase):
     pam.reserve_pages_insert(3, 13)
     pam.reserve_pages_insert(0, 3)
 
-    lens = jnp.asarray([3, 8, 0, 13, 0]).reshape(5, 1)
+    lens = jnp.asarray([3, 8, 0, 13, 0])
     pam.fill_new_pages(lens)
 
     page_token_indices = pam.get_page_token_indices(lens)
