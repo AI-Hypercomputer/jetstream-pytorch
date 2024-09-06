@@ -11,27 +11,93 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+import unittest
+from absl.testing import parameterized
 from collections.abc import Callable
 import math
 import functools
 from typing import Any
+
+import torch
 import jax
 import jax.numpy as jnp
 import numpy as np
+from jetstream_pt.third_party.llama import model_args
 from jax.experimental.pallas.ops.tpu.paged_attention.paged_attention_kernel import paged_attention
 from jax.experimental import shard_map
 import jetstream_pt.attention_kernel as ak
 from jetstream_pt import torchjax
+from jetstream_pt import environment
 
 
-
-DEFAULT_MASK_VALUE = -0.7 * float(np.finfo(np.dtype("float32")).max)
 P = jax.sharding.PartitionSpec
+mesh = jax.sharding.Mesh(np.array(jax.devices()), axis_names=('x',))
+
+class PageAttentionTest(parameterized.TestCase):
+
+  def _make_env(self, bf16_enable=True):
+    torch_dtype = torch.bfloat16 if bf16_enable else torch.float32
+    torch.set_default_dtype(torch_dtype)
+    jax.config.update("jax_dynamic_shapes", False)
+    jax.config.update("jax_traceback_filtering", "off")
+    jax.config.update("jax_platform_name", "cpu")
+    jax.config.update("jax_enable_x64", False) 
+    replicated = jax.sharding.NamedSharding(mesh, P())
+    config = model_args.get_model_args("tiny", 128, 1, True)
+    environment_data = environment.JetEngineEnvironmentData()
+    environment_data.max_input_sequence_length = 128
+    environment_data.max_input_sequence_length = 128
+    environment_data.cache_sequence_length = 128
+    environment_data.bf16_enable = bf16_enable
+    environment_data.model_type = "llama-2-tiny"
+    environment_data.batch_size = 3
+    environment_data.num_layers = config.n_layers
+    environment_data.cache_shape = (
+        1,
+        config.n_kv_heads,
+        environment_data.cache_sequence_length,
+        config.dim // config.n_heads,
+    )
+    env = environment.JetEngineEnvironment(environment_data)
+    env.apply_sharding = lambda *args, **kwargs: None  # don't shard on cpu
+    env.sharding = replicated
+    return env, config
 
 
-
-
+  # def test_dense_vs_page_attention(self):
+  #   self._make_env()
+  #   page_attention_output = test_sharded_multi_page_grouped_query_attention()
+  #   output = test_dense_attention()
+  #   print(f"output : {output[0, 0, 0:10]}")
+  #   print(f"output : {output[0, 1, 0:10]}")
+  #   print(f"page_attention_output : {page_attention_output[0, 0, 0:10]}")
+  #   print(f"page_attention_output : {page_attention_output[0, 1, 0:10]}")
+  #   self.assertTrue(jnp.array_equal(page_attention_output, output))
+    
+  def test_jax_dense_vs_torch_dense(self):
+    self._make_env()
+    torch_output = test_torch_dense_attention()
+    output = test_dense_attention()
+    # print(f"output : {output[0, 1, 0:10]}")
+    # print(f"page_attention_output : {torch_output[0, 1, 0:10]}")    
+    self.assertTrue(jnp.allclose(torch_output, torch_output, atol=1e-4))
+  
+  # def test_torch_dense_attention_with_saved_data(self): 
+  #   self._make_env()
+  #   _torch_dense_attention_with_saved_data()      
+  
+  # def test_dense_attention_with_saved_data(self):
+  #   self._make_env()
+  #   _dense_attention_with_saved_data()
+    
+  # def test_sharded_multi_page_grouped_query_attention_with_saved_data(self):
+  #   self._make_env()
+  #   _sharded_multi_page_grouped_query_attention_with_saved_data()
+    
+      
+       
+    
+    
 multi_page_grouped_query_attention_fully_pipelined = (
     paged_attention
 )
@@ -66,23 +132,16 @@ def shard_kv_heads(
   )
 
   out_specs = P(None, kv_head_mesh_axis_name, None)  # q
-  return  shard_map.shard_map(
-      paged_attention_impl,
-      mesh=mesh,
-      in_specs=in_specs,
-      out_specs=out_specs,
-      check_rep=False,
-  )
 
-  # return jax.jit(
-  #     shard_map.shard_map(
-  #         paged_attention_impl,
-  #         mesh=mesh,
-  #         in_specs=in_specs,
-  #         out_specs=out_specs,
-  #         check_rep=False,
-  #     )
-  # )
+  return jax.jit(
+      shard_map.shard_map(
+          paged_attention_impl,
+          mesh=mesh,
+          in_specs=in_specs,
+          out_specs=out_specs,
+          check_rep=False,
+      )
+  )
 
 
 def get_data(step:int=0):
@@ -203,8 +262,7 @@ def get_seq_lens(step):
 
 def get_page_indices():
   #(1, 32)
-  indices = [ 0, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1]  
+  indices = [0] * 32  
   return jnp.asarray(indices, dtype=jnp.int32).reshape(-1, 32)
 
 
@@ -256,7 +314,8 @@ def test_sharded_multi_page_grouped_query_attention( ):
 def test_dense_attention():
     xq, keys, values, seq_lens, page_indices = get_data(0)    
     xq, keys, values, mask = get_dense_data(xq, keys, values, seq_lens, page_indices)
-    return dense_attention( xq, keys, values, mask = mask)
+    output = dense_attention( xq, keys, values, mask = mask)
+    return output.squeeze(2) 
 
 def test_torch_dense_attention():
     xq, keys, values, seq_lens, page_indices = get_data(0)    
@@ -264,10 +323,12 @@ def test_torch_dense_attention():
     
     xq, keys, values, mask = torchjax.to_torch((xq, keys, values, mask))
     
-    return ak.dense_attention(xq, keys, values, mask=mask)
+    output = ak.dense_attention(xq, keys, values, mask=mask)
+    output = torchjax.from_torch(output)
+    return output.squeeze(2) 
 
-def test_torch_dense_attention_with_saved_data():
-    loaded_data = jnp.load("/home/fanhai/data/test/paged_attention1.npy.npz")
+def _torch_dense_attention_with_saved_data():
+    loaded_data = jnp.load("/home/**/data/test/paged_attention1.npy.npz")
     xq = loaded_data['xq']
     keys = loaded_data['keys']
     values = loaded_data['values']
@@ -290,11 +351,12 @@ def test_torch_dense_attention_with_saved_data():
         
     xq, keys, values, mask = torchjax.to_torch((xq, keys, values, mask))
     
-    return ak.dense_attention(xq, keys, values, mask=mask)
+    output = ak.dense_attention(xq, keys, values, mask=mask)
+    return output.squeeze(2) 
  
  
-def test_dense_attention_with_saved_data():
-    loaded_data = jnp.load("/home/fanhai/data/test/paged_attention1.npy.npz")
+def _dense_attention_with_saved_data():
+    loaded_data = jnp.load("/home/**/data/test/paged_attention1.npy.npz")
     xq = loaded_data['xq']
     keys = loaded_data['keys']
     values = loaded_data['values']
@@ -316,8 +378,8 @@ def test_dense_attention_with_saved_data():
     output = dense_attention(xq, keys, values, mask=mask) 
     return output.squeeze(2) 
 
-def test_sharded_multi_page_grouped_query_attention_with_saved_data( ):
-    loaded_data = jnp.load("/home/fanhai/data/test/paged_attention1.npy.npz")
+def _sharded_multi_page_grouped_query_attention_with_saved_data( ):
+    loaded_data = jnp.load("/home/**/data/test/paged_attention1.npy.npz")
     xq = loaded_data['xq']
     keys = loaded_data['keys']
     values = loaded_data['values']
@@ -341,9 +403,7 @@ def test_sharded_multi_page_grouped_query_attention_with_saved_data( ):
     v_pages_sharded = jax.device_put(values, kv_pspec)
     seq_lens = jax.device_put(seq_lens, replicated)
     page_indices = jax.device_put(page_indices, replicated)
-    # jax.debug.visualize_array_sharding(q_sharded)
-    # jax.debug.visualize_array_sharding(k_pages_sharded)
-    # jax.debug.visualize_array_sharding(v_pages_sharded)
+
 
     paged_attention_impl = functools.partial(
         multi_page_grouped_query_attention_fully_pipelined,
@@ -391,25 +451,6 @@ def test_compare_attention_saved_data():
     print(f"output : {output[0, 1, 0:10]}")
     print(f"array equal: {jnp.array_equal(p_output, output)}")    
     
-    
 
-    
-jax.config.update("jax_traceback_filtering", "off")   
-jax.config.update("jax_enable_x64", False) 
-jax.config.update("jax_dynamic_shapes", False)
-jax.config.update("jax_debug_nans", True)
-mesh = jax.sharding.Mesh(np.array(jax.devices()), axis_names=('x',))
-output = None
-# output = test_sharded_multi_page_grouped_query_attention()
-# output = test_dense_attention()
-#output = test_torch_dense_attention()
-# output = test_torch_dense_attention_with_saved_data()
-# output = test_dense_attention_with_saved_data()
-output = test_sharded_multi_page_grouped_query_attention_with_saved_data()
-
-
-#test_compare_attention_saved_data()
-print(f"result : {output[0, 0, 0:10]}")
-print(f"result : {output[0, 1, 0:10]}")
-print(output.shape)
-# print(output)
+if __name__ == "__main__":
+  unittest.main()

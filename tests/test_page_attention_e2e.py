@@ -147,33 +147,6 @@ class LlamaE2ETest(parameterized.TestCase):
     len = decode.input_pos[slot]
     return [(k[slot, :, 0:len, :], v[slot, :, 0:len, :]) for k, v in decode_caches]
 
-  # def test_prefill(self):
-  #   "end to end jetstream llama test with bfloat16"
-  #   jax.config.update("jax_platform_name", "cpu")
-  #   jax.config.update("jax_default_matmul_precision", jax.lax.Precision.HIGHEST)
-  #   print(f"---------> {jax.devices()}")
-
-  #   env, model_arg = helpers.make_env_tiny(bf16_enable=True)
-  #   model = model_exportable.Transformer(model_arg, env)
-  #   engine = PyTorchEngine(pt_model=model, env=env)
-  #   params = self._get_params(env, model_arg)
-    
-  #   page_env, page_model_arg = helpers.make_page_attention_env_tiny(bf16_enable=True)
-  #   page_model = model_exportable.Transformer(page_model_arg, page_env)
-  #   page_engine = PyTorchEngine(pt_model=page_model, env=page_env)
-  #   page_params = self._get_params(page_env, page_model_arg)
-    
-  #   decode = self._insert(engine, params)
-  #   page_decode = self._insert(page_engine, page_params)
-    
-  #   cache = self.get_compress_kv_cache(decode, 0)
-  #   page_caches = page_engine.page_attention_manager.get_compress_kv_cache(page_decode.caches, 0)
-    
-  #   self.assertEqual(decode.tokens, page_decode.tokens)
-  #   for (k, v), (pk, pv) in zip(cache, page_caches):
-  #     self.assertTrue(jnp.array_equal(k, pk))
-  #     self.assertTrue(jnp.array_equal(v, pv))
-
   def test_decode(self):
     "end to end jetstream llama test with bfloat16"
     jax.config.update("jax_platform_name", "cpu")

@@ -27,7 +27,7 @@ class PageAttentionManager:
     self.unused_pages = queue.Queue()
     self.batch_size = batch_size
     self.page_indices = jnp.full(
-        (batch_size, max_pages_per_sequence), 0, dtype=jnp.int32
+        (batch_size, max_pages_per_sequence), total_num_pages - 1, dtype=jnp.int32
     )
     self.lengths = jnp.zeros(batch_size, dtype=jnp.int32)
     self.page_size = page_size
@@ -82,22 +82,20 @@ class PageAttentionManager:
       self,
       prefill_caches: List[Tuple[jax.Array, jax.Array]],
       decode_caches: List[Tuple[jax.Array, jax.Array]],
-      slot: int,
-      seq_len: int,
-      num_pages: int,
       update_indexes:jax.Array,
       tep_kv: jax.Array,
       sharding: jsharding.Sharding,
   ) -> List[Tuple[jax.Array, jax.Array]]:
-    """Insert prefill caches to decode caches slot.
+    """Insert prefill caches to decode caches.
 
     Args:
       prefill_caches: List of Tuple K, V. For each K, V:
         [batch_size, num_heads, seq_len, head_dim] jax.Array.
       decode_caches: List of Tuple K, V. For each K, V:
         [num_heads, total_num_pages, page_size, head_dim] jax.Array.
-      slot: Slot of batch size in decode.
-      seq_len: Prefill tokens seqeunce length.
+      update_indexes: Page indexes for insertion.
+      tep_kv:  List of Tuple K, V. For each K, V: 
+        kv_heads, num_pages * .page_size, dim.
       sharding: Decode cache sharding.
 
 
@@ -154,21 +152,25 @@ class PageAttentionManager:
     
     for slot in range(self.batch_size):
       seq_len = lens[slot]
+      if seq_len == 0:
+        continue
       num_pages = seq_len // self.page_size + 1
       token_pos = seq_len % self.page_size
       page_index = self.page_indices[slot, num_pages - 1]
-      if page_index < 0:
-        continue
+
       update_page_indices.append(page_index)
       token_scale_indices.append(offset + token_pos)
       batch_slots.append(slot)
       offset += self.page_size
     self.lengths = jnp.where(lens == 0, 0, lens + 1) 
+    update_page_indices = jnp.asarray(update_page_indices)
+    token_scale_indices = jnp.asarray(token_scale_indices)
+    batch_slots = jnp.reshape(jnp.asarray(batch_slots), update_page_indices.shape)
     return jnp.stack(
         (
-            jnp.asarray(update_page_indices),
-            jnp.asarray(token_scale_indices),
-            jnp.asarray(batch_slots),
+            update_page_indices,
+            token_scale_indices,
+            batch_slots,
         )
     )
     

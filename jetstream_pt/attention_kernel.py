@@ -735,10 +735,9 @@ def call_paged_attention(env, xq, keys, values, seq_lens, page_indices):
       env.mesh,
       kv_head_mesh_axis_name='x',
   ) 
-  xq = jax.lax.convert_element_type(xq, jnp.float32) 
-  keys = jax.lax.convert_element_type(keys, jnp.float32)
-  values = jax.lax.convert_element_type(values, jnp.float32)
+  # xq = jax.lax.convert_element_type(xq, jnp.float32) 
+  # keys = jax.lax.convert_element_type(keys, jnp.float32)
+  # values = jax.lax.convert_element_type(values, jnp.float32)
   output = sharded_paged_attention_impl(xq, keys, values, seq_lens, page_indices)
 
-  # jnp.savez("/home/fanhai/data/test/paged_attention.npy", xq=xq, keys=keys, values=values, seq_lens=seq_lens, page_indices=page_indices, output=output)
   return torchjax.to_torch(output)

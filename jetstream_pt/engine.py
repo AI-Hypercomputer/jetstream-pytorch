@@ -123,18 +123,16 @@ class PyTorchEngine():
         self.prefill,
         out_shardings=(self.get_prefix_destination_sharding(), None),
     )
-    # self.insert = jax.jit(
-    #     self.insert,
-    #     donate_argnums=(0, 1),
-    #     out_shardings=self.get_decode_state_sharding(),
-    # )
-    self.insert = self.insert
-    # self.generate = jax.jit(
-    #     self.generate_impl,
-    #     donate_argnums=(1,),
-    #     out_shardings=(self.get_decode_state_sharding(), None),
-    # )
-    self.generate = self.generate_impl
+    self.insert = jax.jit(
+        self.insert,
+        donate_argnums=(0, 1),
+        out_shardings=self.get_decode_state_sharding(),
+    )
+    self.generate = jax.jit(
+        self.generate_impl,
+        donate_argnums=(1,),
+        out_shardings=(self.get_decode_state_sharding(), None),
+    )
     
     if self.env.page_attention:
       self._insert_page_attention_jit = jax.jit(
@@ -143,31 +141,12 @@ class PyTorchEngine():
         out_shardings=self.get_decode_state_sharding(),
         )   
       self.insert = self.insert_page_attention_with_reservation
-      # self.generate_jit=jax.jit(
-      #   self.generate_impl,
-      #   donate_argnums=(1,),
-      #   out_shardings=(self.get_decode_state_sharding(), None),
-      #   )
+      self.generate_jit=jax.jit(
+        self.generate_impl,
+        donate_argnums=(1,),
+        out_shardings=(self.get_decode_state_sharding(), None),
+        )
       
-      # self.generate_jit=jax.jit(
-      #   self.generate_impl,
-      #   donate_argnums=(1,),
-      #   out_shardings=(DecodeState(
-      #     self.replicated,
-      #     self.cache_sharding,
-      #     self.replicated,
-      #     self.replicated,
-      #     self.replicated,
-      #     self.replicated,
-      #     self.replicated,
-      #     self.replicated,
-      #     ), None),)
-
-      # self.generate_jit=jax.jit(
-      #   self.generate_impl,
-      #   donate_argnums=(1,),
-      #   out_shardings=self.get_decode_state_sharding_test(),)      
-      # self._call_model_generate=jax.jit(self._call_model_generate)
       self.generate = self.generate_page_attention
     
     # self._insert_wrap = jax.jit(self._insert_wrap, donate_argnums=(0, 1),
@@ -600,9 +579,6 @@ class PyTorchEngine():
   ):
     caches = self.page_attention_manager.insert_prefill_cache(prefill_caches=prefix.caches,
               decode_caches=decode_state.caches,
-              slot=slot,
-              seq_len=prefix.seq_len,
-              num_pages=num_pages,
               update_indexes=update_indexes,
               tep_kv=tep_kv,
               sharding=self.cache_sharding,
@@ -840,8 +816,8 @@ class PyTorchEngine():
   ) -> tuple[DecodeState, engine_api.ResultTokens]:
     self.page_attention_manager.fill_new_pages(decode_state.input_pos)
     page_token_indices = self.page_attention_manager.get_page_token_indices(decode_state.input_pos)
-    # decode_state = self.generate_jit(params, decode_state, page_token_indices)
-    new_decode_state, result_tokens = self.generate_impl(params, decode_state, page_token_indices)
+    new_decode_state, result_tokens = self.generate_jit(params, decode_state, page_token_indices)
+    # new_decode_state, result_tokens = self.generate_impl(params, decode_state, page_token_indices)
     return new_decode_state, result_tokens
 
     

@@ -99,8 +99,10 @@ def main(argv):
     sampled_tokens_list = []
     print(f"---- Streaming decode started on #slot{slot}.")
     complete = np.zeros((1,), dtype=np.bool_)
+    count = 0
     while True:
-      if profiling_output:
+      print(f"--------------------- count: {count}")
+      if count == 5 and profiling_output:
         jax.profiler.start_trace(profiling_output)
       
       print(f"--------------------------> before generate")  
@@ -110,9 +112,9 @@ def main(argv):
       print(f"--------------------------> after generate")  
       #print_mem_usage()
 
-      if profiling_output:
+      if count == 10 and profiling_output:
         jax.profiler.stop_trace()
-
+      count+=1
       output, complete = token_utils.process_result_tokens(
           tokenizer=tokenizer,
           slot=slot,
