@@ -78,18 +78,18 @@ mistralai/Mixtral-8x7B-Instruct-v0.1
 To run jetstream-pytorch server with one model:
 
 ```
-jpt serve --model_id --model_id meta-llama/Meta-Llama-3-8B-Instruct
+jpt serve --model_id meta-llama/Meta-Llama-3-8B-Instruct
 ```
 
-If it the first time you run this model, it will download weights from 
+If it's the first time you run this model, it will download weights from 
 HuggingFace. 
 
 HuggingFace's Llama3 weights are gated, so you need to either run 
 `huggingface-cli login` to set your token, OR, pass your hf_token explicitly.
 
-To pass hf token, add `--hf_token` flag
+To pass hf token explicitly, add `--hf_token` flag
 ```
-jpt serve --model_id --model_id meta-llama/Meta-Llama-3-8B-Instruct --hf_token=...
+jpt serve --model_id meta-llama/Meta-Llama-3-8B-Instruct --hf_token=...
 ```
 
 To login using huggingface hub, run:
@@ -108,6 +108,13 @@ Quantization will be done on the flight as the weight loads.
 
 Weights downloaded from HuggingFace will be stored by default in `checkpoints` folder.
 in the place where `jpt` is executed.
+
+You can change where the weights are stored with `--working_dir` flag.
+
+If you wish to use your own checkpoint, then, place them inside 
+of the `checkpoints/<org>/<model>/hf_original` dir (or the corresponding subdir in `--working_dir`). For example,
+Llama3 checkpoints will be at `checkpoints/meta-llama/Llama-2-7b-hf/hf_original/*.safetensors`. You can replace these files with modified
+weights in HuggingFace format. 
 
 
 # Run the server with ray

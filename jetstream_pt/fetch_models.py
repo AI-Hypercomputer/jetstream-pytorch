@@ -39,7 +39,7 @@ class ModelInfo:
   # information needed to allocate cache
   num_layers: int
   # number of kv heads
-  num_heads: int
+  num_kv_heads: int
   
   head_dim: int
   n_reps: int  # repeatition for GQA
@@ -139,7 +139,7 @@ def construct_env_data_from_model_id(
   )
   env_data.cache_shape = (
       batch_size,
-      model_info.num_heads,
+      model_info.num_kv_heads,
       max_cache_length,
       model_info.head_dim,
   )
