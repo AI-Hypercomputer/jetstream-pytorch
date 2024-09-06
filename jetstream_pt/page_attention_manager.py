@@ -27,7 +27,9 @@ class PageAttentionManager:
     self.unused_pages = queue.Queue()
     self.batch_size = batch_size
     self.page_indices = jnp.full(
-        (batch_size, max_pages_per_sequence), -1, dtype=jnp.int32
+        (batch_size, max_pages_per_sequence),
+        total_num_pages - 1,
+        dtype=jnp.int32,
     )
     self.lengths = jnp.zeros(batch_size, dtype=jnp.int32)
     self.page_size = page_size
@@ -36,15 +38,19 @@ class PageAttentionManager:
       self.unused_pages.put(i, block=False)
 
   # pylint: disable-next=all
-  def reserve_pages_insert(self, slot: int, seq_len: int) -> Tuple[int, list]:
+  def reserve_pages_insert(
+      self, slot: int, seq_len: int
+  ) -> Tuple[int, jax.Array]:
     self.lengths = self.lengths.at[slot].set(seq_len)
-    num_pages = seq_len // self.page_size
-    if seq_len % self.page_size != 0:
-      num_pages = num_pages + 1
+    num_pages = (
+        seq_len // self.page_size
+        if seq_len % self.page_size == 0
+        else seq_len // self.page_size + 1
+    )
 
     indices = [self.unused_pages.get(block=False) for _ in range(num_pages)]
     self.page_indices = self.page_indices.at[slot, :num_pages].set(indices)
-    return num_pages
+    return num_pages, self.page_indices[slot, :num_pages]
 
   # pylint: disable-next=all
   def reserve_pages_decode(self, slot: int, seq_len: int):
@@ -52,6 +58,11 @@ class PageAttentionManager:
       index = self.unused_pages.get(block=False)
       num_pages = seq_len // self.page_size
       self.page_indices = self.page_indices.at[slot, num_pages].set(index)
+
+  # pylint: disable-next=all
+  def fill_new_pages(self, lens: jax.Array):
+    for slot in range(self.batch_size):
+      self.reserve_pages_decode(slot, lens[slot])
 
   # pylint: disable-next=all
   def prefill_cache_padding(
@@ -65,29 +76,29 @@ class PageAttentionManager:
     if pad_width == 0:
       return caches
 
-    caches = [
+    return [
         (self.pad_sequences(k, pad_width), self.pad_sequences(v, pad_width))
         for k, v in caches
     ]
-    return caches
 
   def insert_prefill_cache(
       self,
       prefill_caches: List[Tuple[jax.Array, jax.Array]],
       decode_caches: List[Tuple[jax.Array, jax.Array]],
-      slot: int,
-      seq_len: int,
+      update_indexes: jax.Array,
+      tep_kv: jax.Array,
       sharding: jsharding.Sharding,
   ) -> List[Tuple[jax.Array, jax.Array]]:
-    """Insert prefill caches to decode caches slot.
+    """Insert prefill caches to decode caches.
 
     Args:
       prefill_caches: List of Tuple K, V. For each K, V:
         [batch_size, num_heads, seq_len, head_dim] jax.Array.
       decode_caches: List of Tuple K, V. For each K, V:
         [num_heads, total_num_pages, page_size, head_dim] jax.Array.
-      slot: Slot of batch size in decode.
-      seq_len: Prefill tokens seqeunce length.
+      update_indexes: Page indexes for insertion.
+      tep_kv:  List of Tuple K, V. For each K, V:
+        kv_heads, num_pages * .page_size, dim.
       sharding: Decode cache sharding.
 
 
@@ -95,31 +106,31 @@ class PageAttentionManager:
       Decode cache. List of Tuple K, V. For each K, V:
         [num_heads, total_num_pages, page_size, head_dim] jax.Array.
     """
-
-    num_pages = self.reserve_pages_insert(slot, seq_len)
-    padded_caches = self.prefill_cache_padding(
-        prefill_caches, seq_len, num_pages
-    )
     # Reduce cache batch deminsion
     # [kv_heads, seq_len, dim]
     squeezed_caches = [
         (jnp.squeeze(k, axis=0), jnp.squeeze(v, axis=0))
-        for k, v in padded_caches
+        for k, v in prefill_caches
     ]
-    kv_heads, _, dim = squeezed_caches[0][0].shape
+    tmp_caches = [
+        (
+            tep_kv.at[:, : k.shape[1], :].set(k),
+            tep_kv.at[:, : v.shape[1], :].set(v),
+        )
+        for k, v in squeezed_caches
+    ]
+    kv_heads, _, dim = tmp_caches[0][0].shape
     # [kv_heads, num_pages, page_size, dim]
     paged_caches = [
         (
             jnp.reshape(k, (kv_heads, -1, self.page_size, dim)),
             jnp.reshape(v, (kv_heads, -1, self.page_size, dim)),
         )
-        for k, v in squeezed_caches
+        for k, v in tmp_caches
     ]
-    update_indexes = self.page_indices[slot, :num_pages]
 
     @functools.partial(jax.jit, donate_argnums=(0, 1), inline=True)
     def insert(cache, new_entry):
-      new_entry = new_entry.squeeze(0)
       res = cache.at[:, update_indexes, :, :].set(new_entry)
       res = jax.lax.with_sharding_constraint(res, sharding)
       return res
@@ -133,41 +144,63 @@ class PageAttentionManager:
 
   # pylint: disable-next=all
   def get_page_token_indices(self, lens: jax.Array) -> jax.Array:
-
-    assert lens.shape == (
-        self.batch_size,
-        1,
-    ), f"len shape: {lens.shape} not equals batch size: {self.batch_size, 1}"
+    # assert lens.shape == (
+    #     self.batch_size,
+    #     1,
+    # ), f"len shape: {lens.shape} not equals batch size: {self.batch_size, 1}"
     update_page_indices = []
     token_scale_indices = []
     batch_slots = []
-    new_lens = []
     offset = 0
+
     for slot in range(self.batch_size):
-      seq_len = lens[slot][0]
+      seq_len = lens[slot]
+      if seq_len == 0:
+        continue
       num_pages = seq_len // self.page_size + 1
       token_pos = seq_len % self.page_size
       page_index = self.page_indices[slot, num_pages - 1]
-      if page_index < 0:
-        continue
+
       update_page_indices.append(page_index)
       token_scale_indices.append(offset + token_pos)
       batch_slots.append(slot)
-      new_lens.append(seq_len + 1)
       offset += self.page_size
+    self.lengths = jnp.where(lens == 0, 0, lens + 1)
+    update_page_indices = jnp.asarray(update_page_indices)
+    token_scale_indices = jnp.asarray(token_scale_indices)
+    batch_slots = jnp.reshape(
+        jnp.asarray(batch_slots), update_page_indices.shape
+    )
     return jnp.stack(
         (
-            jnp.asarray(update_page_indices),
-            jnp.asarray(token_scale_indices),
-            jnp.asarray(batch_slots),
-            jnp.asarray(new_lens),
+            update_page_indices,
+            token_scale_indices,
+            batch_slots,
         )
     )
 
   # pylint: disable-next=all
-  def fill_new_pages(self, lens: jax.Array):
-    for slot in range(self.batch_size):
-      self.reserve_pages_decode(slot, lens[slot])
+  def get_compress_kv_cache(
+      self,
+      decode_caches: List[Tuple[jax.Array, jax.Array]],
+      slot: int,
+  ) -> List[Tuple[jax.Array, jax.Array]]:
+    lens = self.lengths[slot]
+    indices = self.page_indices[slot]
+    return [
+        (
+            self._compress_cache(k, lens, indices),
+            self._compress_cache(v, lens, indices),
+        )
+        for k, v in decode_caches
+    ]
+
+  def _compress_cache(self, cache: jax.Array, lens: int, indices: jax.Array):
+    head, _, _, dim = cache.shape
+    selected_cache = cache[:, indices, :, :]
+    selected_cache = selected_cache.reshape((head, -1, dim))
+    selected_cache = selected_cache[:, 0:lens, :]
+    return selected_cache
 
   # pylint: disable-next=all
   def pad_sequences(self, array, pad_width=10):
@@ -188,5 +221,5 @@ class PageAttentionManager:
         break
       self.unused_pages.put(index, block=False)
 
-    self.page_indices = self.page_indices.at[slot, :].set(jnp.asarray([-1]))
+    self.page_indices = self.page_indices.at[slot, :].set(jnp.asarray([0]))
     return None
