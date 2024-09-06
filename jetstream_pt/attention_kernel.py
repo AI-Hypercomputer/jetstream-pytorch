@@ -15,7 +15,6 @@ import torch.nn.functional as F
 from jetstream_pt import torchjax
 
 
-
 DEFAULT_MASK_VALUE = -0.7 * float(np.finfo(np.dtype("float32")).max)
 P = jax.sharding.PartitionSpec
 
@@ -747,8 +746,7 @@ def shard_kv_heads(
     mesh: jax.sharding.Mesh,
     kv_head_mesh_axis_name: str,
 ):
-
-  """Shard map on kv head."""  
+  """Shard map on kv head."""
   in_specs = (
       P(None, kv_head_mesh_axis_name, None),  # q
       P(kv_head_mesh_axis_name, None, None, None),  # k

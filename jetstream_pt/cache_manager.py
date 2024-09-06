@@ -707,10 +707,11 @@ class PageKVCacheGenerate:
     """Get kv cache state"""
     # pylint: disable-next=all
     return torchjax.from_torch((self.cache_k, self.cache_v))
-  
+
   def finalize(self):
+    """Do nothing now"""
     return
-  
+
   @classmethod
   def empty(cls, shape, device, env):
     """Create empty kv caches"""

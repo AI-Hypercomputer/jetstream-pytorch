@@ -1,6 +1,7 @@
 import unittest
 
 import jax
+import numpy as np
 import jax.numpy as jnp
 import torch
 
@@ -11,6 +12,7 @@ from jetstream_pt.cache_manager import PageKVCacheGenerate, KVCachePrefill
 from jetstream_pt import torchjax
 from absl.testing import parameterized
 
+P = jax.sharding.PartitionSpec
 
 class PageAttentnioTest(parameterized.TestCase):
 
@@ -37,6 +39,9 @@ class PageAttentnioTest(parameterized.TestCase):
     )
     env = environment.JetEngineEnvironment(environment_data)
     env.apply_sharding = lambda *args, **kwargs: None  # don't shard on cpu
+    mesh = jax.sharding.Mesh(np.array(jax.devices()), axis_names=("x",))
+    replicated = jax.sharding.NamedSharding(mesh, P())
+    env.sharding = replicated
     return env, config
 
   def test_page_attention_update(self):
@@ -52,7 +57,7 @@ class PageAttentnioTest(parameterized.TestCase):
     decode_caches = []
     decode_caches.append(
         PageKVCacheGenerate.empty(
-            shape=shape, device=None, bf16_enable=True, env=env
+            shape=shape, device=None, env=env
         )
     )
     decode_caches = [c.state() for c in decode_caches]
@@ -68,10 +73,19 @@ class PageAttentnioTest(parameterized.TestCase):
       prefill_chache.update(k, v, 0)
       prefill_caches = [prefill_chache]
       prefill_caches = [c.state() for c in prefill_caches]
+      num_pages, update_indexes = pam.reserve_pages_insert(slot, seq_len)
+      _, kv_heads, _, dim = prefill_caches[0][0].shape
+      tep_kv = jnp.zeros((kv_heads, num_pages * 4, dim), dtype=jnp.bfloat16)
 
-      return pam.insert_prefill_cache(
-          prefill_caches, decode_caches, slot, seq_len, env.cache_sharding
-      )
+      caches = pam.insert_prefill_cache(
+        prefill_caches=prefill_caches,
+        decode_caches=decode_caches,
+        update_indexes=update_indexes,
+        tep_kv=tep_kv,
+        sharding=env.sharding,
+        )
+
+      return caches
 
     decode_caches = _insert_prefill(3, 2, 0)
     decode_caches = _insert_prefill(8, 2, 1)
@@ -84,7 +98,7 @@ class PageAttentnioTest(parameterized.TestCase):
 
     caches_obj = [
         PageKVCacheGenerate(
-            k, v, page_token_indices, self.cache_sharding, env=env
+            k, v, pam, page_token_indices, self.cache_sharding, env=env
         )
         for k, v in torchjax.to_torch(decode_caches)
     ]

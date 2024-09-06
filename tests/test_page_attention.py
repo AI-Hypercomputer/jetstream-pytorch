@@ -181,8 +181,8 @@ class PageAttentionTest(parameterized.TestCase):
 
     page_token_indices = pam.get_page_token_indices(lens)
 
-    expected_page_indices = jnp.asarray([6, 7, 5]).reshape(3, 1)
-    expected_token_indices = jnp.asarray([3, 4, 9]).reshape(3, 1)
+    expected_page_indices = jnp.asarray([6, 7, 5])
+    expected_token_indices = jnp.asarray([3, 4, 9])
     self.assertTrue(
         jnp.array_equal(page_token_indices[0], expected_page_indices)
     )
