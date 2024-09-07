@@ -142,35 +142,45 @@ def shard_kv_heads(
 
 def get_data(step: int = 0):
   n_heads = 8
-  total_num_pages = 256
-  page_size = 64
+  paged_attention_total_num_pages = 256
+  paged_attention_page_size = 64
   xq = get_xq(1, n_heads, step)
-  keys = get_keys(n_heads, total_num_pages, page_size, step)
-  values = get_values(n_heads, total_num_pages, page_size, step)
+  keys = get_keys(
+      n_heads, paged_attention_total_num_pages, paged_attention_page_size, step
+  )
+  values = get_values(
+      n_heads, paged_attention_total_num_pages, paged_attention_page_size, step
+  )
   seq_lens = get_seq_lens(step)
   page_indices = get_page_indices()
   return xq, keys, values, seq_lens, page_indices
 
 
 def get_dense_data(xq, keys, values, seq_lens, page_indices, n_heads=8):
-  total_num_pages = 256
-  page_size = 64
+  paged_attention_total_num_pages = 256
+  paged_attention_page_size = 64
   batch_size = 1
   dim = 128
 
   xq = jnp.expand_dims(xq, 2)
 
   seq_len = seq_lens[0]
-  num_pages = (seq_len + page_size - 1) // page_size
+  num_pages = (
+      seq_len + paged_attention_page_size - 1
+  ) // paged_attention_page_size
   page_indices = page_indices[0, 0:num_pages]
 
   keys = keys[:, page_indices, :, :]
-  keys = keys.reshape(batch_size, n_heads, num_pages * page_size, dim)
+  keys = keys.reshape(
+      batch_size, n_heads, num_pages * paged_attention_page_size, dim
+  )
   values = values[:, page_indices, :, :]
-  values = values.reshape(batch_size, n_heads, num_pages * page_size, dim)
+  values = values.reshape(
+      batch_size, n_heads, num_pages * paged_attention_page_size, dim
+  )
 
   mask = jnp.full(
-      (batch_size, num_pages * page_size),
+      (batch_size, num_pages * paged_attention_page_size),
       float("-inf"),
       dtype=jnp.float32,
   )
@@ -189,7 +199,7 @@ def get_xq(batch, head, step):
   return xq
 
 
-def get_keys(head, pages, page_size, step):
+def get_keys(head, pages, paged_attention_page_size, step):
   # keys[0, 0, 0:9, 0:2]
   key1 = [
       [
@@ -227,12 +237,14 @@ def get_keys(head, pages, page_size, step):
   key = jnp.asarray(key)
   key = jnp.tile(key, (1, 1, 1, 64))
 
-  r = jnp.zeros((head, pages, page_size, 128), dtype=jnp.float32)
+  r = jnp.zeros(
+      (head, pages, paged_attention_page_size, 128), dtype=jnp.float32
+  )
   r = r.at[:, 0:1, 0 : key.shape[2], :].set(key)
   return r
 
 
-def get_values(head, pages, page_size, step):
+def get_values(head, pages, paged_attention_page_size, step):
   # values[0:1, 0:1, :9, 0:2]
   v1 = [
       [
@@ -267,7 +279,9 @@ def get_values(head, pages, page_size, step):
   v = jnp.asarray(v)
   v = jnp.tile(v, (1, 1, 1, 64))
 
-  r = jnp.zeros((head, pages, page_size, 128), dtype=jnp.float32)
+  r = jnp.zeros(
+      (head, pages, paged_attention_page_size, 128), dtype=jnp.float32
+  )
   r = r.at[:, 0:1, 0 : v.shape[2], :].set(v)
   return r
 
@@ -292,7 +306,7 @@ def get_output():
 def test_sharded_multi_page_grouped_query_attention():
   xq, keys, values, seq_lens, page_indices = get_data(0)
 
-  page_size = 64
+  paged_attention_page_size = 64
   block_size = 512
 
   print(f"mesh shape:{mesh.shape}")
@@ -304,7 +318,7 @@ def test_sharded_multi_page_grouped_query_attention():
 
   paged_attention_impl = functools.partial(
       multi_page_grouped_query_attention_fully_pipelined,
-      pages_per_compute_block=block_size // page_size,
+      pages_per_compute_block=block_size // paged_attention_page_size,
   )
   sharded_paged_attention_impl = shard_kv_heads(
       paged_attention_impl,
@@ -414,7 +428,7 @@ def _sharded_multi_page_grouped_query_attention_with_saved_data():
   print(f"output : {output[0, 0, 0:10]}")
   print(f"output : {output[0, 0, 0:10]}")
 
-  page_size = 64
+  paged_attention_page_size = 64
   block_size = 512
 
   print(f"mesh shape:{mesh.shape}")
@@ -429,7 +443,7 @@ def _sharded_multi_page_grouped_query_attention_with_saved_data():
 
   paged_attention_impl = functools.partial(
       multi_page_grouped_query_attention_fully_pipelined,
-      pages_per_compute_block=block_size // page_size,
+      pages_per_compute_block=block_size // paged_attention_page_size,
   )
   sharded_paged_attention_impl = shard_kv_heads(
       paged_attention_impl,

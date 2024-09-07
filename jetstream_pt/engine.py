@@ -122,16 +122,19 @@ class PyTorchEngine(engine_api.Engine):
 
     if self.env.page_attention:
       max_pages_per_sequence = (
-          self.env._data.cache_sequence_length // self.env._data.page_size
+          self.env._data.cache_sequence_length
+          // self.env._data.paged_attention_page_size
       )
       assert (
-          self.env._data.cache_sequence_length % self.env._data.page_size == 0
-      ), f"cache_sequence_length {self.env._data.cache_sequence_length} should divide page_size {self.env._data.page_size}"
+          self.env._data.cache_sequence_length
+          % self.env._data.paged_attention_page_size
+          == 0
+      ), f"cache_sequence_length {self.env._data.cache_sequence_length} should divide paged_attention_page_size {self.env._data.paged_attention_page_size}"
 
       self.page_attention_manager = PageAttentionManager(
           batch_size=self.env.batch_size,
-          total_num_pages=self.env._data.total_num_pages,
-          page_size=self.env._data.page_size,
+          paged_attention_total_num_pages=self.env._data.paged_attention_total_num_pages,
+          paged_attention_page_size=self.env._data.paged_attention_page_size,
           max_pages_per_sequence=max_pages_per_sequence,
       )
 
@@ -655,7 +658,11 @@ class PyTorchEngine(engine_api.Engine):
     )
     _, kv_heads, _, dim = prefix.caches[0][0].shape
     tep_kv = jnp.zeros(
-        (kv_heads, num_pages * self.page_attention_manager.page_size, dim),
+        (
+            kv_heads,
+            num_pages * self.page_attention_manager.paged_attention_page_size,
+            dim,
+        ),
         dtype=self.default_dtype,
         device=self.prefill_cache_sharding,
     )
@@ -1024,8 +1031,8 @@ def create_pytorch_engine(
     generate_cache_stacked=False,
     new_cache_stacked=False,
     lazy_cache_update=False,
-    total_num_pages=0,
-    page_size=64,
+    paged_attention_total_num_pages=0,
+    paged_attention_page_size=64,
 ) -> PyTorchEngine:
   """Returns: The pytorch engine."""
 
@@ -1100,8 +1107,8 @@ def create_pytorch_engine(
       generate_cache_stacked=generate_cache_stacked,
       new_cache_stacked=new_cache_stacked,
       lazy_cache_update=lazy_cache_update,
-      total_num_pages=total_num_pages,
-      page_size=page_size,
+      paged_attention_total_num_pages=paged_attention_total_num_pages,
+      paged_attention_page_size=paged_attention_page_size,
   )
 
   if shard_on_batch and sharding_config:
@@ -1120,11 +1127,11 @@ def create_pytorch_engine(
             max_cache_length,
             args.dim // args.n_heads,
         )
-        if env_data.total_num_pages == 0
+        if env_data.paged_attention_total_num_pages == 0
         else (
             args.n_kv_heads,
-            env_data.total_num_pages,
-            env_data.page_size,
+            env_data.paged_attention_total_num_pages,
+            env_data.paged_attention_page_size,
             args.head_dim,
         )
     )

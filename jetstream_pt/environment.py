@@ -107,10 +107,10 @@ class JetEngineEnvironmentData:
   flash_attention: bool = False
 
   # total number of pages per layer
-  total_num_pages: int = 0
+  paged_attention_total_num_pages: int = 0
 
   # page size per page
-  page_size: int = 64
+  paged_attention_page_size: int = 64
 
   generate_cache_stacked: bool = False
 
@@ -153,7 +153,7 @@ class JetEngineEnvironment:
     self.testing = self._data.testing
     self.testing_seed = self._data.testing_seed
     self.ring_buffer = self._data.ring_buffer
-    self.page_attention = self._data.total_num_pages > 0
+    self.page_attention = self._data.paged_attention_total_num_pages
     self.prefill_attention_kv_axis_names = (
         self._data.prefill_attention_kv_axis_names
     )
@@ -220,7 +220,7 @@ class JetEngineEnvironment:
     elif self.page_attention:
       self.attention_kv_axis_names = (
           "num_attn_heads",  # kv_heads
-          "total_num_pages",
+          "paged_attention_total_num_pages",
           "pages_size",
           "head_dim",
       )

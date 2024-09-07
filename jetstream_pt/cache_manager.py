@@ -687,12 +687,14 @@ class PageKVCacheGenerate:
     def _update(cache, x):
       x = x.squeeze(2).transpose((1, 0, 2))
       x = x[:, page_token_indicesj[2], :]
-      head, _, page_size, dim = cache.shape
+      head, _, paged_attention_page_size, dim = cache.shape
       selected_cache = cache[:, page_token_indicesj[0], :, :]
       selected_cache = selected_cache.reshape((head, -1, dim))
 
       selected_cache = selected_cache.at[:, page_token_indicesj[1], :].set(x)
-      selected_cache = selected_cache.reshape((head, -1, page_size, dim))
+      selected_cache = selected_cache.reshape(
+          (head, -1, paged_attention_page_size, dim)
+      )
 
       cache = cache.at[:, page_token_indicesj[0], :, :].set(selected_cache)
       return cache

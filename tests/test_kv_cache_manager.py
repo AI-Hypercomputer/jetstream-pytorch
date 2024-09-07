@@ -52,7 +52,10 @@ class PageAttentnioTest(parameterized.TestCase):
     env, _ = self._make_env()
 
     pam = PageAttentionManager(
-        batch_size=5, total_num_pages=20, page_size=4, max_pages_per_sequence=4
+        batch_size=5,
+        paged_attention_total_num_pages=20,
+        paged_attention_page_size=4,
+        max_pages_per_sequence=4,
     )
     shape = (1, 20, 4, 2)
     decode_caches = []

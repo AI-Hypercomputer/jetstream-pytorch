@@ -775,7 +775,7 @@ def call_paged_attention(env, xq, keys, values, seq_lens, page_indices):
   )
   paged_attention_impl = functools.partial(
       paged_attention,
-      pages_per_compute_block=env.block_size // env.page_size,
+      pages_per_compute_block=env.block_size // env.paged_attention_page_size,
       # mask_value=float("-inf")
   )
   sharded_paged_attention_impl = shard_kv_heads(

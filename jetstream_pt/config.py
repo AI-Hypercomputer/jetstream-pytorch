@@ -140,13 +140,13 @@ flags.DEFINE_integer(
 )
 
 flags.DEFINE_integer(
-    "total_num_pages",
+    "paged_attention_total_num_pages",
     0,
     "total number of pages per layer for page attention",
 )
 
 flags.DEFINE_integer(
-    "page_size",
+    "paged_attention_page_size",
     64,
     "page size per page",
 )
@@ -225,8 +225,8 @@ def create_engine_from_config_flags():
       generate_cache_stacked=FLAGS.generate_cache_stacked,
       new_cache_stacked=FLAGS.new_cache_stacked,
       lazy_cache_update=FLAGS.lazy_cache_update,
-      total_num_pages=FLAGS.total_num_pages,
-      page_size=FLAGS.page_size,
+      paged_attention_total_num_pages=FLAGS.paged_attention_total_num_pages,
+      paged_attention_page_size=FLAGS.paged_attention_page_size,
   )
 
   print("Initialize engine", time.perf_counter() - start)

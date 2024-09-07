@@ -86,8 +86,8 @@ def make_page_attention_env_tiny(
   jax.config.update("jax_traceback_filtering", "off")
   config = model_args.get_model_args("llama-2-tiny", 128, 1, True)
   environment_data = environment.JetEngineEnvironmentData()
-  environment_data.page_size = 32
-  environment_data.total_num_pages = 16
+  environment_data.paged_attention_page_size = 32
+  environment_data.paged_attention_total_num_pages = 16
   environment_data.block_size = 64
   environment_data.max_input_sequence_length = 128
   environment_data.max_input_sequence_length = 128
@@ -98,8 +98,8 @@ def make_page_attention_env_tiny(
   environment_data.num_layers = config.n_layers
   environment_data.cache_shape = (
       config.n_kv_heads,
-      environment_data.total_num_pages,
-      environment_data.page_size,
+      environment_data.paged_attention_total_num_pages,
+      environment_data.paged_attention_page_size,
       config.dim // config.n_heads,
   )
   environment_data.testing = True
