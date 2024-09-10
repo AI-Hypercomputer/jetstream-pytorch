@@ -153,9 +153,9 @@ class JetEngineEnvironment:
     self.testing = self._data.testing
     self.testing_seed = self._data.testing_seed
     self.ring_buffer = self._data.ring_buffer
-    self.page_attention = self._data.paged_attention_total_num_pages
+    self.page_attention = self.paged_attention_total_num_pages
     self.prefill_attention_kv_axis_names = (
-        self._data.prefill_attention_kv_axis_names
+        self.prefill_attention_kv_axis_names
     )
 
     # If not None, then use this tokenizer without
