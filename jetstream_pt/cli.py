@@ -33,10 +33,10 @@ def shard_weights(env, weights, weight_shardings):
   sharded = {}
   for key, val in weights.items():
     sharding = env.sharding_by_axis(weight_shardings.get(key, -1))
+    print("SHARDING", key, sharding)
     with jax.default_device(jax.devices("cpu")[0]):
       arr = torch_xla2.tensor.t2j(val)
 
-    print("SHARDING", key, sharding)
     arr = jax.device_put(arr, sharding)
     sharded[key] = torchjax.to_torch(arr)
   return sharded
@@ -207,22 +207,28 @@ def interactive():
     print(tokenizer.decode(sampled_tokens_list))
 
 
-def main(argv):
-  """Entry point"""
-  if len(argv) < 2:
-    print("Invalid arguments. please specify 'list' or 'serve'")
+def main():
+  """Main function."""
 
-  if argv[1] == "list":
-    list_model()
-  elif argv[1] == "serve":
-    serve()
-  elif argv[1] == "interactive":
-    interactive()
-  else:
-    print(
-        "Invalid arguments. please specify 'list', 'serve', or 'interactive'."
-    )
+  def main_real(argv):
+    """Entry point"""
+    if len(argv) < 2:
+      print("Invalid arguments. please specify 'list' or 'serve'")
+
+    if argv[1] == "list":
+      list_model()
+    elif argv[1] == "serve":
+      serve()
+    elif argv[1] == "interactive":
+      interactive()
+    else:
+      print(
+          "Invalid arguments. please specify 'list', 'serve', or 'interactive'."
+      )
+
+  app.run(main_real)
+  return 0
 
 
 if __name__ == "__main__":
-  app.run(main)
+  main()

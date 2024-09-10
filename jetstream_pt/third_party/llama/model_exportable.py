@@ -347,8 +347,12 @@ class Transformer(ModuleBase):
         "meta-llama/Llama-2-7b-hf": "llama-2-7b",
         "meta-llama/Llama-2-13b-chat-hf": "llama-2-13b",
         "meta-llama/Llama-2-13b-hf": "llama-2-13b",
+        "meta-llama/Llama-2-70b-hf": "llama-2-70b",
+        "meta-llama/Llama-2-70b-chat-hf": "llama-2-70b",
         "meta-llama/Meta-Llama-3-8B": "llama-3-8b",
         "meta-llama/Meta-Llama-3-8B-Instruct": "llama-3-8b",
+        "meta-llama/Meta-Llama-3-70B": "llama-3-70b",
+        "meta-llama/Meta-Llama-3-70B-Instruct": "llama-3-70b",
     }.get(model_id)
     assert name
     args = model_args.get_model_args(
@@ -380,4 +384,6 @@ class Transformer(ModuleBase):
         updated[key] = transform(
             value, self.params.n_kv_heads or self.params.n_heads
         )
-    return super().convert_hf_weights(updated)
+    res = super().convert_hf_weights(updated)
+    res["freqs_cis"] = self.freqs_cis
+    return res

@@ -14,13 +14,9 @@ Commandline Flags might have changed between the release version to HEAD.
 1. Ssh to Cloud TPU VM (using v5e-8 TPU VM)
    a. Create a Cloud TPU VM if you haven’t
 2. Download jetstream-pytorch github repo
-3. Clone repo and install dependencies 
-4. Download and convert weights
-5. Run checkpoint converter (quantizer)
-6. Local run
-7. Run the server
-8. Run benchmarks
-9. Typical Errors
+3. Run the server
+4. Run benchmarks
+5. Typical Errors
 
 # Ssh to Cloud TPU VM (using v5e-8 TPU VM)
 
@@ -49,108 +45,76 @@ cd jetstream-pytorch
 source install_everything.sh
 ```
 
-# Download and convert weights
 
-## LLaMA
-### Get official llama weights from meta-llama
+# Run jetstream pytorch
 
-Following instructions here: 
-* Llama-2: https://github.com/meta-llama/llama#download
-* Llama-3: https://github.com/meta-llama/llama3/#download
+## List out supported models
 
-After you have downloaded the weights, it will also download a `tokenizer.model` file that is 
-the tokenizer that we will use.
+```
+jpt list
+```
 
-## Gemma
-### Get Gemma Checkpoint from HuggingFace
+This will print out list of support models and variants:
 
-Please sign agreement on Huggingface website to access Gemma checkpoints. Download Gemma PyTorch checkpoint using huggingface-cli. Gemma Tokenizer is included in the checkpoint.
+```
+meta-llama/Llama-2-7b-chat-hf
+meta-llama/Llama-2-7b-hf
+meta-llama/Llama-2-13b-chat-hf
+meta-llama/Llama-2-13b-hf
+meta-llama/Llama-2-70b-hf
+meta-llama/Llama-2-70b-chat-hf
+meta-llama/Meta-Llama-3-8B
+meta-llama/Meta-Llama-3-8B-Instruct
+meta-llama/Meta-Llama-3-70B
+meta-llama/Meta-Llama-3-70B-Instruct
+google/gemma-2b
+google/gemma-2b-it
+google/gemma-7b
+google/gemma-7b-it
+mistralai/Mixtral-8x7B-v0.1
+mistralai/Mixtral-8x7B-Instruct-v0.1
+```
 
-```bash
-# Install huggingface-cli and login if it's not set up.
+To run jetstream-pytorch server with one model:
+
+```
+jpt serve --model_id meta-llama/Meta-Llama-3-8B-Instruct
+```
+
+If it's the first time you run this model, it will download weights from 
+HuggingFace. 
+
+HuggingFace's Llama3 weights are gated, so you need to either run 
+`huggingface-cli login` to set your token, OR, pass your hf_token explicitly.
+
+To pass hf token explicitly, add `--hf_token` flag
+```
+jpt serve --model_id meta-llama/Meta-Llama-3-8B-Instruct --hf_token=...
+```
+
+To login using huggingface hub, run:
+
+```
 pip install -U "huggingface_hub[cli]"
 huggingface-cli login
-huggingface-cli download google/gemma-7b-pytorch --local-dir $input_ckpt_dir
 ```
+Then follow its prompt.
 
-## Mixtral
-### Get Mixtral Checkpoint from HuggingFace
+After the weights are downloaded,
+Next time when you run this `--hf_token` will no longer be required.
 
-Please sign agreement on Huggingface website to access Mixtral checkpoints. Download Mixtral PyTorch checkpoint using huggingface-cli. Mixtral Tokenizer is included in the checkpoint.
+To run this model in `int8` quantization, add `--quantize_weights=1`.
+Quantization will be done on the flight as the weight loads.
 
-```bash
-huggingface-cli download mistralai/Mixtral-8x7B-v0.1 --local-dir $input_ckpt_dir
-```
+Weights downloaded from HuggingFace will be stored by default in `checkpoints` folder.
+in the place where `jpt` is executed.
 
-## Run weight safetensor convert
+You can change where the weights are stored with `--working_dir` flag.
 
-There are limited support (only Llama models as of now) for accessing checkpoints on GCS. Accessing GCS takes a long time and therefore storing checkpoints to local is recommended.
-
-```bash
-export input_ckpt_dir=Original llama weights directory
-export output_ckpt_dir=The output directory
-export model_name="llama-3" # or "llama-2", "gemma", "mixtral"
-export quantize_weights=True # Whether to quantize weights
-export quantize_type="int8_per_channel" # "quantize_weights" needs to be turned on. Availabe quantize type: {"int8", "int4"} x {"per_channel", "blockwise"}, "int8_per_channel" is the default option if not specified.
-python -m convert_checkpoints --model_name=$model_name --input_checkpoint_dir=$input_ckpt_dir --output_checkpoint_dir=$output_ckpt_dir --quantize_type=$quantize_type --quantize_weights=$quantize_weights
-```
-
-
-# Local run
-
-Set tokenizer path
-```bash
-export tokenizer_path=tokenizer model file path
-```
-
-## Llama-2 7b
-```bash
-python run_interactive.py --size=7b --model_name=$model_name --batch_size=128 --max_cache_length=2048 --quantize_weights=$quantize_weights --quantize_type=$quantize_type --quantize_kv_cache=$quantize_weights --checkpoint_path=$output_ckpt_dir --tokenizer_path=$tokenizer_path --sharding_config=default_shardings/llama.yaml
-```
-
-## Llama-2 13b
-```bash
-python run_interactive.py --size=13b --model_name=$model_name --batch_size=64 --max_cache_length=2048 --quantize_weights=$quantize_weights --quantize_type=$quantize_type --quantize_kv_cache=$quantize_weights --checkpoint_path=$output_ckpt_dir --tokenizer_path=$tokenizer_path --sharding_config=default_shardings/llama.yaml
-```
-
-## Llama-3 8b
-```bash
-python run_interactive.py --size=8b --model_name=$model_name --batch_size=128 --max_cache_length=2048 --quantize_weights=$quantize_weights --quantize_type=$quantize_type --quantize_kv_cache=$quantize_weights --checkpoint_path=$output_ckpt_dir --tokenizer_path=$tokenizer_path --sharding_config=default_shardings/llama.yaml
-```
-
-## Llama-3 70b
-```bash
-python run_interactive.py --size=70b --model_name=$model_name --batch_size=8 --max_cache_length=2048 --quantize_weights=$quantize_weights --quantize_type=$quantize_type --quantize_kv_cache=$quantize_weights --checkpoint_path=$output_ckpt_dir --tokenizer_path=$tokenizer_path --sharding_config=default_shardings/llama.yaml
-```
-
-## Gemma 7b
-```bash
-python run_interactive.py --model_name=$model_name --size=7b --batch_size=64 --max_cache_length=2048 --quantize_weights=$quantize_weights --quantize_type=$quantize_type --quantize_kv_cache=$quantize_weights --checkpoint_path=$output_ckpt_dir --tokenizer_path=$tokenizer_path --sharding_config=default_shardings/$model_name.yaml
-```
-
-## Mixtral 8x7b
-```bash
-python run_interactive.py --model_name=$model_name --batch_size=128 --max_cache_length=2048 --quantize_weights=$quantize_weights --quantize_type=$quantize_type --quantize_kv_cache=$quantize_weights --checkpoint_path=$output_ckpt_dir --tokenizer_path=$tokenizer_path --sharding_config=default_shardings/$model_name.yaml
-```
-
-
-# Run the server
-Here is an example to run the server with llama2 7B config.
-
-```bash
-python run_server.py --model_name=$model_name --size=7b --batch_size=128 --max_cache_length=2048 --quantize_weights=$quantize_weights --quantize_type=$quantize_type --quantize_kv_cache=$quantize_weights --checkpoint_path=$output_ckpt_dir   --tokenizer_path=$tokenizer_path --sharding_config="default_shardings/llama.yaml"
-```
-
-Now you can fire gRPC to it.
-
-Optional flags: 
-* `--shard_on_batch=1` This makes the model to shard on 
-  the batch dimension. I.e. this runs in data parallel mode instead of model
-  parallel. This will ignore the sharding config. This is recommended for Gemma 2B
-  model, because Gemma 2B is small enough to fit on a single TPU chip.
-
-* `--sharding_config=<path>` This makes use of alternative sharding config instead of
-  the ones in default_shardings directory.
+If you wish to use your own checkpoint, then, place them inside 
+of the `checkpoints/<org>/<model>/hf_original` dir (or the corresponding subdir in `--working_dir`). For example,
+Llama3 checkpoints will be at `checkpoints/meta-llama/Llama-2-7b-hf/hf_original/*.safetensors`. You can replace these files with modified
+weights in HuggingFace format. 
 
 
 # Run the server with ray
