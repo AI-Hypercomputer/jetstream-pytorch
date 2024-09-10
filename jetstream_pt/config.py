@@ -139,6 +139,18 @@ flags.DEFINE_integer(
     "size of top k used when sampling next token",
 )
 
+flags.DEFINE_integer(
+    "paged_attention_total_num_pages",
+    0,
+    "total number of pages per layer for page attention",
+)
+
+flags.DEFINE_integer(
+    "paged_attention_page_size",
+    64,
+    "page size per page",
+)
+
 
 def create_quantization_config_from_flags():
   """Create Quantization Config from cmd flags"""
@@ -213,6 +225,8 @@ def create_engine_from_config_flags():
       generate_cache_stacked=FLAGS.generate_cache_stacked,
       new_cache_stacked=FLAGS.new_cache_stacked,
       lazy_cache_update=FLAGS.lazy_cache_update,
+      paged_attention_total_num_pages=FLAGS.paged_attention_total_num_pages,
+      paged_attention_page_size=FLAGS.paged_attention_page_size,
   )
 
   print("Initialize engine", time.perf_counter() - start)

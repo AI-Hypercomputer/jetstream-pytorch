@@ -396,6 +396,7 @@ class AttentionKernel:
     others_pspec = self.env.partition_by_axis()
     self.dense_attention = ak.dense_attention
     self.flash_attention = ak.flash_attention
+    self.page_attention = ak.call_paged_attention
     self.ragged_attention_orig = ak.RaggedAttentionKernel(
         env,
         input_specs=(q_pspec, kv_pspec, kv_pspec, *([others_pspec] * 7)),
@@ -445,12 +446,18 @@ class AttentionKernel:
 
       true_len = seqlen
       # When GQA is enabled, it not necessary to expand
-      if not (self.env.ragged_mha and n_rep > 1) and seqlen == 1:
+      if (
+          not (self.env.ragged_mha and n_rep > 1)
+          and seqlen == 1
+          and not self.env.page_attention
+      ):
         true_len = 2
         xq = torch.nn.functional.pad(
             xq, (0, 0, 0, true_len - seqlen), "constant", 0
         )
 
+      local_max = None
+      local_denom = None
       if self.env.ragged_mha and seqlen == 1 and keys.shape[-2] > 1:
         local_output, (local_max, local_denom) = torch_xla2.interop.call_jax(
             impl,
@@ -476,6 +483,15 @@ class AttentionKernel:
               v_scaler=None,
               mask=local_mask,
           )
+      elif self.env.page_attention and seqlen == 1:
+        local_output = self.page_attention(
+            self.env,
+            torch.squeeze(xq, 2),
+            keys,
+            values,
+            cache.page_attention_manager.lengths,
+            cache.page_attention_manager.page_indices,
+        )
       else:
         local_output = self.dense_attention(
             xq=xq,
@@ -485,8 +501,6 @@ class AttentionKernel:
             v_scaler=None,
             mask=local_mask,
         )
-        local_max = None
-        local_denom = None
 
       local_output = local_output.reshape(bsz, num_heads, true_len, head_dim)
       if local_max is not None:
