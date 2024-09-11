@@ -93,7 +93,7 @@ def main(argv):
   decode_state = engine.init_decode_state()
   profiler_started = False
   for exp in range(4, 11):
-    batch = 2 ** exp
+    batch = 2**exp
     runtime, decode_state, profiler_started = run_prefill_time(
         engine, params, decode_state, batch, profiler_started
     )

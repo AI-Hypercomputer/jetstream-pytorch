@@ -51,7 +51,7 @@ jobs:
         set -euo pipefail
         source venv/bin/activate 
         JAX_PLATFORMS=tpu,cpu python -m jetstream_pt.cli benchmark_offline --model_id meta-llama/Meta-Llama-3-8B-Instruct --quantize_weights=0 --override_batch_size=128 --benchmark_save_offline_result_to_file=result.md --internal_use_random_weights=True --hf_token=$HF_TOKEN
-        cat result.md | ./jq-linux-amd64 > output.txt
+        cat result.md | ./jq-linux-amd64 -Rsa . > output.txt
     - name: Update result to PR
       env: 
         URL: ${{ github.event.pull_request.comments_url }}

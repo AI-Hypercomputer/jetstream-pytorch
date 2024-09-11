@@ -23,7 +23,11 @@ flags.DEFINE_string(
     "Directory to store downloaded/converted weights",
 )
 flags.DEFINE_string("hf_token", "", "huggingface token")
-flags.DEFINE_bool("internal_use_random_weights", False, "Use random weights instead of HF weights. Testing only.")
+flags.DEFINE_bool(
+    "internal_use_random_weights",
+    False,
+    "Use random weights instead of HF weights. Testing only.",
+)
 
 flags.DEFINE_integer(
     "override_max_cache_length",
@@ -158,10 +162,11 @@ def _load_weights(directory):
   # Load the state_dict into the model
   return state_dict
 
+
 def _make_random_model_weights(model):
   result = {}
   for key, val in model.state_dict().items():
-    new_weights = torch.rand(val.shape, dtype=val.dtype, device='cpu')
+    new_weights = torch.rand(val.shape, dtype=val.dtype, device="cpu")
     result[key] = new_weights
   return result
 
@@ -172,8 +177,9 @@ def instantiate_model_from_repo_id(
 ):
   """Create model instance by hf model id.+"""
   model_dir = _hf_dir(repo_id)
-  if not FLAGS.internal_use_random_weights and (not os.path.exists(model_dir) or 
-      not os.listdir(model_dir)):
+  if not FLAGS.internal_use_random_weights and (
+      not os.path.exists(model_dir) or not os.listdir(model_dir)
+  ):
     # no weights has been downloaded
     _hf_download(repo_id, model_dir, FLAGS.hf_token)
   model_info = model_id_to_class.get(repo_id)
