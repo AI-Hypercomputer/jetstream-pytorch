@@ -5,6 +5,7 @@ import time
 # import torch_xla2 first!
 import torch_xla2  # pylint: disable
 import jax
+from jax import numpy as jnp
 from absl import app, flags
 from jetstream.engine import token_utils
 from jetstream.core import server_lib
@@ -26,6 +27,11 @@ flags.DEFINE_integer("max_input_length", 1024, "The batch size")
 flags.DEFINE_integer("max_output_length", 1024, "The batch size")
 flags.DEFINE_integer("port", 9000, "port to listen on")
 flags.DEFINE_integer("threads", 64, "number of worker threads in thread pool")
+flags.DEFINE_string(
+    "benchmark_save_offline_result_to_file",
+    "",
+    "if set, then save the result to the given file name",
+)
 
 
 def shard_weights(env, weights, weight_shardings):
@@ -112,6 +118,45 @@ def _check_model_id():
     print("valid model ids are:")
     list_model()
     sys.exit(1)
+
+
+def _run_prefill_time(
+    pt_engine, params, decode_state, seqlen, profiler_started
+):
+  """Run prefill and measure time."""
+  metadata = pt_engine.get_tokenizer()
+  tokenizer = pt_engine.build_tokenizer(metadata)
+
+  text = "This is a beautiful day"
+  tokens, true_length = tokenizer.encode(
+      text, is_bos=True, prefill_lengths=[seqlen]
+  )
+
+  for _ in range(3):
+    prefill_result, _ = pt_engine.prefill(
+        params=params, padded_tokens=tokens, true_length=true_length
+    )
+    decode_state = pt_engine.insert(
+        prefill_result, decode_state, slot=jnp.int32(1)
+    )
+
+  nums = 5
+  start = time.perf_counter()
+  for i in range(nums):
+    if i == nums - 1 and FLAGS.profiling_prefill and not profiler_started:
+      jax.profiler.start_trace(FLAGS.profiling_output)
+      profiler_started = True
+
+    prefill_result, _ = pt_engine.prefill(
+        params=params, padded_tokens=tokens, true_length=true_length
+    )
+    decode_state = pt_engine.insert(
+        prefill_result, decode_state, slot=jnp.int32(i)
+    )
+  jax.block_until_ready(decode_state)
+
+  end = time.perf_counter()
+  return (end - start) / nums, decode_state, profiler_started
 
 
 def interactive():
@@ -207,6 +252,100 @@ def interactive():
     print(tokenizer.decode(sampled_tokens_list))
 
 
+def _save_benchmark_to_file(filename, prefill_times_ms, decode_time_ms):
+  lines = (
+      [
+          " # Offline benchmark numbers",
+          " ## Model: " + FLAGS.model_id,
+          f" ## Batch size: {FLAGS.override_batch_size}",
+          f" ## Quantize: {FLAGS.quantize_weights}",
+          " |       | time (ms) |",
+          " |-------|-----------|",
+      ]
+      + [f"| Prefill {x} | {y} |" for x, y in prefill_times_ms.items()]
+      + [f"| Decode | {decode_time_ms} |"]
+  )
+  with open(filename, "w", encoding="utf-8") as f:
+    f.write("\n".join(lines))
+    f.flush()
+
+
+def benchmark_offline():
+  """function to run engine offline."""
+  _check_model_id()
+  devices = server_lib.get_devices()
+  print(f"devices: {devices}")
+  pt_engine = create_engine(devices)
+
+  start = time.perf_counter()
+  params = pt_engine.load_params()
+  print("Load params ", time.perf_counter() - start)
+
+  prefill_times = {}
+
+  decode_state = pt_engine.init_decode_state()
+  profiler_started = False
+  # 16 .. 1024
+  for exp in range(4, 11):
+    batch = 2**exp
+    runtime, decode_state, profiler_started = _run_prefill_time(
+        pt_engine, params, decode_state, batch, profiler_started
+    )
+    prefill_times[batch] = runtime
+
+  sampled_tokens_list = []
+
+  for i in range(3):  # warm up
+    # pylint: disable-next=all
+    decode_state, sampled_tokens = pt_engine.generate(
+        params=params, decode_state=decode_state
+    )
+    sampled_tokens_list.append(sampled_tokens)
+
+  profiling_output = FLAGS.profiling_output
+  print("======= decode starting ===")
+
+  dec_times = []
+  for i in range(10):
+    if profiling_output and i == 7 and not profiler_started:
+      jax.profiler.start_trace(profiling_output)
+      profiler_started = True
+    start = time.perf_counter()
+    # pylint: disable-next=all
+    decode_state, sampled_tokens = pt_engine.generate(params, decode_state)
+    jax.block_until_ready(decode_state)
+    sampled_tokens_list.append(sampled_tokens)
+    end = time.perf_counter()
+    dec_times.append(end - start)
+    print(i, "decode time", (end - start))
+
+  if profiler_started:
+    jax.profiler.stop_trace()
+
+  print("prefill ", prefill_times)
+  avg_decode_times = sum(dec_times[2:]) / len(dec_times[2:])
+  print("decode", avg_decode_times)
+
+  prefill_times_ms = {k: v * 1000 for k, v in prefill_times.items()}
+  decode_time_ms = sum(dec_times[2:]) * 1000 / 8
+
+  largest_prefill = max(prefill_times.items())
+  print("MAX tokens:", FLAGS.batch_size / avg_decode_times)
+
+  time2 = (FLAGS.batch_size * FLAGS.max_decode_length) / (
+      FLAGS.batch_size * largest_prefill[1]
+      + FLAGS.max_decode_length * avg_decode_times
+  )
+  print("MAX tokens 2:", time2)
+
+  if FLAGS.benchmark_save_offline_result_to_file:
+    _save_benchmark_to_file(
+        FLAGS.benchmark_save_offline_result_to_file,
+        prefill_times_ms,
+        decode_time_ms,
+    )
+
+
 def main():
   """Main function."""
 
@@ -221,6 +360,8 @@ def main():
       serve()
     elif argv[1] == "interactive":
       interactive()
+    elif argv[1] == "benchmark_offline":
+      benchmark_offline()
     else:
       print(
           "Invalid arguments. please specify 'list', 'serve', or 'interactive'."
