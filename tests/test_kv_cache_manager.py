@@ -93,9 +93,10 @@ class PageAttentnioTest(parameterized.TestCase):
     decode_caches = _insert_prefill(8, 2, 1)
     decode_caches = _insert_prefill(13, 2, 3)
 
-    lens = jnp.asarray([3, 8, 0, 13, 0])
+    lens = np.asarray([3, 8, 0, 13, 0])
     pam.fill_new_pages(lens)
-    page_token_indices = pam.get_page_token_indices(lens)
+    np_page_token_indices = pam.get_page_token_indices(lens)
+    page_token_indices = jnp.asarray(np_page_token_indices)
     page_token_indices = torchjax.to_torch(page_token_indices)
 
     caches_obj = [

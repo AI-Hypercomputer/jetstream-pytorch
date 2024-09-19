@@ -5,6 +5,7 @@ from typing import List, Tuple
 import jax
 import jax.numpy as jnp
 import jax.sharding as jsharding
+import numpy as np
 
 
 class PageAttentionManager:
@@ -26,22 +27,20 @@ class PageAttentionManager:
   ):
     self.unused_pages = queue.Queue()
     self.batch_size = batch_size
-    self.page_indices = jnp.full(
+    self.page_indices = np.full(
         (batch_size, max_pages_per_sequence),
         paged_attention_total_num_pages - 1,
-        dtype=jnp.int32,
+        dtype=np.int32,
     )
-    self.lengths = jnp.zeros(batch_size, dtype=jnp.int32)
+    self.lengths = np.zeros(batch_size, dtype=np.int32)
     self.paged_attention_page_size = paged_attention_page_size
     self.max_pages_per_sequence = max_pages_per_sequence
     for i in range(paged_attention_total_num_pages):
       self.unused_pages.put(i, block=False)
 
   # pylint: disable-next=all
-  def reserve_pages_insert(
-      self, slot: int, seq_len: int
-  ) -> Tuple[int, jax.Array]:
-    self.lengths = self.lengths.at[slot].set(seq_len)
+  def reserve_pages_insert(self, slot: int, seq_len: int):
+    self.lengths[slot] = seq_len
     num_pages = (
         seq_len // self.paged_attention_page_size
         if seq_len % self.paged_attention_page_size == 0
@@ -49,7 +48,7 @@ class PageAttentionManager:
     )
 
     indices = [self.unused_pages.get(block=False) for _ in range(num_pages)]
-    self.page_indices = self.page_indices.at[slot, :num_pages].set(indices)
+    self.page_indices[slot, :num_pages] = indices
     return num_pages, self.page_indices[slot, :num_pages]
 
   # pylint: disable-next=all
@@ -57,10 +56,10 @@ class PageAttentionManager:
     if seq_len > 0 and seq_len % self.paged_attention_page_size == 0:
       index = self.unused_pages.get(block=False)
       num_pages = seq_len // self.paged_attention_page_size
-      self.page_indices = self.page_indices.at[slot, num_pages].set(index)
+      self.page_indices[slot, num_pages] = index
 
   # pylint: disable-next=all
-  def fill_new_pages(self, lens: jax.Array):
+  def fill_new_pages(self, lens):
     for slot in range(self.batch_size):
       self.reserve_pages_decode(slot, lens[slot])
 
@@ -143,7 +142,7 @@ class PageAttentionManager:
     return caches
 
   # pylint: disable-next=all
-  def get_page_token_indices(self, lens: jax.Array) -> jax.Array:
+  def get_page_token_indices(self, lens):
     # assert lens.shape == (
     #     self.batch_size,
     #     1,
@@ -165,11 +164,11 @@ class PageAttentionManager:
       token_scale_indices.append(offset + token_pos)
       batch_slots.append(slot)
       offset += self.paged_attention_page_size
-    self.lengths = jnp.where(lens == 0, 0, lens + 1)
-    update_page_indices = jnp.asarray(update_page_indices)
-    token_scale_indices = jnp.asarray(token_scale_indices)
-    batch_slots = jnp.asarray(batch_slots)
-    return jnp.stack(
+    self.lengths = np.where(lens == 0, 0, lens + 1)
+    update_page_indices = np.asarray(update_page_indices)
+    token_scale_indices = np.asarray(token_scale_indices)
+    batch_slots = np.asarray(batch_slots)
+    return np.stack(
         (
             update_page_indices,
             token_scale_indices,
