@@ -653,9 +653,10 @@ class PyTorchEngine(engine_api.Engine):
       decode_state: DecodeState,
       slot: int,
   ) -> DecodeState:
-    num_pages, update_indexes = (
+    num_pages, np_update_indexes = (
         self.page_attention_manager.reserve_pages_insert(slot, prefix.seq_len)
     )
+    update_indexes = jnp.array(np_update_indexes)
     _, kv_heads, _, dim = prefix.caches[0][0].shape
     tep_kv = jnp.zeros(
         (
@@ -735,10 +736,12 @@ class PyTorchEngine(engine_api.Engine):
   def generate_page_attention(
       self, params: Any, decode_state: DecodeState
   ) -> tuple[DecodeState, engine_api.ResultTokens]:
-    self.page_attention_manager.fill_new_pages(decode_state.input_pos)
-    page_token_indices = self.page_attention_manager.get_page_token_indices(
-        decode_state.input_pos
+    np_pos = np.asarray(decode_state.input_pos.block_until_ready())
+    self.page_attention_manager.fill_new_pages(np_pos)
+    np_page_token_indices = self.page_attention_manager.get_page_token_indices(
+        np_pos
     )
+    page_token_indices = jnp.asarray(np_page_token_indices)
     new_decode_state, result_tokens = self.generate_jit(
         params, decode_state, page_token_indices=page_token_indices
     )

@@ -157,23 +157,23 @@ class PageAttentionTest(parameterized.TestCase):
     slot = 1
     seq_len = 8
     pam.reserve_pages_insert(slot, seq_len)
-    expected_slot_page_indices = jnp.asarray([0, 1])
+    expected_slot_page_indices = np.asarray([0, 1])
     slot_page_indices = pam.page_indices[slot][0:2]
     self.assertTrue(
-        jnp.array_equal(slot_page_indices, expected_slot_page_indices)
+        np.array_equal(slot_page_indices, expected_slot_page_indices)
     )
 
-    lens = jnp.asarray([0, seq_len, 0])
+    lens = np.asarray([0, seq_len, 0])
     pam.fill_new_pages(lens)
-    expected_slot_page_indices = jnp.asarray([0, 1, 2, 19])
+    expected_slot_page_indices = np.asarray([0, 1, 2, 19])
     slot_page_indices = pam.page_indices[slot]
     self.assertTrue(
-        jnp.array_equal(slot_page_indices, expected_slot_page_indices)
+        np.array_equal(slot_page_indices, expected_slot_page_indices)
     )
 
-    expected_0_page_indices = jnp.asarray([19, 19, 19, 19])
+    expected_0_page_indices = np.asarray([19, 19, 19, 19])
     zer0_page_indices = pam.page_indices[0][0:4]
-    self.assertTrue(jnp.array_equal(zer0_page_indices, expected_0_page_indices))
+    self.assertTrue(np.array_equal(zer0_page_indices, expected_0_page_indices))
 
   def test_get_page_token_indices(self):
     env, _ = self._make_env()
@@ -188,18 +188,18 @@ class PageAttentionTest(parameterized.TestCase):
     pam.reserve_pages_insert(3, 13)
     pam.reserve_pages_insert(0, 3)
 
-    lens = jnp.asarray([3, 8, 0, 13, 0])
+    lens = np.asarray([3, 8, 0, 13, 0])
     pam.fill_new_pages(lens)
 
     page_token_indices = pam.get_page_token_indices(lens)
 
-    expected_page_indices = jnp.asarray([6, 7, 5])
-    expected_token_indices = jnp.asarray([3, 4, 9])
+    expected_page_indices = np.asarray([6, 7, 5])
+    expected_token_indices = np.asarray([3, 4, 9])
     self.assertTrue(
-        jnp.array_equal(page_token_indices[0], expected_page_indices)
+        np.array_equal(page_token_indices[0], expected_page_indices)
     )
     self.assertTrue(
-        jnp.array_equal(page_token_indices[1], expected_token_indices)
+        np.array_equal(page_token_indices[1], expected_token_indices)
     )
 
 
