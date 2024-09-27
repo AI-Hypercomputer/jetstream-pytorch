@@ -1088,7 +1088,7 @@ def create_pytorch_engine(
     )
 
   # Jax cache configurations
-  jax.config.update("jax_compilation_cache_dir", jax_compilation_cache_dir)
+  jax.config.update("jax_compilation_cache_dir", os.path.expanduser(jax_compilation_cache_dir))
   jax.config.update("jax_persistent_cache_min_entry_size_bytes", jax_persistent_cache_min_entry_size_bytes)
   jax.config.update("jax_persistent_cache_min_compile_time_secs", jax_persistent_cache_min_compile_time_secs)
 
