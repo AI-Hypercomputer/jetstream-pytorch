@@ -1033,6 +1033,9 @@ def create_pytorch_engine(
     lazy_cache_update=False,
     paged_attention_total_num_pages=0,
     paged_attention_page_size=64,
+    jax_compilation_cache_dir="~/jax_cache",
+    jax_persistent_cache_min_entry_size_bytes=0,
+    jax_persistent_cache_min_compile_time_secs=1,
 ) -> PyTorchEngine:
   """Returns: The pytorch engine."""
 
@@ -1083,6 +1086,11 @@ def create_pytorch_engine(
     sharding_config = os.path.join(
         "default_shardings", sharding_file_name + ".yaml"
     )
+
+  # Jax cache configurations
+  jax.config.update("jax_compilation_cache_dir", jax_compilation_cache_dir)
+  jax.config.update("jax_persistent_cache_min_entry_size_bytes", jax_persistent_cache_min_entry_size_bytes)
+  jax.config.update("jax_persistent_cache_min_compile_time_secs", jax_persistent_cache_min_compile_time_secs)
 
   env_data = JetEngineEnvironmentData(
       tokenizer_path=tokenizer_path,
