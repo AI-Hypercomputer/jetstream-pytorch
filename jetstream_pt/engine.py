@@ -60,6 +60,8 @@ class Prefix:
   token: jax.Array  # [1, seqlen]
   caches: List[Tuple[jax.Array, jax.Array]]
   seq_len: int  # true seqlen front pad
+  # temperature parameter for scaling probability
+  temperature: float
 
 
 @struct.dataclass
@@ -75,9 +77,7 @@ class DecodeState:
   start: jax.Array  # [batch_size, 1], the starting pos for each slot
   input_pos: jax.Array  # [batch_size, 1] input pos for each slot
   mask: jax.Array  # [batch_size, seqlen] -inf for invalid; 0 for valid
-  topk: int
-  nucleus_topp: int
-  temperature: int
+  temperatures: List[float]  # [batch_size, 1], the temperature for each slot
 
 # NOTE model specific
 
@@ -170,6 +170,7 @@ class PyTorchEngine(engine_api.Engine):
     scalers = []
     if self.env.quant_config.enable_kv_quantization:
       scalers = [c.scalers() for c in caches_obj]
+    temperatures = [self.env.temperature] * self.env.batch_size
     return DecodeState(
         jnp.zeros((self.env.batch_size, 1), dtype=jnp.int32),
         caches,
@@ -183,6 +184,7 @@ class PyTorchEngine(engine_api.Engine):
             float("-inf"),
             dtype=self.default_dtype,
         ),  # mask
+        temperatures,
     )
 
   # pylint: disable-next=all
@@ -282,7 +284,9 @@ class PyTorchEngine(engine_api.Engine):
     caches_res = [c.state() for c in caches]
     return torchjax.from_torch((res, caches_res))
 
-  def _sampling(self, logits: Any, batch_size: int, topk: Any, nucleus_topp: Any, temperature: Any) -> jnp.ndarray:
+  def _sampling(
+      self, logits: Any, batch_size: int, temperatures: List[float]
+  ) -> jnp.ndarray:
     if len(logits.shape) == 2:
       logits = jnp.expand_dims(logits, 0)
     return (
@@ -290,9 +294,9 @@ class PyTorchEngine(engine_api.Engine):
             logits[:, -1],
             self.rng,
             self.env.sampling_algorithm,
-            topk,
-            nucleus_topp,
-            temperature,
+            self.env.topk,
+            self.env.nucleus_topp,
+            temperatures,
         )
         .reshape(batch_size, -1)
         .astype(jnp.int32)
@@ -305,8 +309,7 @@ class PyTorchEngine(engine_api.Engine):
       existing_prefix: Optional[Prefix] = None,
       padded_tokens: PrefillInputs,  # PrefillInputs[jax.Array],
       true_length: int,
-      sampler: Optional[Callable[[Any], Any]] = None,
-      sampling_config: Any = None,
+      sampler: Any,
   ) -> Tuple[Prefix, engine_api.ResultTokens]:
     if isinstance(padded_tokens, jax.Array):
       batched_token = padded_tokens.reshape(1, -1)
@@ -325,21 +328,24 @@ class PyTorchEngine(engine_api.Engine):
     if len(logits.shape) == 3:  # b, seqlen, num words
       logits = logits[0]  # seqlen, num words
 
-    topk = sampling_config.topk if sampling_config else self.env.topk
-    nucleus_topp = sampling_config.nucleus_topp if sampling_config else self.env.nucleus_topp
-    temperature = sampling_config.temperature if sampling_config else self.env.temperature
+    temperature = (
+        sampler["temperature"]
+        if isinstance(sampler, dict) and "temperature" in sampler
+        else self.env.temperature
+    )
 
-    if sampler:
+    if sampler and callable(sampler):
       token = sampler(logits[true_length - 1])
     else:
       token = sampling_utils.sampling(
           logits[true_length - 1],
           self.rng,
           self.env.sampling_algorithm,
-          topk,
-          nucleus_topp,
+          self.env.topk,
+          self.env.nucleus_topp,
           temperature,
       )
+
     token_out = jnp.reshape(token, (1, 1))
     data = jnp.concatenate(
         [
@@ -365,7 +371,7 @@ class PyTorchEngine(engine_api.Engine):
     #       v, seq_len - true_length, true_length, axis=2))
     #   for k, v in updated_caches
     # ]
-    return Prefix(token, updated_caches, true_length), result
+    return Prefix(token, updated_caches, true_length, temperature), result
 
   def shrink_prefix(
       self,
@@ -484,6 +490,7 @@ class PyTorchEngine(engine_api.Engine):
           caches.append((kcache, vcache))
           scales.append((kscale, vscale))
     lens = decode_state.lens.at[slot].set(1)
+    decode_state.temperatures[slot] = prefix.temperature
     return DecodeState(
         tokens,
         caches,
@@ -493,6 +500,7 @@ class PyTorchEngine(engine_api.Engine):
         start,
         input_pos,
         mask,
+        decode_state.temperatures,
     )
 
   # pylint: disable-next=all
@@ -577,6 +585,7 @@ class PyTorchEngine(engine_api.Engine):
         scales.append((kscale, vscale))
 
     lens = decode_state.lens.at[slot].set(1)
+    decode_state.temperatures[slot] = prefix.temperature
     return DecodeState(
         tokens,
         caches,
@@ -586,6 +595,7 @@ class PyTorchEngine(engine_api.Engine):
         start,
         input_pos,
         mask,
+        decode_state.temperatures,
     )
 
   def _insert_page_attention(
@@ -621,6 +631,7 @@ class PyTorchEngine(engine_api.Engine):
     input_pos = decode_state.input_pos.at[slot].set(prefix.seq_len)
     scales = None
     lens = decode_state.lens.at[slot].set(1)
+    decode_state.temperatures[slot] = prefix.temperature
     return DecodeState(
         tokens,
         caches,
@@ -630,6 +641,7 @@ class PyTorchEngine(engine_api.Engine):
         start,
         input_pos,
         mask,
+        decode_state.temperatures,
     )
 
   def insert(
@@ -737,7 +749,9 @@ class PyTorchEngine(engine_api.Engine):
     return b_next, i_next
 
   def generate(
-      self, params: Any, decode_state: DecodeState, sampler=None, sampling_config=None
+      self,
+      params: Any,
+      decode_state: DecodeState,
   ) -> tuple[DecodeState, engine_api.ResultTokens]:
     return (None, None)
 
@@ -761,7 +775,6 @@ class PyTorchEngine(engine_api.Engine):
       params: Any,
       decode_state: DecodeState,
       sampler=None,
-      sampling_config=None,
       page_token_indices=None,
   ) -> tuple[DecodeState, engine_api.ResultTokens]:
     # seq_len = padded_tokens.shape[0]
@@ -808,14 +821,12 @@ class PyTorchEngine(engine_api.Engine):
       # fill mask later, now use flash attention
       mask = update_mask()
 
-    topk = sampling_config.topk if sampling_config else self.env.topk
-    nucleus_topp = sampling_config.nucleus_topp if sampling_config else self.env.nucleus_topp
-    temperature = sampling_config.temperature if sampling_config else self.env.temperature
-
-    if sampler:
+    if sampler and callable(sampler):
       next_token = sampler(logits[:, -1])
     else:
-      next_token = self._sampling(logits, self.env.batch_size, topk, nucleus_topp, temperature)
+      next_token = self._sampling(
+          logits, self.env.batch_size, decode_state.temperatures
+      )
 
     if self.env.ring_buffer:
       input_pos = decode_state.input_pos + 1
@@ -977,6 +988,7 @@ class PyTorchEngine(engine_api.Engine):
         if self.env.page_attention
         else self.cache_sharding,
         self.replicated,
+        self.replicated,
     )
 
   def get_decode_state_sharding(self) -> DecodeState:
@@ -984,9 +996,6 @@ class PyTorchEngine(engine_api.Engine):
     return DecodeState(
         self.x_sharding if self.env.shard_on_batch else self.replicated,
         self.cache_sharding,
-        self.replicated,
-        self.replicated,
-        self.replicated,
         self.replicated,
         self.replicated,
         self.replicated,
