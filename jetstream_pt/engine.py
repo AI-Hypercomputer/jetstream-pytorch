@@ -75,7 +75,9 @@ class DecodeState:
   start: jax.Array  # [batch_size, 1], the starting pos for each slot
   input_pos: jax.Array  # [batch_size, 1] input pos for each slot
   mask: jax.Array  # [batch_size, seqlen] -inf for invalid; 0 for valid
-
+  topk: int
+  nucleus_topp: int
+  temperature: int
 
 # NOTE model specific
 
@@ -280,7 +282,7 @@ class PyTorchEngine(engine_api.Engine):
     caches_res = [c.state() for c in caches]
     return torchjax.from_torch((res, caches_res))
 
-  def _sampling(self, logits: Any, batch_size: int) -> jnp.ndarray:
+  def _sampling(self, logits: Any, batch_size: int, topk: Any, nucleus_topp: Any, temperature: Any) -> jnp.ndarray:
     if len(logits.shape) == 2:
       logits = jnp.expand_dims(logits, 0)
     return (
@@ -288,9 +290,9 @@ class PyTorchEngine(engine_api.Engine):
             logits[:, -1],
             self.rng,
             self.env.sampling_algorithm,
-            self.env.topk,
-            self.env.nucleus_topp,
-            self.env.temperature,
+            topk,
+            nucleus_topp,
+            temperature,
         )
         .reshape(batch_size, -1)
         .astype(jnp.int32)
@@ -304,6 +306,7 @@ class PyTorchEngine(engine_api.Engine):
       padded_tokens: PrefillInputs,  # PrefillInputs[jax.Array],
       true_length: int,
       sampler: Optional[Callable[[Any], Any]] = None,
+      sampling_config: Any = None,
   ) -> Tuple[Prefix, engine_api.ResultTokens]:
     if isinstance(padded_tokens, jax.Array):
       batched_token = padded_tokens.reshape(1, -1)
@@ -321,6 +324,11 @@ class PyTorchEngine(engine_api.Engine):
     )
     if len(logits.shape) == 3:  # b, seqlen, num words
       logits = logits[0]  # seqlen, num words
+
+    topk = sampling_config.topk if sampling_config else self.env.topk
+    nucleus_topp = sampling_config.nucleus_topp if sampling_config else self.env.nucleus_topp
+    temperature = sampling_config.temperature if sampling_config else self.env.temperature
+
     if sampler:
       token = sampler(logits[true_length - 1])
     else:
@@ -328,9 +336,9 @@ class PyTorchEngine(engine_api.Engine):
           logits[true_length - 1],
           self.rng,
           self.env.sampling_algorithm,
-          self.env.topk,
-          self.env.nucleus_topp,
-          self.env.temperature,
+          topk,
+          nucleus_topp,
+          temperature,
       )
     token_out = jnp.reshape(token, (1, 1))
     data = jnp.concatenate(
@@ -729,7 +737,7 @@ class PyTorchEngine(engine_api.Engine):
     return b_next, i_next
 
   def generate(
-      self, params: Any, decode_state: DecodeState, sampler=None
+      self, params: Any, decode_state: DecodeState, sampler=None, sampling_config=None
   ) -> tuple[DecodeState, engine_api.ResultTokens]:
     return (None, None)
 
@@ -753,6 +761,7 @@ class PyTorchEngine(engine_api.Engine):
       params: Any,
       decode_state: DecodeState,
       sampler=None,
+      sampling_config=None,
       page_token_indices=None,
   ) -> tuple[DecodeState, engine_api.ResultTokens]:
     # seq_len = padded_tokens.shape[0]
@@ -799,10 +808,15 @@ class PyTorchEngine(engine_api.Engine):
       # fill mask later, now use flash attention
       mask = update_mask()
 
+    topk = sampling_config.topk if sampling_config else self.env.topk
+    nucleus_topp = sampling_config.nucleus_topp if sampling_config else self.env.nucleus_topp
+    temperature = sampling_config.temperature if sampling_config else self.env.temperature
+
     if sampler:
       next_token = sampler(logits[:, -1])
     else:
-      next_token = self._sampling(logits, self.env.batch_size)
+      next_token = self._sampling(logits, self.env.batch_size, topk, nucleus_topp, temperature)
+
     if self.env.ring_buffer:
       input_pos = decode_state.input_pos + 1
       lens = decode_state.lens + 1
@@ -970,6 +984,10 @@ class PyTorchEngine(engine_api.Engine):
     return DecodeState(
         self.x_sharding if self.env.shard_on_batch else self.replicated,
         self.cache_sharding,
+        self.replicated,
+        self.replicated,
+        self.replicated,
+        self.replicated,
         self.replicated,
         self.replicated,
         self.replicated,
