@@ -153,17 +153,17 @@ flags.DEFINE_integer(
 flags.DEFINE_string(
     "jax_compilation_cache_dir",
     "~/jax_cache",
-    "Jax compilation cache directory"
+    "Jax compilation cache directory",
 )
 flags.DEFINE_integer(
     "jax_persistent_cache_min_entry_size_bytes",
     0,
-    "Minimum size (in bytes) of an entry that will be cached in the persistent compilation cache"
+    "Minimum size (in bytes) of an entry that will be cached in the persistent compilation cache",
 )
 flags.DEFINE_integer(
     "jax_persistent_cache_min_compile_time_secs",
     1,
-    "Minimum compilation time for a computation to be written to persistent cache"
+    "Minimum compilation time for a computation to be written to persistent cache",
 )
 
 
