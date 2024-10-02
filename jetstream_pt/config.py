@@ -150,6 +150,21 @@ flags.DEFINE_integer(
     64,
     "page size per page",
 )
+flags.DEFINE_string(
+    "jax_compilation_cache_dir",
+    "~/jax_cache",
+    "Jax compilation cache directory",
+)
+flags.DEFINE_integer(
+    "jax_persistent_cache_min_entry_size_bytes",
+    0,
+    "Minimum size (in bytes) of an entry that will be cached in the persistent compilation cache",
+)
+flags.DEFINE_integer(
+    "jax_persistent_cache_min_compile_time_secs",
+    1,
+    "Minimum compilation time for a computation to be written to persistent cache",
+)
 
 
 def create_quantization_config_from_flags():
@@ -227,6 +242,9 @@ def create_engine_from_config_flags():
       lazy_cache_update=FLAGS.lazy_cache_update,
       paged_attention_total_num_pages=FLAGS.paged_attention_total_num_pages,
       paged_attention_page_size=FLAGS.paged_attention_page_size,
+      jax_compilation_cache_dir=FLAGS.jax_compilation_cache_dir,
+      jax_persistent_cache_min_entry_size_bytes=FLAGS.jax_persistent_cache_min_entry_size_bytes,
+      jax_persistent_cache_min_compile_time_secs=FLAGS.jax_persistent_cache_min_compile_time_secs,
   )
 
   print("Initialize engine", time.perf_counter() - start)

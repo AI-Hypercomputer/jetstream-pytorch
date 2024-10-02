@@ -33,6 +33,7 @@ flags.DEFINE_string(
 flags.DEFINE_integer("prometheus_port", 0, "")
 flags.DEFINE_bool("enable_jax_profiler", False, "enable jax profiler")
 flags.DEFINE_integer("jax_profiler_port", 9999, "port of JAX profiler server")
+flags.DEFINE_bool("enable_model_warmup", False, "enable model warmup")
 
 
 # pylint: disable-next=all
@@ -65,6 +66,7 @@ def main(argv: Sequence[str]):
       metrics_server_config=metrics_server_config,
       enable_jax_profiler=FLAGS.enable_jax_profiler,
       jax_profiler_port=FLAGS.jax_profiler_port,
+      enable_model_warmup=FLAGS.enable_model_warmup,
   )
   print("Started jetstream_server....")
   jetstream_server.wait_for_termination()

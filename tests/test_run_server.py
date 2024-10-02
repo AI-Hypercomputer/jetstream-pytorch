@@ -84,6 +84,7 @@ class ServerRunTest(unittest.TestCase):
     self.assertEqual(f.prometheus_port, 0)
     self.assertEqual(f.enable_jax_profiler, False)
     self.assertEqual(f.jax_profiler_port, 9999)
+    self.assertEqual(f.enable_model_warmup, False)
 
     # quantization configs
     self.assertEqual(f.quantize_weights, False)
