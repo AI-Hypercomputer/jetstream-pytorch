@@ -153,11 +153,14 @@ class Transformer(ModuleBase):
     }
 
   @classmethod
-  def from_hf_model_id(cls, model_id, env):
-    name = {
-        "mistralai/Mixtral-8x7B-v0.1": "Mixtral-8x7B-v0.1",
-        "mistralai/Mixtral-8x7B-Instruct-v0.1": "Mixtral-8x7B-v0.1",
-    }.get(model_id)
+  def from_hf_model_id(cls, model_id, env, is_tiny=False):
+    if is_tiny:
+      name = "llama-2-tiny"
+    else:
+      name = {
+          "mistralai/Mixtral-8x7B-v0.1": "Mixtral-8x7B-v0.1",
+          "mistralai/Mixtral-8x7B-Instruct-v0.1": "Mixtral-8x7B-v0.1",
+      }.get(model_id)
     assert name
     args = ModelArgs.from_name(name)
     args.device = "meta"
