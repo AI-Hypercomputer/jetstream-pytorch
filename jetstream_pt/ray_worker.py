@@ -357,7 +357,7 @@ class PyTorchRayWorker:
           )
           for k, v in torchjax.to_torch(caches)
       ]
-    mask = jnp.expand_dims(mask, (1, 2))
+    mask = jnp.expand_dims(new_mask, (1, 2))
 
     args = (tokens, input_pos, caches_obj, mask)
     paramst, argst = torchjax.to_torch((weights, args))
@@ -371,7 +371,6 @@ class PyTorchRayWorker:
     new_current_position = (
         current_position + 1
     ) % self.env.cache_sequence_length
-
     return torchjax.from_torch(
         (
             res,
@@ -816,7 +815,7 @@ class PyTorchRayWorker:
         length_idx=(2 * length, 2 * length + 1),
         samples_per_slot=1,
     )
-
+    next_token = jax.lax.with_sharding_constraint(next_token, self.replicated)
     new_decode_state = DecodeState(
         next_token,
         new_caches,
