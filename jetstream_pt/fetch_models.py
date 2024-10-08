@@ -9,7 +9,6 @@ import torch
 from safetensors import safe_open
 from jetstream_pt.environment import (
     JetEngineEnvironmentData,
-    QuantizationConfig,
 )
 from jetstream_pt.third_party.llama import model_exportable as llama_model
 from jetstream_pt.third_party.mixtral import model as mixtral_model
@@ -27,6 +26,12 @@ flags.DEFINE_bool(
     "internal_use_random_weights",
     False,
     "Use random weights instead of HF weights. Testing only.",
+)
+
+flags.DEFINE_bool(
+    "internal_use_tiny_model",
+    False,
+    "Use tiny config instead of real config of HF weights. Testing only.",
 )
 
 flags.DEFINE_integer(
@@ -108,16 +113,11 @@ def construct_env_data_from_model_id(
     batch_size,
     input_length,
     output_length,
-    quantize,
 ):
   """Create Environment from model id and options"""
   tokenizer_path = os.path.join(_hf_dir(repo_id), "tokenizer.model")
-  if quantize:
-    checkpoint_path = _int_dir(repo_id)
-    checkpoint_format = "safetensors"
-  else:
-    checkpoint_path = _hf_dir(repo_id)
-    checkpoint_format = "safetensors"
+  checkpoint_path = _hf_dir(repo_id)
+  checkpoint_format = "safetensors"
 
   shard_on_batch = False
 
@@ -135,7 +135,6 @@ def construct_env_data_from_model_id(
       batch_size=batch_size,
       max_decode_length=output_length,
       max_input_sequence_length=input_length,
-      quant_config=QuantizationConfig(),
       cache_sequence_length=max_cache_length,
       bf16_enable=True,
       sharding_config_path="",
@@ -186,12 +185,14 @@ def instantiate_model_from_repo_id(
   assert model_info is not None
 
   env.device = "meta"
-  model = model_info.model_class.from_hf_model_id(repo_id, env)
-  if not FLAGS.internal_use_random_weights:
+  model = model_info.model_class.from_hf_model_id(
+      repo_id, env, FLAGS.internal_use_tiny_model
+  )
+  if FLAGS.internal_use_random_weights or FLAGS.internal_use_tiny_model:
+    weights = _make_random_model_weights(model)
+  else:
     weights = _load_weights(model_dir)
     weights = model.convert_hf_weights(weights)
-  else:
-    weights = _make_random_model_weights(model)
   model.load_state_dict(weights, assign=True, strict=False)
 
   return model

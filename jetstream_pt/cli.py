@@ -1,3 +1,4 @@
+import os
 from typing import List
 import random
 import sys
@@ -39,10 +40,8 @@ def shard_weights(env, weights, weight_shardings):
   sharded = {}
   for key, val in weights.items():
     sharding = env.sharding_by_axis(weight_shardings.get(key, -1))
-    print("SHARDING", key, sharding)
     with jax.default_device(jax.devices("cpu")[0]):
       arr = torch_xla2.tensor.t2j(val)
-
     arr = jax.device_put(arr, sharding)
     sharded[key] = torchjax.to_torch(arr)
   return sharded
@@ -57,17 +56,16 @@ def create_engine(devices):
       FLAGS.override_batch_size,
       FLAGS.max_input_length,
       FLAGS.max_output_length,
-      quant_config.enable_weight_quantization,
   )
   tokenizer = AutoTokenizer.from_pretrained(FLAGS.model_id)
   env = environment.JetEngineEnvironment(env_data)
   env.hf_tokenizer = tokenizer
   model = fetch_models.instantiate_model_from_repo_id(FLAGS.model_id, env)
+  # NOTE: this is assigned later because, the model should be constructed
+  # as a float model first then quantized
+  env.quant_config = quant_config
   if quant_config.enable_weight_quantization:
     quantize_model.quantize_model(model, quant_config)
-    print("====== model =======")
-    print(model)
-
   weight_shardings = model.get_sharding_annotations()
   sharded_weights = shard_weights(env, model.state_dict(), weight_shardings)
   env_data.quant_config = quant_config
@@ -202,7 +200,7 @@ def interactive():
       "<s>[INST] <<SYS>>\nYou are an AI assistant. You will be given a task. You must generate a detailed and long answer.\n<</SYS>>\n\nContinue the following story.\n\nKay didn't have shoes that fit her feet properly. She only wore sneakers, because the \nChoose from: [I] shoes  fitted badly. [II] sneakers  fitted badly. [/INST]",
   ]
   for prompt in prompts:
-    slot = random.randint(0, FLAGS.batch_size - 1)
+    slot = random.randint(0, FLAGS.override_batch_size - 1)
     tokens, true_length = tokenizer.encode(prompt)
 
     print(f"---- Input prompts are: {prompt}")
@@ -330,10 +328,10 @@ def benchmark_offline():
   decode_time_ms = sum(dec_times[2:]) * 1000 / 8
 
   largest_prefill = max(prefill_times.items())
-  print("MAX tokens:", FLAGS.batch_size / avg_decode_times)
+  print("MAX tokens:", FLAGS.override_batch_size / avg_decode_times)
 
-  time2 = (FLAGS.batch_size * FLAGS.max_decode_length) / (
-      FLAGS.batch_size * largest_prefill[1]
+  time2 = (FLAGS.override_batch_size * FLAGS.max_decode_length) / (
+      FLAGS.override_batch_size * largest_prefill[1]
       + FLAGS.max_decode_length * avg_decode_times
   )
   print("MAX tokens 2:", time2)
@@ -351,6 +349,8 @@ def main():
 
   def main_real(argv):
     """Entry point"""
+    jax.config.update("jax_default_prng_impl", "unsafe_rbg")
+    os.environ["TF_CPP_MIN_LOG_LEVEL"] = "0"
     if len(argv) < 2:
       print("Invalid arguments. please specify 'list' or 'serve'")
 

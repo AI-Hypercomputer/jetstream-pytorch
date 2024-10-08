@@ -2,6 +2,8 @@ import torch
 from .layers import (
     create_quantized_from_nn_linear,
     create_quantized_from_nn_embedding,
+    AttentionKernel,
+    Int8KVAttentionKernel,
 )
 
 
@@ -20,6 +22,12 @@ def quantize_model(float_model, config):
 
       if new_mod:
         setattr(float_model, name, new_mod)
+
+    if config.enable_kv_quantization:
+      for name, mod in float_model.__dict__.items():
+        if isinstance(mod, AttentionKernel):
+          new_mod = Int8KVAttentionKernel(mod.env, mod.layer_id)
+          setattr(float_model, name, new_mod)
 
   float_model.apply(quantize_nn_mod)
   return float_model

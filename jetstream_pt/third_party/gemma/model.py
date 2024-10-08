@@ -461,7 +461,7 @@ class GemmaModel(ModuleBase):
     }
 
   @classmethod
-  def from_hf_model_id(cls, model_id, env):
+  def from_hf_model_id(cls, model_id, env, is_tiny=False):
     name = {
         "google/gemma-2b": "2b",
         "google/gemma-2b-it": "2b",

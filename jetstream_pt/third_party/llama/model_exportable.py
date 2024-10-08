@@ -341,19 +341,22 @@ class Transformer(ModuleBase):
     return sharding_dict
 
   @classmethod
-  def from_hf_model_id(cls, model_id, env):
-    name = {
-        "meta-llama/Llama-2-7b-chat-hf": "llama-2-7b",
-        "meta-llama/Llama-2-7b-hf": "llama-2-7b",
-        "meta-llama/Llama-2-13b-chat-hf": "llama-2-13b",
-        "meta-llama/Llama-2-13b-hf": "llama-2-13b",
-        "meta-llama/Llama-2-70b-hf": "llama-2-70b",
-        "meta-llama/Llama-2-70b-chat-hf": "llama-2-70b",
-        "meta-llama/Meta-Llama-3-8B": "llama-3-8b",
-        "meta-llama/Meta-Llama-3-8B-Instruct": "llama-3-8b",
-        "meta-llama/Meta-Llama-3-70B": "llama-3-70b",
-        "meta-llama/Meta-Llama-3-70B-Instruct": "llama-3-70b",
-    }.get(model_id)
+  def from_hf_model_id(cls, model_id, env, is_tiny=False):
+    if is_tiny:
+      name = "llama-2-tiny"
+    else:
+      name = {
+          "meta-llama/Llama-2-7b-chat-hf": "llama-2-7b",
+          "meta-llama/Llama-2-7b-hf": "llama-2-7b",
+          "meta-llama/Llama-2-13b-chat-hf": "llama-2-13b",
+          "meta-llama/Llama-2-13b-hf": "llama-2-13b",
+          "meta-llama/Llama-2-70b-hf": "llama-2-70b",
+          "meta-llama/Llama-2-70b-chat-hf": "llama-2-70b",
+          "meta-llama/Meta-Llama-3-8B": "llama-3-8b",
+          "meta-llama/Meta-Llama-3-8B-Instruct": "llama-3-8b",
+          "meta-llama/Meta-Llama-3-70B": "llama-3-70b",
+          "meta-llama/Meta-Llama-3-70B-Instruct": "llama-3-70b",
+      }.get(model_id)
     assert name
     args = model_args.get_model_args(
         name, env.cache_len, env.batch_size, env.bf16_enable
