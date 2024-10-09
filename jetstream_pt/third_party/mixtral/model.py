@@ -110,48 +110,6 @@ class Transformer(ModuleBase):
       logits = self.output(x)
     return logits
 
-  @staticmethod
-  def get_quantized_linear_weight_to_scaler_map():
-    return {
-        "attention.wq.weight": "attention.wq.weight_scaler",
-        "attention.wk.weight": "attention.wk.weight_scaler",
-        "attention.wv.weight": "attention.wv.weight_scaler",
-        "attention.wo.weight": "attention.wo.weight_scaler",
-        "output.weight": "output.weight_scaler",
-        "block_sparse_moe.gate.weight": "block_sparse_moe.gate.weight_scaler",
-        "block_sparse_moe.cond_ffn.w1": "block_sparse_moe.cond_ffn.w1_scaler",
-        "block_sparse_moe.cond_ffn.w2": "block_sparse_moe.cond_ffn.w2_scaler",
-        "block_sparse_moe.cond_ffn.w3": "block_sparse_moe.cond_ffn.w3_scaler",
-    }
-
-  @staticmethod
-  def get_quantized_embedding_weight_to_scaler_map():
-    return {
-        "tok_embeddings.weight": "tok_embeddings.weight_scaler",
-    }
-
-  @staticmethod
-  def get_weight_sharding_type():
-    # ParallelEmbedding is col partitioned across the shards.
-    # ColumnParallelLinear is row partitioned across shards due to transpose.
-    # RowParallelLinear is col partitioned across shards due to transpose.
-    # None is no partitioning and tensor should be identical across shards
-    return {
-        "tok_embeddings.weight": "ParallelEmbedding",
-        "rope.freqs": None,
-        "attention.wq.weight": "ColumnParallelLinear",
-        "attention.wk.weight": "ColumnParallelLinear",
-        "attention.wv.weight": "ColumnParallelLinear",
-        "attention.wo.weight": "RowParallelLinear",
-        "feed_forward.w1.weight": "ColumnParallelLinear",
-        "feed_forward.w2.weight": "RowParallelLinear",
-        "feed_forward.w3.weight": "ColumnParallelLinear",
-        "attention_norm.weight": None,
-        "ffn_norm.weight": None,
-        "norm.weight": None,
-        "output.weight": "ColumnParallelLinear",
-    }
-
   @classmethod
   def from_hf_model_id(cls, model_id, env, is_tiny=False):
     if is_tiny:
