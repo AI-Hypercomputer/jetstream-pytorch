@@ -290,56 +290,6 @@ class Transformer(ModuleBase):
       output = self.output(h).float()
     return output
 
-  @staticmethod
-  def get_quantized_linear_weight_to_scaler_map():
-    return {
-        "attention.wq.weight": "attention.wq.weight_scaler",
-        "attention.wk.weight": "attention.wk.weight_scaler",
-        "attention.wv.weight": "attention.wv.weight_scaler",
-        "attention.wo.weight": "attention.wo.weight_scaler",
-        "feed_forward.w1.weight": "feed_forward.w1.weight_scaler",
-        "feed_forward.w2.weight": "feed_forward.w2.weight_scaler",
-        "feed_forward.w3.weight": "feed_forward.w3.weight_scaler",
-        "output.weight": "output.weight_scaler",
-    }
-
-  @staticmethod
-  def get_quantized_embedding_weight_to_scaler_map():
-    return {
-        "tok_embeddings.weight": "tok_embeddings.weight_scaler",
-    }
-
-  @staticmethod
-  def get_weight_sharding_type(model_name: str = ""):
-    # ParallelEmbedding is col partitioned across the shards.
-    # VocalParallelEmbedding is row partitioned across the shards.
-    # ColumnParallelLinear is row partitioned across shards due to transpose.
-    # RowParallelLinear is col partitioned across shards due to transpose.
-    # None is no partitioning and tensor should be identical across shards
-    expected_model_names = ("llama-2", "llama-3")
-    assert (
-        model_name in expected_model_names
-    ), f"Expected model_name to one of {expected_model_names}"
-    sharding_dict = {
-        "rope.freqs": None,
-        "attention.wq.weight": "ColumnParallelLinear",
-        "attention.wk.weight": "ColumnParallelLinear",
-        "attention.wv.weight": "ColumnParallelLinear",
-        "attention.wo.weight": "RowParallelLinear",
-        "feed_forward.w1.weight": "ColumnParallelLinear",
-        "feed_forward.w2.weight": "RowParallelLinear",
-        "feed_forward.w3.weight": "ColumnParallelLinear",
-        "attention_norm.weight": None,
-        "ffn_norm.weight": None,
-        "norm.weight": None,
-        "output.weight": "ColumnParallelLinear",
-    }
-    if model_name == "llama-2":
-      sharding_dict["tok_embeddings.weight"] = "ParallelEmbedding"
-    elif model_name == "llama-3":
-      sharding_dict["tok_embeddings.weight"] = "VocabParallelEmbedding"
-    return sharding_dict
-
   @classmethod
   def from_hf_model_id(cls, model_id, env, is_tiny=False):
     if is_tiny:
@@ -364,9 +314,6 @@ class Transformer(ModuleBase):
     args.device = "meta"
     model = cls(args, env)
     return model
-
-  def drop_weight(self, key):
-    return key.startswith("model")
 
   def convert_hf_weights(self, hf_weights):
 
