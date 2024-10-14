@@ -33,7 +33,11 @@ flags.DEFINE_string(
     "",
     "if set, then save the result to the given file name",
 )
-
+flags.DEFINE_bool(
+    "internal_use_local_tokenizer",
+    0,
+    "Use local tokenizer if set to True"
+)
 
 def shard_weights(env, weights, weight_shardings):
   """Shard weights according to weight_shardings"""
@@ -57,8 +61,11 @@ def create_engine(devices):
       FLAGS.max_input_length,
       FLAGS.max_output_length,
   )
-  tokenizer = AutoTokenizer.from_pretrained(FLAGS.model_id)
   env = environment.JetEngineEnvironment(env_data)
+  if FLAGS.internal_use_local_tokenizer:
+    tokenizer = AutoTokenizer.from_pretrained(env_data.checkpoint_path)
+  else:
+    tokenizer = AutoTokenizer.from_pretrained(FLAGS.model_id)
   env.hf_tokenizer = tokenizer
   model = fetch_models.instantiate_model_from_repo_id(FLAGS.model_id, env)
   # NOTE: this is assigned later because, the model should be constructed
