@@ -37,6 +37,7 @@ class QuantizationConfig:
 
   enable_activation_quantization: bool = False
   enable_kv_quantization: bool = False
+  enable_embedding_quantization: bool = True
 
 
 @dataclasses.dataclass
