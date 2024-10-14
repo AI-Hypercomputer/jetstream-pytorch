@@ -1,9 +1,17 @@
 import torch
+from absl import flags
 from .layers import (
     create_quantized_from_nn_linear,
     create_quantized_from_nn_embedding,
     AttentionKernel,
     Int8KVAttentionKernel,
+)
+
+
+_QUANTIZE_EMBEDDING = flags.DEFINE_bool(
+    "internal_quantize_embedding_layer",
+    True,
+    "Whether to quantize embedding layer or not. Defaults to true",
 )
 
 
@@ -17,7 +25,7 @@ def quantize_model(float_model, config):
         new_mod = mod.get_quantized_version()
       elif isinstance(mod, torch.nn.Linear):
         new_mod = create_quantized_from_nn_linear(mod, config)
-      elif isinstance(mod, torch.nn.Embedding):
+      elif isinstance(mod, torch.nn.Embedding) and _QUANTIZE_EMBEDDING.value:
         new_mod = create_quantized_from_nn_embedding(mod, config)
 
       if new_mod:
