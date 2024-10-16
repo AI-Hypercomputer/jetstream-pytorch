@@ -49,6 +49,11 @@ flags.DEFINE_string(
 flags.DEFINE_bool(
     "quantize_kv_cache", None, "defaults to the same value as quantize_weights"
 )
+flags.DEFINE_multi_string(
+    "quantize_exclude_layers",
+    None,
+    "List of layer names to exclude from quantization",
+)
 
 _VALID_QUANTIZATION_TYPE = {
     "int8_per_channel",
@@ -178,6 +183,7 @@ def create_quantization_config_from_flags():
   config.is_blockwise_weight = "blockwise" in quantize_type
 
   config.enable_activation_quantization = FLAGS.quantize_activation
+  config.exclude_layers = FLAGS.quantize_exclude_layers
   config.enable_kv_quantization = (
       FLAGS.quantize_kv_cache
       if FLAGS.quantize_kv_cache is not None
