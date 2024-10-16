@@ -50,7 +50,7 @@ flags.DEFINE_bool(
     "quantize_kv_cache", None, "defaults to the same value as quantize_weights"
 )
 flags.DEFINE_bool(
-    "internal_quantize_embedding_layer",
+    "quantize_embedding_layer",
     True,
     "Whether to quantize embedding layer or not. Defaults to true",
 )
@@ -184,7 +184,7 @@ def create_quantization_config_from_flags():
   config.is_blockwise_weight = "blockwise" in quantize_type
 
   config.enable_activation_quantization = FLAGS.quantize_activation
-  config.enable_embedding_quantization = FLAGS.internal_quantize_embedding_layer
+  config.enable_embedding_quantization = FLAGS.quantize_embedding_layer
   config.enable_kv_quantization = (
       FLAGS.quantize_kv_cache
       if FLAGS.quantize_kv_cache is not None
