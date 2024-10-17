@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import dataclasses
-from typing import Tuple
+from typing import List, Tuple, Union
 
 import jax
 import jax.numpy as jnp
@@ -37,6 +37,7 @@ class QuantizationConfig:
 
   enable_activation_quantization: bool = False
   enable_kv_quantization: bool = False
+  exclude_layers: Union[None, List[str]] = None
 
 
 @dataclasses.dataclass

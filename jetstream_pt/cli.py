@@ -34,10 +34,9 @@ flags.DEFINE_string(
     "if set, then save the result to the given file name",
 )
 flags.DEFINE_bool(
-    "internal_use_local_tokenizer",
-    0,
-    "Use local tokenizer if set to True"
+    "internal_use_local_tokenizer", 0, "Use local tokenizer if set to True"
 )
+
 
 def shard_weights(env, weights, weight_shardings):
   """Shard weights according to weight_shardings"""
