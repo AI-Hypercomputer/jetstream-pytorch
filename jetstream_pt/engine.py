@@ -103,9 +103,7 @@ class PyTorchEngine(engine_api.Engine):
     self.pt_model = pt_model
     self.env = env
     self.default_dtype = jnp.bfloat16 if env.bf16_enable else jnp.float32
-    self.rng = jax.random.key(0).reshape(
-        1,
-    )
+    self.rng = jax.random.key(0)
     # For sampling
     self.splited_rngs = jax.random.split(self.rng, num=self.env.batch_size)
     self.weights = weights
@@ -467,6 +465,9 @@ class PyTorchEngine(engine_api.Engine):
 
       # Prefill only handle batch size of 1, therefore no need to use splitted rngs
       sampling = self._custom_sampling
+      rng = self.rng.reshape(
+          1,
+      )
     else:
       algorithm, temperature, topk, nucleus_topp = (
           self.env.sampling_algorithm,
@@ -475,11 +476,12 @@ class PyTorchEngine(engine_api.Engine):
           self.env.nucleus_topp,
       )
       sampling = self._sampling
+      rng = self.rng
 
     token = sampling(
         logits=logits,
         algorithm=algorithm,
-        rng=self.rng,
+        rng=rng,
         temperature=temperature,
         topk=topk,
         nucleus_topp=nucleus_topp,
