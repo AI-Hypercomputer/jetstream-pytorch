@@ -24,7 +24,8 @@ from jetstream_pt.engine import DecodeState
 from jetstream_pt.engine import Prefix
 from tests import helpers
 from jetstream_pt import cache_manager
-
+# from jetstream_pt.engine import BaseSampler, GreedySampler, WeightedSampler, TopkSampler, NucleusSampler
+from jetstream.core.utils.sampling_util import BaseSampler, GreedySampler, WeightedSampler, TopkSampler, NucleusSampler
 
 class MockEngine(PyTorchEngine):
 
@@ -198,17 +199,15 @@ class EngineTest(unittest.TestCase):
     self.assertTrue(jnp.array_equal(token, jnp.array([[3], [1]])))
     self.assertTrue(jnp.isdtype(token, jnp.int32))
 
+
   def test_custom_sampling_3D(self):
     engine = self.setup(batch_size=2)
-    engine.rng = jax.random.key(3)
-    engine.splited_rngs = jax.random.split(
-        engine.rng, num=engine.env.batch_size
-    )
+    rng = jax.random.key(3)
+
     engine.env.sampling_algorithm = ""
 
     # Need a different engine of batch size of 1 to reshape the output
-    engine_b1 = self.setup()
-    engine_b1.rng = jax.random.key(3)
+    rng_b1 = jax.random.key(3)
     logits = jnp.array(
         [
             [[0.4, 0.3, 0.2, 0.1], [0.5, 0.6, 0.7, 0.8]],
@@ -217,21 +216,17 @@ class EngineTest(unittest.TestCase):
     )
 
     # test greedy
-    token = engine._custom_sampling(
-        logits,
-        jnp.array([0, 0]),
-        engine.splited_rngs,
-        temperature=jnp.array([[0.0], [0.0]]),
-        topk=jnp.array([[0], [0]]),
-        nucleus_topp=jnp.array([[0.0], [0.0]]),
-    )
+    sampler = GreedySampler()
+    samplers = [sampler, sampler]
+    token = engine._custom_sampling( logits, samplers)
+
     original_tokens = []
     for i in range(2):
-      original_token = engine_b1._sampling(
+      original_token = engine._sampling(
           logits[i],
           "greedy",
-          engine.splited_rngs[i],
-          temperature=1.0,
+          rng=rng,
+          temperature=0.0,
           topk=0,
           nucleus_topp=0.0,
       )
@@ -244,21 +239,18 @@ class EngineTest(unittest.TestCase):
     self.assertTrue(jnp.isdtype(token, jnp.int32))
 
     # test weighted
-    engine.env.sampling_algorithm = "weighted"
-    token = engine._custom_sampling(
-        logits,
-        jnp.array([1, 1]),
-        engine.splited_rngs,
-        temperature=jnp.array([1, 1]),
-        topk=jnp.array([0, 0]),
-        nucleus_topp=jnp.array([0.0, 0.0]),
-    )
+    sampler1 = WeightedSampler(rng=rng, temperature=1.0)
+    sampler2 = WeightedSampler(rng=rng, temperature=1.0)
+    samplers = [sampler1, sampler2]
+    token = engine._custom_sampling(logits, samplers)
+
     original_tokens = []
     for i in range(2):
-      original_token = engine_b1._sampling(
+      rng_b1, sub_rng = jax.random.split(rng_b1)
+      original_token = engine._sampling(
           logits[i],
           "weighted",
-          engine.splited_rngs[i],
+          rng,
           temperature=1,
           topk=0,
           nucleus_topp=0.0,
@@ -268,25 +260,23 @@ class EngineTest(unittest.TestCase):
 
     print(f"custom sampling token {token} vs original tokens {original_tokens}")
     self.assertTrue(jnp.array_equal(token, original_tokens))
-    self.assertTrue(jnp.array_equal(token, jnp.array([[3], [2]])))
+    self.assertTrue(jnp.array_equal(token, jnp.array([[2], [2]])))
     self.assertTrue(jnp.isdtype(token, jnp.int32))
 
-    # test topk
-    engine.env.sampling_algorithm = "topk"
-    token = engine._custom_sampling(
-        logits,
-        jnp.array([3, 3]),
-        engine.splited_rngs,
-        temperature=jnp.array([[1.0], [1.0]]),
-        topk=jnp.array([[3], [3]]),
-        nucleus_topp=jnp.array([[0.0], [0.0]]),
-    )
+    # # test topk
+    sampler1 = TopkSampler(rng=rng, temperature=1.0, topk=3)
+    sampler2 = TopkSampler(rng=rng, temperature=1.0, topk=3)
+    samplers = [sampler1, sampler2]
+    token = engine._custom_sampling(logits, samplers)
+
     original_tokens = []
     for i in range(2):
-      original_token = engine_b1._sampling(
+    #   rng_b1, sub_rng = jax.random.split(rng_b1)
+      sub_rng = rng
+      original_token = engine._sampling(
           logits[i],
           "topk",
-          engine.splited_rngs[i],
+          rng=sub_rng,
           temperature=1.0,
           topk=3,
           nucleus_topp=0.0,
@@ -300,22 +290,17 @@ class EngineTest(unittest.TestCase):
     self.assertTrue(jnp.isdtype(token, jnp.int32))
 
     # test nucleus
-    engine.env.sampling_algorithm = "nucleus"
-    token = engine._custom_sampling(
-        logits,
-        jnp.array([2, 2]),
-        engine.splited_rngs,
-        temperature=jnp.array([[1.0], [1.0]]),
-        topk=jnp.array([[0], [0]]),
-        nucleus_topp=jnp.array([[0.8], [0.8]]),
-    )
+    sampler1 = NucleusSampler(rng=rng, temperature=1.0, nucleus_topp=0.8)
+    sampler2 = NucleusSampler(rng=rng, temperature=1.0, nucleus_topp=0.8)
+    samplers = [sampler1, sampler2]
+    token = engine._custom_sampling(logits, samplers)
 
     original_tokens = []
     for i in range(2):
-      original_token = engine_b1._sampling(
+      original_token = engine._sampling(
           logits[i],
           "nucleus",
-          engine.splited_rngs[i],
+          rng,
           temperature=1.0,
           topk=0,
           nucleus_topp=0.8,
@@ -324,38 +309,34 @@ class EngineTest(unittest.TestCase):
     original_tokens = jnp.concatenate(original_tokens)
     print(f"custom sampling token {token} vs original tokens {original_tokens}")
     self.assertTrue(jnp.array_equal(token, original_tokens))
-    self.assertTrue(jnp.array_equal(token, jnp.array([[3], [2]])))
+    self.assertTrue(jnp.array_equal(token, jnp.array([[2], [2]])))
     self.assertTrue(jnp.isdtype(token, jnp.int32))
 
-    # test greedy + topk
-    token = engine._custom_sampling(
-        logits,
-        jnp.array([0, 3]),
-        engine.splited_rngs,
-        temperature=jnp.array([[0.0], [1.0]]),
-        topk=jnp.array([[0], [3]]),
-        nucleus_topp=jnp.array([[0.0], [0.0]]),
-    )
-    original_tokens = []
+    # # test topk + greedy
+    sampler1 = TopkSampler(rng=rng, temperature=1.0, topk=3)
+    sampler2 = GreedySampler()
+    samplers = [sampler1, sampler2]
+    token = engine._custom_sampling(logits, samplers)
 
+    original_tokens = []
     i = 0
-    original_token = engine_b1._sampling(
+    original_token = engine._sampling(
         logits[i],
-        "greedy",
-        engine.splited_rngs[i],
-        temperature=0.0,
-        topk=0,
+        "topk",
+        rng,
+        temperature=1.0,
+        topk=3,
         nucleus_topp=0.8,
     )
     original_tokens.append(original_token)
 
     i = 1
-    original_token = engine_b1._sampling(
+    original_token = engine._sampling(
         logits[i],
-        "topk",
-        engine.splited_rngs[i],
-        temperature=1.0,
-        topk=3,
+        "greedy",
+        rng,
+        temperature=0.0,
+        topk=0,
         nucleus_topp=0.0,
     )
     original_tokens.append(original_token)
@@ -364,11 +345,14 @@ class EngineTest(unittest.TestCase):
 
     print(f"custom sampling token {token} vs original tokens {original_tokens}")
     self.assertTrue(jnp.array_equal(token, original_tokens))
-    self.assertTrue(jnp.array_equal(token, jnp.array([[3], [2]])))
+    self.assertTrue(jnp.array_equal(token, jnp.array([[1], [0]])))
     self.assertTrue(jnp.isdtype(token, jnp.int32))
 
+  # test Prefill
   def test_prefill_with_custom_sampling(self):
     engine = self.setup()
+    engine.rng = jax.random.key(3)
+
     engine.env.sampling_algorithm = ""
 
     # Inputs doesn't matter
@@ -377,8 +361,7 @@ class EngineTest(unittest.TestCase):
     true_length = 1
 
     # Greedy
-    # algorithm, temperature, topk, nucleus_topp
-    sampler = [0, 1.0, 3, 0.8]
+    sampler = GreedySampler()
     prefix, _ = engine.prefill(
         params=params,
         padded_tokens=padded_tokens,
@@ -390,15 +373,8 @@ class EngineTest(unittest.TestCase):
     self.assertTrue(jnp.array_equal(token, jnp.array([[3]])))
     self.assertTrue(jnp.isdtype(token, jnp.int32))
 
-    print(
-        f"prefix sampler config {prefix.sampler_config} vs sampler {jnp.array(sampler)}"
-    )
-    self.assertAlmostEqual(
-        prefix.sampler_config.all(), jnp.array(sampler).all()
-    )
-
     # Weighted
-    sampler = [1, 10.0, 3, 0.8]
+    sampler = WeightedSampler(rng=engine.rng, temperature=1.0)
     prefix, _ = engine.prefill(
         params=params,
         padded_tokens=padded_tokens,
@@ -407,30 +383,11 @@ class EngineTest(unittest.TestCase):
     )
     token = prefix.token
     print(f"Weighted output: {token}")
-    self.assertTrue(jnp.array_equal(token, jnp.array([[0]])))
+    self.assertTrue(jnp.array_equal(token, jnp.array([[2]])))
     self.assertTrue(jnp.isdtype(token, jnp.int32))
-    self.assertAlmostEqual(
-        prefix.sampler_config.all(), jnp.array(sampler).all()
-    )
 
     # Nucleus
-    sampler = [2, 1.0, 3, 0.0]
-    prefix, _ = engine.prefill(
-        params=params,
-        padded_tokens=padded_tokens,
-        true_length=true_length,
-        sampler=sampler,
-    )
-    token = prefix.token
-    print(f"Topk output: {token}")
-    self.assertTrue(jnp.array_equal(token, jnp.array([[3]])))
-    self.assertTrue(jnp.isdtype(token, jnp.int32))
-    self.assertAlmostEqual(
-        prefix.sampler_config.all(), jnp.array(sampler).all()
-    )
-
-    # Topk
-    sampler = [3, 1.0, 3, 0.8]
+    sampler = NucleusSampler(rng=engine.rng, temperature=1.0, nucleus_topp=0.8)
     prefix, _ = engine.prefill(
         params=params,
         padded_tokens=padded_tokens,
@@ -439,20 +396,29 @@ class EngineTest(unittest.TestCase):
     )
     token = prefix.token
     print(f"Nucleus output: {token}")
-    self.assertTrue(jnp.array_equal(token, jnp.array([[3]])))
+    self.assertTrue(jnp.array_equal(token, jnp.array([[2]])))
     self.assertTrue(jnp.isdtype(token, jnp.int32))
-    self.assertAlmostEqual(
-        prefix.sampler_config.all(), jnp.array(sampler).all()
+
+    # Topk
+    sampler = TopkSampler(rng=engine.rng, temperature=1.0, topk=3)
+
+    prefix, _ = engine.prefill(
+        params=params,
+        padded_tokens=padded_tokens,
+        true_length=true_length,
+        sampler=sampler,
     )
+    token = prefix.token
+    print(f"Topk output: {token}")
+    self.assertTrue(jnp.array_equal(token, jnp.array([[1]])))
+    self.assertTrue(jnp.isdtype(token, jnp.int32))
+
 
   def test_insert_no_wrap_with_custom_sampling(self):
     engine = self.setup()
     engine.env.sampling_algorithm = ""
     engine.env.batch_size = 2
     cache_shape = engine.env.cache_shape
-
-    sampler_config_raw = [0, 1.0, 3, 0.8]
-    sampler_config = jnp.array(sampler_config_raw)
 
     prefill_cache_shape = (1, cache_shape[1], 16, cache_shape[3])
     prefill_cache = []
@@ -464,11 +430,12 @@ class EngineTest(unittest.TestCase):
           )
       )
 
+    sampler = GreedySampler()
     prefix = Prefix(
         token=jnp.ones((1)),
         caches=prefill_cache,
         seq_len=16,
-        sampler_config=sampler_config,
+        sampler=sampler,
     )
 
     doesnt_matter = jnp.array([0])
@@ -484,7 +451,7 @@ class EngineTest(unittest.TestCase):
         start=jnp.zeros((engine.env.batch_size, 1)),
         input_pos=jnp.zeros((engine.env.batch_size,)),
         mask=jnp.zeros((engine.env.batch_size, 128)),
-        sampler_config=jnp.zeros((engine.env.batch_size, 4)),
+        samplers = [BaseSampler()] * engine.env.batch_size
     )
 
     # Insert to slot 1
@@ -493,17 +460,11 @@ class EngineTest(unittest.TestCase):
     self.assertAlmostEqual(
         result_decode_state.tokens.all(), decode_state.tokens.all()
     )
-    self.assertAlmostEqual(
-        result_decode_state.sampler_config.all(),
-        jnp.array([[0, 0, 0, 0], sampler_config_raw]).all(),
-    )
+    self.assertEqual(result_decode_state.samplers[1], prefix.sampler)
 
-  def test_decode_with_custom_sampling(self):
+  def test_generate_with_custom_sampling(self):
     engine = self.setup(batch_size=2)
     engine.rng = jax.random.key(3)
-    engine.splited_rngs = jax.random.split(
-        engine.rng, num=engine.env.batch_size
-    )
     engine.env.sampling_algorithm = ""
 
     # Inputs doesn't matter
@@ -519,7 +480,7 @@ class EngineTest(unittest.TestCase):
         start=doesnt_matter,
         input_pos=jnp.zeros((engine.env.batch_size,)),
         mask=jnp.zeros((engine.env.batch_size, 1)),
-        sampler_config=jnp.array([[0, 0.0, 0, 0.0], [3, 1.0, 3, 0.0]]),
+        samplers = [GreedySampler(), WeightedSampler(rng=engine.rng, temperature=1.0)],
     )
 
     # Topk + Weighted
@@ -528,7 +489,7 @@ class EngineTest(unittest.TestCase):
         params=params, decode_state=decode_state
     )
     token = decode_state.tokens
-    print(f"Greedy output: {token}")
+    print(f"Topk + Weighted output: {token}")
     self.assertTrue(jnp.array_equal(token, jnp.array([[3], [2]])))
     self.assertTrue(jnp.isdtype(token, jnp.int32))
 

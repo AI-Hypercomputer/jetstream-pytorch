@@ -44,6 +44,7 @@ from jetstream_pt.third_party.gemma import config as gemma_config, model as gemm
 from jetstream_pt.third_party.mixtral import config as mixtral_config, model as mixtral_model
 
 from absl import flags
+from collections.abc import Callable
 
 FLAGS = flags.FLAGS
 
@@ -53,7 +54,29 @@ P = jax.sharding.PartitionSpec
 Params = jax.Array
 PrefillInputs = jax.Array
 
-NEG_INF = -1.0e7  # Sampling masking
+
+class DefaultSampler:
+    def __init__(self, rng, temperature, topk, nucleus_topp, algorithm):
+        self.rng = rng
+        self.temperature = temperature
+        self.topk = topk
+        self.nucleus_topp = nucleus_topp
+        self.algorithm = algorithm
+
+    def __call__(self, logits):
+      return PyTorchEngine._sampling(logits, self.algorithm, self.rng, self.temperature, self.topk, self.nucleus_topp)
+
+    # Define how to flatten the instance into leaves and auxiliary data
+    def tree_flatten(self):
+        children = (self.rng, self.temperature, self.topk, self.nucleus_topp, self.algorithm)  # Leaves to be flattened
+        aux_data = ()  # Auxiliary data that does not need to be traced
+        return children, aux_data
+
+    # Define how to unflatten from leaves and auxiliary data
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        rng, temperature, topk, nucleus_topp, algorithm = children
+        return cls(rng, temperature, topk, nucleus_topp, algorithm)
 
 
 @struct.dataclass
@@ -62,7 +85,7 @@ class Prefix:
   token: jax.Array  # [1, seqlen]
   caches: List[Tuple[jax.Array, jax.Array]]
   seq_len: int  # true seqlen front pad
-  sampler_config: jax.Array  # Sampler or sampling config, []
+  sampler: List[Any] | int  # User defined Sampler
 
 
 @struct.dataclass
@@ -84,7 +107,8 @@ class DecodeState:
   # If sampling_algorithm set to empty, the shape is [batch_size, 1]
   # Otherwise it's a list of intergers
   # The last dimension contains [algorithm, temperature, topk, nucleus]
-  sampler_config: jax.Array | List[int]
+  # sampler_config: jax.Array | List[int]
+  samplers: jax.Array
 
 
 # NOTE model specific
@@ -104,8 +128,7 @@ class PyTorchEngine(engine_api.Engine):
     self.env = env
     self.default_dtype = jnp.bfloat16 if env.bf16_enable else jnp.float32
     self.rng = jax.random.key(0)
-    # For sampling
-    self.splited_rngs = jax.random.split(self.rng, num=self.env.batch_size)
+
     self.weights = weights
 
     self.y_sharding = env.sharding_by_axis(1)
@@ -117,10 +140,10 @@ class PyTorchEngine(engine_api.Engine):
     jax.config.update("jax_enable_x64", False)
 
     self.prefill_cache_sharding = self.env.prefill_cache_sharding
-    self.prefill = jax.jit(
-        self.prefill,
-        out_shardings=(self.get_prefix_destination_sharding(), None),
-    )
+    # self.prefill = jax.jit(
+    #     self.prefill,
+    #     out_shardings=(self.get_prefix_destination_sharding(), None),
+    # )
     self.insert = jax.jit(
         self.insert,
         donate_argnums=(0, 1),
@@ -183,16 +206,17 @@ class PyTorchEngine(engine_api.Engine):
 
     if self.env.sampling_algorithm == "":
       # [algorithm, temperature, topk, nucleus]
-      sampler_config = [0, 0.0, 0, 0.0]
-      sampler_config = jnp.tile(sampler_config, (self.env.batch_size, 1))
-
+      # sampler_config = [0, 0.0, 0, 0.0]
+      # sampler_config = jnp.tile(sampler_config, (self.env.batch_size, 1))
+      samplers = []
     else:
-      sampler_config = [
-          self.env.sampling_algorithm,
-          self.env.temperature,
-          self.env.topk,
-          self.env.nucleus_topp,
-      ]
+      # sampler_config = [
+      #     self.env.sampling_algorithm,
+      #     self.env.temperature,
+      #     self.env.topk,
+      #     self.env.nucleus_topp,
+      # ]
+      samplers = DefaultSampler(self.rng, self.env.temperature, self.env.topk, self.env.nucleus_topp, self.env.algorithm)
 
     return DecodeState(
         jnp.zeros((self.env.batch_size, 1), dtype=jnp.int32),
@@ -307,119 +331,133 @@ class PyTorchEngine(engine_api.Engine):
     caches_res = [c.state() for c in caches]
     return torchjax.from_torch((res, caches_res))
 
-  def _greedy_sampling(self, logits):
-    return jnp.argmax(logits, axis=-1)
+  # def _greedy_sampling(self, logits):
+  #   return jnp.argmax(logits, axis=-1)
 
-  def _weighted_sampling(self, logits, rng, temperature):
-    return jax.random.categorical(rng, logits / temperature)
+  # def _weighted_sampling(self, logits, rng, temperature):
+  #   return jax.random.categorical(rng, logits / temperature)
 
-  def _nucleus_sampling(self, logits, rng, temperature, nucleus_topp):
-    # return sampling_utils.sample_nucleus_topp_logits(logits, nucleus_topp, temperature, rng)
-    """Restrict sampling to the top logits with cumulative probability >=
-    nucleus_topp.
+  # def _nucleus_sampling(self, logits, rng, temperature, nucleus_topp):
+  #   # return sampling_utils.sample_nucleus_topp_logits(logits, nucleus_topp, temperature, rng)
+  #   """Restrict sampling to the top logits with cumulative probability >=
+  #   nucleus_topp.
 
-    The nucleus sampling method is proposed in the paper `The Curious Case of
-    Neural Text Degeneration (https://arxiv.org/pdf/1904.09751.pdf)`
+  #   The nucleus sampling method is proposed in the paper `The Curious Case of
+  #   Neural Text Degeneration (https://arxiv.org/pdf/1904.09751.pdf)`
 
-    """
-    # if nucleus_topp < 0:
-    #   raise ValueError(
-    #       "Can't apply nucleus with parameter {nucleus_topp=} less zero"
-    #   )
-    logits_sorted = jnp.sort(logits, axis=-1)[..., ::-1]  # sort descending
-    sorted_cum_probs = jnp.cumsum(
-        jax.nn.softmax(logits_sorted, axis=-1), axis=-1
-    )  # get cumsum probs
-    cutoff_index = jnp.sum(
-        sorted_cum_probs < nucleus_topp, axis=-1, keepdims=True
-    )  # find cutoff index
-    cutoff_logit = jnp.take_along_axis(logits_sorted, cutoff_index, axis=-1)
-    logits = jnp.where(
-        logits < cutoff_logit, jnp.full_like(logits, NEG_INF), logits
-    )
-    result = jax.random.categorical(rng, logits / temperature)
-    return result
+  #   """
+  #   # if nucleus_topp < 0:
+  #   #   raise ValueError(
+  #   #       "Can't apply nucleus with parameter {nucleus_topp=} less zero"
+  #   #   )
+  #   logits_sorted = jnp.sort(logits, axis=-1)[..., ::-1]  # sort descending
+  #   sorted_cum_probs = jnp.cumsum(
+  #       jax.nn.softmax(logits_sorted, axis=-1), axis=-1
+  #   )  # get cumsum probs
+  #   cutoff_index = jnp.sum(
+  #       sorted_cum_probs < nucleus_topp, axis=-1, keepdims=True
+  #   )  # find cutoff index
+  #   cutoff_logit = jnp.take_along_axis(logits_sorted, cutoff_index, axis=-1)
+  #   logits = jnp.where(
+  #       logits < cutoff_logit, jnp.full_like(logits, NEG_INF), logits
+  #   )
+  #   result = jax.random.categorical(rng, logits / temperature)
+  #   return result
 
-  def _topk_sampling(self, logits, rng, temperature, topk):
-    # return sampling_utils.sample_topk_logits(logits, topk, temperature, rng)
-    """Restricting sampling to the best k logits."""
-    # if topk <= 0:
-    #   raise ValueError("Can't apply algorithm topk with parameter {topk=} <= 0")
-    sorted_indices = jnp.argsort(logits)[::-1]  # Sort in descending order
-    topk_mask = jnp.arange(sorted_indices.shape[-1]) < topk
-    topk_idxs = jnp.where(topk_mask, sorted_indices, -1)
+  # def _topk_sampling(self, logits, rng, temperature, topk):
+  #   # return sampling_utils.sample_topk_logits(logits, topk, temperature, rng)
+  #   """Restricting sampling to the best k logits."""
+  #   # if topk <= 0:
+  #   #   raise ValueError("Can't apply algorithm topk with parameter {topk=} <= 0")
+  #   sorted_indices = jnp.argsort(logits)[::-1]  # Sort in descending order
+  #   topk_mask = jnp.arange(sorted_indices.shape[-1]) < topk
+  #   topk_idxs = jnp.where(topk_mask, sorted_indices, -1)
 
-    topk_logits = jnp.where(topk_idxs == -1, -jnp.inf, logits)
+  #   topk_logits = jnp.where(topk_idxs == -1, -jnp.inf, logits)
 
-    sampled_idx = jnp.expand_dims(
-        jax.random.categorical(rng, topk_logits / temperature).astype(
-            jnp.int32
-        ),
-        axis=-1,
-    )
-    sampled_tokens = jnp.squeeze(
-        jnp.take_along_axis(topk_idxs, sampled_idx, axis=-1), axis=-1
-    ).astype(jnp.int32)
+  #   sampled_idx = jnp.expand_dims(
+  #       jax.random.categorical(rng, topk_logits / temperature).astype(
+  #           jnp.int32
+  #       ),
+  #       axis=-1,
+  #   )
+  #   sampled_tokens = jnp.squeeze(
+  #       jnp.take_along_axis(topk_idxs, sampled_idx, axis=-1), axis=-1
+  #   ).astype(jnp.int32)
 
-    return sampled_tokens
+  #   return sampled_tokens
 
   # Algorithm type:
   # 0: Greedy 1: Weighted 2: Nucleus 3: Top-k
-  def _apply_sampling(
-      self, logits, algorithm, rng, temperature, topk, nucleus_topp
-  ) -> jnp.ndarray:
-    return jax.lax.cond(
-        algorithm == 0,
-        lambda: self._greedy_sampling(logits),  # Greedy
-        lambda: jax.lax.cond(
-            algorithm == 1,
-            lambda: self._weighted_sampling(
-                logits, rng, temperature
-            ),  # Weighted
-            lambda: jax.lax.cond(
-                algorithm == 2,
-                lambda: self._nucleus_sampling(
-                    logits, rng, temperature, nucleus_topp
-                ),  # Nucleus sampling
-                lambda: self._topk_sampling(
-                    logits, rng, temperature, topk
-                ),  # Top-k sampling
-            ),
-        ),
-    )
+  # def _apply_sampling(
+  #     self, logits, algorithm, rng, temperature, topk, nucleus_topp
+  # ) -> jnp.ndarray:
+  #   return jax.lax.cond(
+  #       algorithm == 0,
+  #       lambda: self._greedy_sampling(logits),  # Greedy
+  #       lambda: jax.lax.cond(
+  #           algorithm == 1,
+  #           lambda: self._weighted_sampling(
+  #               logits, rng, temperature
+  #           ),  # Weighted
+  #           lambda: jax.lax.cond(
+  #               algorithm == 2,
+  #               lambda: self._nucleus_sampling(
+  #                   logits, rng, temperature, nucleus_topp
+  #               ),  # Nucleus sampling
+  #               lambda: self._topk_sampling(
+  #                   logits, rng, temperature, topk
+  #               ),  # Top-k sampling
+  #           ),
+  #       ),
+  #   )
 
   def _custom_sampling(
-      self, logits, algorithm, rng, temperature, topk, nucleus_topp
+      self, logits, samplers
   ) -> jnp.ndarray:
     if len(logits.shape) == 2:
       logits = jnp.expand_dims(logits, 0)
+
     logits = logits[:, -1]
-    apply_sampling_v = jax.vmap(
-        lambda _logits, _algorithm, _rngs, _temperature, _topk, _nucleus_topp: self._apply_sampling(
-            _logits, _algorithm, _rngs, _temperature, _topk, _nucleus_topp
-        ),
-        in_axes=(0, 0, 0, 0, 0, 0),
-    )
-    apply_sampling_v = jax.jit(apply_sampling_v)
-    return apply_sampling_v(
-        logits, algorithm, rng, temperature, topk, nucleus_topp
-    ).reshape(self.env.batch_size, -1)
+
+    # Prefill and Generate have different batch size
+    current_batch_size = logits.shape[0]
+
+    idx = jnp.arange(current_batch_size)
+    apply_sampler = lambda i, l: jax.lax.switch(i, samplers, l)
+    apply_vmap = jax.vmap(apply_sampler, in_axes=(0, 0))
+    return apply_vmap(idx, logits).reshape(current_batch_size, -1)
+
+    # apply_sampling_v = jax.vmap(
+    #     lambda _logits, _algorithm, _rngs, _temperature, _topk, _nucleus_topp: self._apply_sampling(
+    #         _logits, _algorithm, _rngs, _temperature, _topk, _nucleus_topp
+    #     ),
+    #     in_axes=(0, 0, 0, 0, 0, 0),
+    # )
+    # apply_sampling_v = jax.jit(apply_sampling_v)
+    # return apply_sampling_v(
+    #     logits, algorithm, rng, temperature, topk, nucleus_topp
+    # ).reshape(self.env.batch_size, -1)
 
   def _sampling(
       self, logits: Any, algorithm, rng, temperature, topk, nucleus_topp
   ) -> jnp.ndarray:
     if len(logits.shape) == 2:
       logits = jnp.expand_dims(logits, 0)
+
+    logits = logits[:, -1]
+    current_batch_size = logits.shape[0]
+
     return (
         sampling_utils.sampling(
-            logits[:, -1],
-            rng,
-            algorithm,
-            topk,
-            nucleus_topp,
-            temperature,
+            logits=logits,
+            rng=rng,
+            algorithm=algorithm,
+            topk=topk,
+            nucleus_topp=nucleus_topp,
+            temperature=temperature,
         )
-        .reshape(self.env.batch_size, -1)
+        .reshape(current_batch_size, -1)
         .astype(jnp.int32)
     )
 
@@ -449,25 +487,30 @@ class PyTorchEngine(engine_api.Engine):
     if len(logits.shape) == 3:  # b, seqlen, num words
       logits = logits[0]  # seqlen, num words
 
+    prefill_batch_size = logits.shape[0]
     if self.env.sampling_algorithm == "":
-      assert (
-          isinstance(sampler, List)
-          or isinstance(sampler, list)
-          or isinstance(sampler, Tuple)
-          or isinstance(sampler, tuple)
-      ), f"{type(sampler)} is not valid"
-      algorithm, temperature, topk, nucleus_topp = sampler
+      # assert (
+      #     isinstance(sampler, List)
+      #     or isinstance(sampler, list)
+      #     or isinstance(sampler, Tuple)
+      #     or isinstance(sampler, tuple)
+      # ), f"{type(sampler)} is not valid"
+      # algorithm, temperature, topk, nucleus_topp = sampler
 
-      algorithm = jnp.array([algorithm])
-      temperature = jnp.array([temperature])
-      topk = jnp.array([topk])
-      nucleus_topp = jnp.array([nucleus_topp])
+      # algorithm = jnp.array([algorithm])
+      # temperature = jnp.array([temperature])
+      # topk = jnp.array([topk])
+      # nucleus_topp = jnp.array([nucleus_topp])
 
       # Prefill only handle batch size of 1, therefore no need to use splitted rngs
-      sampling = self._custom_sampling
-      rng = self.rng.reshape(
-          1,
-      )
+      token = self._custom_sampling(logits, [sampler])
+
+      # if len(logits.shape) == 2:
+      #   logits = jnp.expand_dims(logits, 0)
+
+      # logits = logits[:, -1]
+      # token = sampler(logits)
+
     else:
       algorithm, temperature, topk, nucleus_topp = (
           self.env.sampling_algorithm,
@@ -475,19 +518,15 @@ class PyTorchEngine(engine_api.Engine):
           self.env.topk,
           self.env.nucleus_topp,
       )
-      sampling = self._sampling
-      rng = self.rng
+      sampling = lambda logits: self._sampling(logits, algorithm, jax.random.key(0), temperature, topk, nucleus_topp)
+      # No need to store the sampler if using default
+      sampler = 0
 
-    token = sampling(
-        logits=logits,
-        algorithm=algorithm,
-        rng=rng,
-        temperature=temperature,
-        topk=topk,
-        nucleus_topp=nucleus_topp,
-    )
+    # token = sampling(
+    #     logits=logits
+    # ).reshape(prefill_batch_size, 1)
+    token_out = token.reshape(prefill_batch_size, 1)
 
-    token_out = jnp.reshape(token, (1, 1))
     data = jnp.concatenate(
         [
             token_out,  # First token
@@ -513,7 +552,7 @@ class PyTorchEngine(engine_api.Engine):
     #   for k, v in updated_caches
     # ]
     return (
-        Prefix(token, updated_caches, true_length, jnp.array(sampler)),
+        Prefix(token_out, updated_caches, true_length, sampler),
         result,
     )
 
@@ -636,16 +675,10 @@ class PyTorchEngine(engine_api.Engine):
     lens = decode_state.lens.at[slot].set(1)
 
     if self.env.sampling_algorithm == "":
-      sampler_config = decode_state.sampler_config.at[slot].set(
-          prefix.sampler_config
-      )
-    else:
-      sampler_config = [
-          self.env.sampling_algorithm,
-          self.env.temperature,
-          self.env.topk,
-          self.env.nucleus_topp,
-      ]
+      # sampler_config = decode_state.sampler_config.at[slot].set(
+      #     prefix.sampler_config
+      # )
+      decode_state.samplers[slot] = prefix.sampler
 
     return DecodeState(
         tokens,
@@ -656,7 +689,7 @@ class PyTorchEngine(engine_api.Engine):
         start,
         input_pos,
         mask,
-        sampler_config,
+        decode_state.samplers,
     )
 
   # pylint: disable-next=all
@@ -743,16 +776,7 @@ class PyTorchEngine(engine_api.Engine):
     lens = decode_state.lens.at[slot].set(1)
 
     if self.env.sampling_algorithm == "":
-      sampler_config = decode_state.sampler_config.at[slot].set(
-          prefix.sampler_config
-      )
-    else:
-      sampler_config = [
-          self.env.sampling_algorithm,
-          self.env.temperature,
-          self.env.topk,
-          self.env.nucleus_topp,
-      ]
+      decode_state.samplers[slot] = prefix.sampler
 
     return DecodeState(
         tokens,
@@ -763,7 +787,7 @@ class PyTorchEngine(engine_api.Engine):
         start,
         input_pos,
         mask,
-        sampler_config,
+        decode_state.samplers,
     )
 
   def _insert_page_attention(
@@ -801,16 +825,7 @@ class PyTorchEngine(engine_api.Engine):
     lens = decode_state.lens.at[slot].set(1)
 
     if self.env.sampling_algorithm == "":
-      sampler_config = decode_state.sampler_config.at[slot].set(
-          prefix.sampler_config
-      )
-    else:
-      sampler_config = [
-          self.env.sampling_algorithm,
-          self.env.temperature,
-          self.env.topk,
-          self.env.nucleus_topp,
-      ]
+      decode_state.samplers[slot] = prefix.sampler
 
     return DecodeState(
         tokens,
@@ -821,7 +836,7 @@ class PyTorchEngine(engine_api.Engine):
         start,
         input_pos,
         mask,
-        sampler_config,
+        decode_state.samplers,
     )
 
   def insert(
@@ -1005,20 +1020,9 @@ class PyTorchEngine(engine_api.Engine):
       mask = update_mask()
 
     if self.env.sampling_algorithm == "":
-      sampling = self._custom_sampling
-      rng = self.splited_rngs
+      next_token = self._custom_sampling(logits, decode_state.samplers)
     else:
-      sampling = self._sampling
-      rng = self.rng
-
-    next_token = sampling(
-        logits=logits,
-        algorithm=decode_state.sampler_config[:, 0:1].reshape(-1),
-        rng=rng,
-        temperature=decode_state.sampler_config[:, 1:2].reshape(-1),
-        topk=decode_state.sampler_config[:, 2:3].reshape(-1),
-        nucleus_topp=decode_state.sampler_config[:, 3:4].reshape(-1),
-    )
+      next_token = self._sampling(logits, self.env.algorithm, jax.random.key(0), self.env.temperature, self.env.topk, self.env.nucleus_topp)
 
     if self.env.ring_buffer:
       input_pos = decode_state.input_pos + 1
@@ -1061,7 +1065,7 @@ class PyTorchEngine(engine_api.Engine):
         decode_state.start,
         input_pos,
         mask,
-        decode_state.sampler_config,
+        decode_state.samplers,
     )
     return new_decode_state, result_tokens
 
