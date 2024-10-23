@@ -10,11 +10,18 @@ from .layers import (
 
 def quantize_model(float_model, config: QuantizationConfig):
   """Apply quantization to linear layers."""
+  exclude_mods = None
+  if config.exclude_layers:
+    exclude_mods = [
+        module
+        for name, module in float_model.named_modules()
+        if name in config.exclude_layers
+    ]
 
   def quantize_nn_mod(float_model):
     for name, mod in float_model.named_modules():
       new_mod = None
-      if config.exclude_layers and name in config.exclude_layers:
+      if config.exclude_layers and mod in exclude_mods:
         continue
       if hasattr(mod, "get_quantized_version"):
         new_mod = mod.get_quantized_version()
