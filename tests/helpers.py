@@ -7,7 +7,9 @@ from jetstream_pt import environment
 
 
 # pylint: disable-next=all
-def make_env_tiny(bf16_enable=True, env_data_update_fn=lambda _: None):
+def make_env_tiny(
+    bf16_enable=True, env_data_update_fn=lambda _: None, batch_size=1
+):
   torch_dtype = torch.bfloat16 if bf16_enable else torch.float32
   torch.set_default_dtype(torch_dtype)
   jax.config.update("jax_dynamic_shapes", False)
@@ -19,7 +21,7 @@ def make_env_tiny(bf16_enable=True, env_data_update_fn=lambda _: None):
   environment_data.cache_sequence_length = 128
   environment_data.bf16_enable = bf16_enable
   environment_data.model_type = "llama-2-tiny"
-  environment_data.batch_size = 1
+  environment_data.batch_size = batch_size
   environment_data.num_layers = config.n_layers
   environment_data.cache_shape = (
       1,
