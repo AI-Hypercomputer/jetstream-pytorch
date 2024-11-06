@@ -55,6 +55,7 @@ def create_engine(devices):
   """Create Pytorch engine from flags"""
   torch.set_default_dtype(torch.bfloat16)
   quant_config = config.create_quantization_config_from_flags()
+  config.set_jax_compilation_cache_config()
   env_data = fetch_models.construct_env_data_from_model_id(
       FLAGS.model_id,
       FLAGS.override_batch_size,
