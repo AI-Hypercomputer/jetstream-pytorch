@@ -36,6 +36,7 @@ flags.DEFINE_string(
 flags.DEFINE_bool(
     "internal_use_local_tokenizer", 0, "Use local tokenizer if set to True"
 )
+flags.DEFINE_bool("enable_model_warmup", False, "enable model warmup")
 
 
 def shard_weights(env, weights, weight_shardings):
@@ -111,6 +112,7 @@ def serve():
       config=server_config,
       devices=devices,
       metrics_server_config=metrics_server_config,
+      enable_model_warmup=FLAGS.enable_model_warmup,
   )
   print("Started jetstream_server....")
   jetstream_server.wait_for_termination()
