@@ -37,6 +37,21 @@ flags.DEFINE_bool(
     "internal_use_local_tokenizer", 0, "Use local tokenizer if set to True"
 )
 flags.DEFINE_bool("enable_model_warmup", False, "enable model warmup")
+flags.DEFINE_string(
+    "internal_jax_compilation_cache_dir",
+    "~/jax_cache",
+    "Jax compilation cache directory",
+)
+flags.DEFINE_integer(
+    "internal_jax_persistent_cache_min_entry_size_bytes",
+    0,
+    "Minimum size (in bytes) of an entry that will be cached in the persistent compilation cache",
+)
+flags.DEFINE_integer(
+    "internal_jax_persistent_cache_min_compile_time_secs",
+    1,
+    "Minimum compilation time for a computation to be written to persistent cache",
+)
 
 
 def shard_weights(env, weights, weight_shardings):
@@ -55,7 +70,11 @@ def create_engine(devices):
   """Create Pytorch engine from flags"""
   torch.set_default_dtype(torch.bfloat16)
   quant_config = config.create_quantization_config_from_flags()
-  config.set_jax_compilation_cache_config()
+  config.set_jax_compilation_cache_config(
+      FLAGS.internal_jax_compilation_cache_dir,
+      FLAGS.internal_jax_persistent_cache_min_entry_size_bytes,
+      FLAGS.internal_jax_persistent_cache_min_compile_time_secs,
+  )
   env_data = fetch_models.construct_env_data_from_model_id(
       FLAGS.model_id,
       FLAGS.override_batch_size,

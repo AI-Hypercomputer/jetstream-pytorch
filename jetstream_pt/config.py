@@ -155,21 +155,6 @@ flags.DEFINE_integer(
     64,
     "page size per page",
 )
-flags.DEFINE_string(
-    "internal_jax_compilation_cache_dir",
-    "~/jax_cache",
-    "Jax compilation cache directory",
-)
-flags.DEFINE_integer(
-    "internal_jax_persistent_cache_min_entry_size_bytes",
-    0,
-    "Minimum size (in bytes) of an entry that will be cached in the persistent compilation cache",
-)
-flags.DEFINE_integer(
-    "internal_jax_persistent_cache_min_compile_time_secs",
-    1,
-    "Minimum compilation time for a computation to be written to persistent cache",
-)
 
 
 def create_quantization_config_from_flags():
@@ -194,17 +179,19 @@ def create_quantization_config_from_flags():
   return config
 
 
-def set_jax_compilation_cache_config():
+def set_jax_compilation_cache_config(
+    cache_dir, cache_entry_size, cache_compile_time
+):
   """Sets the jax compilation cache configuration"""
   jax.config.update(
       "jax_compilation_cache_dir",
-      os.path.expanduser(FLAGS.internal_jax_compilation_cache_dir),
+      os.path.expanduser(cache_dir),
   )
   jax.config.update(
       "jax_persistent_cache_min_entry_size_bytes",
-      FLAGS.internal_jax_persistent_cache_min_entry_size_bytes,
+      cache_entry_size,
   )
   jax.config.update(
       "jax_persistent_cache_min_compile_time_secs",
-      FLAGS.internal_jax_persistent_cache_min_compile_time_secs,
+      cache_compile_time,
   )
