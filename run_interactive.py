@@ -23,12 +23,28 @@ import numpy as np
 from absl import app
 from jetstream.engine import token_utils
 from jetstream_pt.config import FLAGS, create_engine_from_config_flags
+from jetstream.engine import sampling_utils
 
 
 # pylint: disable-next=all
 def main(argv):
 
   engine = create_engine_from_config_flags()
+
+  rng = jax.random.key(1)
+  temperature = 1
+  topk = 1
+  topp = 0.2
+
+  sampler = jax.tree_util.Partial(
+      sampling_utils.jittable_sample_topk_logits,
+      rng=rng,
+      temperature=temperature,
+      topk=topk,
+  )
+  # sampler = jax.tree_util.Partial(sampling_utils.jittable_sample_topp_logits, rng=rng, temperature=temperature, topp=topp)
+  # sampler = jax.tree_util.Partial(sampling_utils.jittable_sample_greedy_logits)
+  # sampler = jax.tree_util.Partial(sampling_utils.jittable_sample_weighted_logits, rng=rng, temperature=temperature)
 
   start = time.perf_counter()
   params = engine.load_params()
@@ -77,7 +93,10 @@ def main(argv):
       jax.profiler.start_trace(profiling_output)
 
     prefill_result, _ = engine.prefill(
-        params=params, padded_tokens=tokens, true_length=true_length
+        params=params,
+        padded_tokens=tokens,
+        true_length=true_length,
+        sampler=sampler
     )
     # pylint: disable-next=all
     decode_state = engine.insert(prefill_result, decode_state, slot=slot)

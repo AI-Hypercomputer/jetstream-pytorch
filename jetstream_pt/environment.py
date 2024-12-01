@@ -52,7 +52,10 @@ class JetEngineEnvironmentData:
   batch_size: int = 32  # batch size is generate step batch size
   cache_sequence_length: int = 2048  # size of the cache.
 
-  quant_config: QuantizationConfig = QuantizationConfig()
+  # quant_config: QuantizationConfig = QuantizationConfig()
+  quant_config: QuantizationConfig = dataclasses.field(
+      default_factory=QuantizationConfig
+  )
 
   model_type: str = "llama-2-13b"  # this implies the model config
 

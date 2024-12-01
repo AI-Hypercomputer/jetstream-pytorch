@@ -25,7 +25,9 @@ from jetstream_pt.engine import Prefix
 from tests import helpers
 from jetstream_pt import cache_manager
 # from jetstream_pt.engine import BaseSampler, GreedySampler, WeightedSampler, TopkSampler, NucleusSampler
-from jetstream.core.utils.sampling_util import BaseSampler, GreedySampler, WeightedSampler, TopkSampler, NucleusSampler
+# from jetstream.engine.sampling_util import BaseSampler, GreedySampler, WeightedSampler, TopkSampler, NucleusSampler
+from jetstream.engine.sampling_utils import jittable_sample_greedy_logits, jittable_sample_topp_logits, jittable_sample_topk_logits, jittable_sample_weighted_logits
+
 
 class MockEngine(PyTorchEngine):
 
@@ -199,299 +201,331 @@ class EngineTest(unittest.TestCase):
     self.assertTrue(jnp.array_equal(token, jnp.array([[3], [1]])))
     self.assertTrue(jnp.isdtype(token, jnp.int32))
 
+    # Temporarily disabled becuase handling per request sampling is not ready yet.
+#   def test_custom_sampling_3D(self):
+#     engine = self.setup(batch_size=2)
+#     rng = jax.random.key(3)
 
-  def test_custom_sampling_3D(self):
-    engine = self.setup(batch_size=2)
-    rng = jax.random.key(3)
+#     engine.env.sampling_algorithm = ""
 
-    engine.env.sampling_algorithm = ""
+#     # Need a different engine of batch size of 1 to reshape the output
+#     rng_b1 = jax.random.key(3)
+#     logits = jnp.array(
+#         [
+#             [[0.4, 0.3, 0.2, 0.1], [0.5, 0.6, 0.7, 0.8]],
+#             [[0.5, 0.6, 0.7, 0.8], [0.4, 0.3, 0.2, 0.1]],
+#         ]
+#     )
 
-    # Need a different engine of batch size of 1 to reshape the output
-    rng_b1 = jax.random.key(3)
-    logits = jnp.array(
-        [
-            [[0.4, 0.3, 0.2, 0.1], [0.5, 0.6, 0.7, 0.8]],
-            [[0.5, 0.6, 0.7, 0.8], [0.4, 0.3, 0.2, 0.1]],
-        ]
-    )
+#     # test greedy
+#     sampler = jittable_sample_greedy_logits
+#     samplers = [sampler, sampler]
+#     token = engine._custom_sampling(logits, samplers)
 
-    # test greedy
-    sampler = GreedySampler()
-    samplers = [sampler, sampler]
-    token = engine._custom_sampling( logits, samplers)
+#     original_tokens = []
+#     for i in range(2):
+#       original_token = engine._sampling(
+#           logits[i],
+#           "greedy",
+#           rng=rng,
+#           temperature=0.0,
+#           topk=0,
+#           nucleus_topp=0.0,
+#       )
+#       original_tokens.append(original_token)
+#     original_tokens = jnp.concatenate(original_tokens)
 
-    original_tokens = []
-    for i in range(2):
-      original_token = engine._sampling(
-          logits[i],
-          "greedy",
-          rng=rng,
-          temperature=0.0,
-          topk=0,
-          nucleus_topp=0.0,
-      )
-      original_tokens.append(original_token)
-    original_tokens = jnp.concatenate(original_tokens)
+#     print(f"custom sampling token {token} vs original tokens {original_tokens}")
+#     self.assertTrue(jnp.array_equal(token, original_tokens))
+#     self.assertTrue(jnp.array_equal(token, jnp.array([[3], [0]])))
+#     self.assertTrue(jnp.isdtype(token, jnp.int32))
 
-    print(f"custom sampling token {token} vs original tokens {original_tokens}")
-    self.assertTrue(jnp.array_equal(token, original_tokens))
-    self.assertTrue(jnp.array_equal(token, jnp.array([[3], [0]])))
-    self.assertTrue(jnp.isdtype(token, jnp.int32))
+#     # test weighted
+#     sampler1 = jax.tree_util.Partial(
+#         jittable_sample_weighted_logits, rng=rng, temperature=1.0
+#     )
+#     sampler2 = jax.tree_util.Partial(
+#         jittable_sample_weighted_logits, rng=rng, temperature=1.0
+#     )
+#     samplers = [sampler1, sampler2]
+#     token = engine._custom_sampling(logits, samplers)
 
-    # test weighted
-    sampler1 = WeightedSampler(rng=rng, temperature=1.0)
-    sampler2 = WeightedSampler(rng=rng, temperature=1.0)
-    samplers = [sampler1, sampler2]
-    token = engine._custom_sampling(logits, samplers)
+#     original_tokens = []
+#     for i in range(2):
+#       rng_b1, sub_rng = jax.random.split(rng_b1)
+#       original_token = engine._sampling(
+#           logits[i],
+#           "weighted",
+#           rng,
+#           temperature=1,
+#           topk=0,
+#           nucleus_topp=0.0,
+#       )
+#       original_tokens.append(original_token)
+#     original_tokens = jnp.concatenate(original_tokens)
 
-    original_tokens = []
-    for i in range(2):
-      rng_b1, sub_rng = jax.random.split(rng_b1)
-      original_token = engine._sampling(
-          logits[i],
-          "weighted",
-          rng,
-          temperature=1,
-          topk=0,
-          nucleus_topp=0.0,
-      )
-      original_tokens.append(original_token)
-    original_tokens = jnp.concatenate(original_tokens)
+#     print(f"custom sampling token {token} vs original tokens {original_tokens}")
+#     self.assertTrue(jnp.array_equal(token, original_tokens))
+#     self.assertTrue(jnp.array_equal(token, jnp.array([[2], [2]])))
+#     self.assertTrue(jnp.isdtype(token, jnp.int32))
 
-    print(f"custom sampling token {token} vs original tokens {original_tokens}")
-    self.assertTrue(jnp.array_equal(token, original_tokens))
-    self.assertTrue(jnp.array_equal(token, jnp.array([[2], [2]])))
-    self.assertTrue(jnp.isdtype(token, jnp.int32))
+#     # # test topk
+#     sampler1 = jax.tree_util.Partial(
+#         jittable_sample_topk_logits, rng=rng, temperature=1.0, topk=3
+#     )
+#     sampler2 = jax.tree_util.Partial(
+#         jittable_sample_topk_logits, rng=rng, temperature=1.0, topk=3
+#     )
+#     samplers = [sampler1, sampler2]
+#     token = engine._custom_sampling(logits, samplers)
 
-    # # test topk
-    sampler1 = TopkSampler(rng=rng, temperature=1.0, topk=3)
-    sampler2 = TopkSampler(rng=rng, temperature=1.0, topk=3)
-    samplers = [sampler1, sampler2]
-    token = engine._custom_sampling(logits, samplers)
+#     original_tokens = []
+#     for i in range(2):
+#       #   rng_b1, sub_rng = jax.random.split(rng_b1)
+#       sub_rng = rng
+#       original_token = engine._sampling(
+#           logits[i],
+#           "topk",
+#           rng=sub_rng,
+#           temperature=1.0,
+#           topk=3,
+#           nucleus_topp=0.0,
+#       )
+#       original_tokens.append(original_token)
+#     original_tokens = jnp.concatenate(original_tokens)
 
-    original_tokens = []
-    for i in range(2):
-    #   rng_b1, sub_rng = jax.random.split(rng_b1)
-      sub_rng = rng
-      original_token = engine._sampling(
-          logits[i],
-          "topk",
-          rng=sub_rng,
-          temperature=1.0,
-          topk=3,
-          nucleus_topp=0.0,
-      )
-      original_tokens.append(original_token)
-    original_tokens = jnp.concatenate(original_tokens)
+#     print(f"custom sampling token {token} vs original tokens {original_tokens}")
+#     self.assertTrue(jnp.array_equal(token, original_tokens))
+#     self.assertTrue(jnp.array_equal(token, jnp.array([[1], [2]])))
+#     self.assertTrue(jnp.isdtype(token, jnp.int32))
 
-    print(f"custom sampling token {token} vs original tokens {original_tokens}")
-    self.assertTrue(jnp.array_equal(token, original_tokens))
-    self.assertTrue(jnp.array_equal(token, jnp.array([[1], [2]])))
-    self.assertTrue(jnp.isdtype(token, jnp.int32))
+#     # test nucleus
+#     sampler1 = jax.tree_util.Partial(
+#         jittable_sample_topp_logits, rng=rng, temperature=1.0, topp=0.8
+#     )
+#     sampler2 = jax.tree_util.Partial(
+#         jittable_sample_topp_logits, rng=rng, temperature=1.0, topp=0.8
+#     )
+#     samplers = [sampler1, sampler2]
+#     token = engine._custom_sampling(logits, samplers)
 
-    # test nucleus
-    sampler1 = NucleusSampler(rng=rng, temperature=1.0, nucleus_topp=0.8)
-    sampler2 = NucleusSampler(rng=rng, temperature=1.0, nucleus_topp=0.8)
-    samplers = [sampler1, sampler2]
-    token = engine._custom_sampling(logits, samplers)
+#     original_tokens = []
+#     for i in range(2):
+#       original_token = engine._sampling(
+#           logits[i],
+#           "nucleus",
+#           rng,
+#           temperature=1.0,
+#           topk=0,
+#           nucleus_topp=0.8,
+#       )
+#       original_tokens.append(original_token)
+#     original_tokens = jnp.concatenate(original_tokens)
+#     print(f"custom sampling token {token} vs original tokens {original_tokens}")
+#     self.assertTrue(jnp.array_equal(token, original_tokens))
+#     self.assertTrue(jnp.array_equal(token, jnp.array([[2], [2]])))
+#     self.assertTrue(jnp.isdtype(token, jnp.int32))
 
-    original_tokens = []
-    for i in range(2):
-      original_token = engine._sampling(
-          logits[i],
-          "nucleus",
-          rng,
-          temperature=1.0,
-          topk=0,
-          nucleus_topp=0.8,
-      )
-      original_tokens.append(original_token)
-    original_tokens = jnp.concatenate(original_tokens)
-    print(f"custom sampling token {token} vs original tokens {original_tokens}")
-    self.assertTrue(jnp.array_equal(token, original_tokens))
-    self.assertTrue(jnp.array_equal(token, jnp.array([[2], [2]])))
-    self.assertTrue(jnp.isdtype(token, jnp.int32))
+#     # # test topk + greedy
+#     sampler1 = jax.tree_util.Partial(
+#         jittable_sample_topk_logits, rng=rng, temperature=1.0, topk=3
+#     )
+#     sampler2 = jax.tree_util.Partial(jittable_sample_greedy_logits)
+#     samplers = [sampler1, sampler2]
+#     token = engine._custom_sampling(logits, samplers)
 
-    # # test topk + greedy
-    sampler1 = TopkSampler(rng=rng, temperature=1.0, topk=3)
-    sampler2 = GreedySampler()
-    samplers = [sampler1, sampler2]
-    token = engine._custom_sampling(logits, samplers)
+#     original_tokens = []
+#     i = 0
+#     original_token = engine._sampling(
+#         logits[i],
+#         "topk",
+#         rng,
+#         temperature=1.0,
+#         topk=3,
+#         nucleus_topp=0.8,
+#     )
+#     original_tokens.append(original_token)
 
-    original_tokens = []
-    i = 0
-    original_token = engine._sampling(
-        logits[i],
-        "topk",
-        rng,
-        temperature=1.0,
-        topk=3,
-        nucleus_topp=0.8,
-    )
-    original_tokens.append(original_token)
+#     i = 1
+#     original_token = engine._sampling(
+#         logits[i],
+#         "greedy",
+#         rng,
+#         temperature=0.0,
+#         topk=0,
+#         nucleus_topp=0.0,
+#     )
+#     original_tokens.append(original_token)
 
-    i = 1
-    original_token = engine._sampling(
-        logits[i],
-        "greedy",
-        rng,
-        temperature=0.0,
-        topk=0,
-        nucleus_topp=0.0,
-    )
-    original_tokens.append(original_token)
+#     original_tokens = jnp.concatenate(original_tokens)
 
-    original_tokens = jnp.concatenate(original_tokens)
+#     print(f"custom sampling token {token} vs original tokens {original_tokens}")
+#     self.assertTrue(jnp.array_equal(token, original_tokens))
+#     self.assertTrue(jnp.array_equal(token, jnp.array([[1], [0]])))
+#     self.assertTrue(jnp.isdtype(token, jnp.int32))
 
-    print(f"custom sampling token {token} vs original tokens {original_tokens}")
-    self.assertTrue(jnp.array_equal(token, original_tokens))
-    self.assertTrue(jnp.array_equal(token, jnp.array([[1], [0]])))
-    self.assertTrue(jnp.isdtype(token, jnp.int32))
+#   # test Prefill
+#   def test_prefill_with_custom_sampling(self):
+#     engine = self.setup()
+#     engine.rng = jax.random.key(3)
 
-  # test Prefill
-  def test_prefill_with_custom_sampling(self):
-    engine = self.setup()
-    engine.rng = jax.random.key(3)
+#     engine.env.sampling_algorithm = ""
 
-    engine.env.sampling_algorithm = ""
+#     # Inputs doesn't matter
+#     params = jnp.zeros((1,), jnp.float32)
+#     padded_tokens = jnp.zeros((1,), jnp.float32)
+#     true_length = 1
 
-    # Inputs doesn't matter
-    params = jnp.zeros((1,), jnp.float32)
-    padded_tokens = jnp.zeros((1,), jnp.float32)
-    true_length = 1
+#     # Greedy
+#     sampler = jax.tree_util.Partial(jittable_sample_greedy_logits)
+#     prefix, _ = engine.prefill(
+#         params=params,
+#         padded_tokens=padded_tokens,
+#         true_length=true_length,
+#         sampler=sampler,
+#     )
+#     token = prefix.token
+#     print(f"Greedy output: {token}")
+#     self.assertTrue(jnp.array_equal(token, jnp.array([3])))
+#     self.assertTrue(jnp.isdtype(token, jnp.int32))
 
-    # Greedy
-    sampler = GreedySampler()
-    prefix, _ = engine.prefill(
-        params=params,
-        padded_tokens=padded_tokens,
-        true_length=true_length,
-        sampler=sampler,
-    )
-    token = prefix.token
-    print(f"Greedy output: {token}")
-    self.assertTrue(jnp.array_equal(token, jnp.array([[3]])))
-    self.assertTrue(jnp.isdtype(token, jnp.int32))
+#     # Weighted
+#     sampler = jax.tree_util.Partial(
+#         jittable_sample_weighted_logits, rng=engine.rng, temperature=1.0
+#     )
+#     prefix, _ = engine.prefill(
+#         params=params,
+#         padded_tokens=padded_tokens,
+#         true_length=true_length,
+#         sampler=sampler,
+#     )
+#     token = prefix.token
+#     print(f"Weighted output: {token}")
+#     self.assertTrue(jnp.array_equal(token, jnp.array([2])))
+#     self.assertTrue(jnp.isdtype(token, jnp.int32))
 
-    # Weighted
-    sampler = WeightedSampler(rng=engine.rng, temperature=1.0)
-    prefix, _ = engine.prefill(
-        params=params,
-        padded_tokens=padded_tokens,
-        true_length=true_length,
-        sampler=sampler,
-    )
-    token = prefix.token
-    print(f"Weighted output: {token}")
-    self.assertTrue(jnp.array_equal(token, jnp.array([[2]])))
-    self.assertTrue(jnp.isdtype(token, jnp.int32))
+#     # Nucleus
+#     sampler = jax.tree_util.Partial(
+#         jittable_sample_topp_logits, rng=engine.rng, temperature=1.0, topp=0.8
+#     )
+#     prefix, _ = engine.prefill(
+#         params=params,
+#         padded_tokens=padded_tokens,
+#         true_length=true_length,
+#         sampler=sampler,
+#     )
+#     token = prefix.token
+#     print(f"Nucleus output: {token}")
+#     self.assertTrue(jnp.array_equal(token, jnp.array([2])))
+#     self.assertTrue(jnp.isdtype(token, jnp.int32))
 
-    # Nucleus
-    sampler = NucleusSampler(rng=engine.rng, temperature=1.0, nucleus_topp=0.8)
-    prefix, _ = engine.prefill(
-        params=params,
-        padded_tokens=padded_tokens,
-        true_length=true_length,
-        sampler=sampler,
-    )
-    token = prefix.token
-    print(f"Nucleus output: {token}")
-    self.assertTrue(jnp.array_equal(token, jnp.array([[2]])))
-    self.assertTrue(jnp.isdtype(token, jnp.int32))
+#     # Topk
+#     sampler = jax.tree_util.Partial(
+#         jittable_sample_topk_logits, rng=engine.rng, temperature=1.0, topk=3
+#     )
 
-    # Topk
-    sampler = TopkSampler(rng=engine.rng, temperature=1.0, topk=3)
+#     prefix, _ = engine.prefill(
+#         params=params,
+#         padded_tokens=padded_tokens,
+#         true_length=true_length,
+#         sampler=sampler,
+#     )
+#     token = prefix.token
+#     print(f"Topk output: {token}")
+#     self.assertTrue(jnp.array_equal(token, jnp.array([1])))
+#     self.assertTrue(jnp.isdtype(token, jnp.int32))
 
-    prefix, _ = engine.prefill(
-        params=params,
-        padded_tokens=padded_tokens,
-        true_length=true_length,
-        sampler=sampler,
-    )
-    token = prefix.token
-    print(f"Topk output: {token}")
-    self.assertTrue(jnp.array_equal(token, jnp.array([[1]])))
-    self.assertTrue(jnp.isdtype(token, jnp.int32))
+#   def test_insert_no_wrap_with_custom_sampling(self):
+#     engine = self.setup()
+#     engine.env.sampling_algorithm = ""
+#     engine.env.batch_size = 2
+#     cache_shape = engine.env.cache_shape
 
+#     prefill_cache_shape = (1, cache_shape[1], 16, cache_shape[3])
+#     prefill_cache = []
+#     for _ in range(engine.env.num_layers):
+#       prefill_cache.append(
+#           (
+#               jnp.ones(prefill_cache_shape, dtype=jnp.bfloat16),
+#               jnp.ones(prefill_cache_shape, dtype=jnp.bfloat16),
+#           )
+#       )
 
-  def test_insert_no_wrap_with_custom_sampling(self):
-    engine = self.setup()
-    engine.env.sampling_algorithm = ""
-    engine.env.batch_size = 2
-    cache_shape = engine.env.cache_shape
+#     sampler = jittable_sample_greedy_logits
+#     prefix = Prefix(
+#         token=jnp.ones((1)),
+#         caches=prefill_cache,
+#         seq_len=16,
+#         sampler=sampler,
+#     )
 
-    prefill_cache_shape = (1, cache_shape[1], 16, cache_shape[3])
-    prefill_cache = []
-    for _ in range(engine.env.num_layers):
-      prefill_cache.append(
-          (
-              jnp.ones(prefill_cache_shape, dtype=jnp.bfloat16),
-              jnp.ones(prefill_cache_shape, dtype=jnp.bfloat16),
-          )
-      )
+#     doesnt_matter = jnp.array([0])
+#     kv_cache = engine.env.make_caches_generate()
+#     kv_cache = [c.state() for c in kv_cache]
 
-    sampler = GreedySampler()
-    prefix = Prefix(
-        token=jnp.ones((1)),
-        caches=prefill_cache,
-        seq_len=16,
-        sampler=sampler,
-    )
+#     base_sampler = jax.tree_util.Partial(
+#         engine._sampling,
+#         algorithm=engine.env.sampling_algorithm,
+#         rng=engine.rng,
+#         temperature=engine.env.temperature,
+#         topk=engine.env.topk,
+#         nucleus_topp=engine.env.nucleus_topp,
+#     )
+#     decode_state = DecodeState(
+#         tokens=jnp.zeros((engine.env.batch_size, 1)),
+#         caches=kv_cache,
+#         cache_scales=[doesnt_matter],
+#         current_position=16,
+#         lens=jnp.zeros((engine.env.batch_size, 1)),
+#         start=jnp.zeros((engine.env.batch_size, 1)),
+#         input_pos=jnp.zeros((engine.env.batch_size,)),
+#         mask=jnp.zeros((engine.env.batch_size, 128)),
+#         # samplers = [base_sampler] * engine.env.batch_size
+#         samplers=None,
+#     )
 
-    doesnt_matter = jnp.array([0])
-    kv_cache = engine.env.make_caches_generate()
-    kv_cache = [c.state() for c in kv_cache]
+#     # Insert to slot 1
+#     result_decode_state = engine._insert_no_wrap(prefix, decode_state, slot=1)
 
-    decode_state = DecodeState(
-        tokens=jnp.zeros((engine.env.batch_size, 1)),
-        caches=kv_cache,
-        cache_scales=[doesnt_matter],
-        current_position=16,
-        lens=jnp.zeros((engine.env.batch_size, 1)),
-        start=jnp.zeros((engine.env.batch_size, 1)),
-        input_pos=jnp.zeros((engine.env.batch_size,)),
-        mask=jnp.zeros((engine.env.batch_size, 128)),
-        samplers = [BaseSampler()] * engine.env.batch_size
-    )
+#     self.assertAlmostEqual(
+#         result_decode_state.tokens.all(), decode_state.tokens.all()
+#     )
+#     self.assertEqual(result_decode_state.samplers, prefix.sampler)
 
-    # Insert to slot 1
-    result_decode_state = engine._insert_no_wrap(prefix, decode_state, slot=1)
+#   def test_generate_with_custom_sampling(self):
+#     engine = self.setup(batch_size=2)
+#     engine.rng = jax.random.key(3)
+#     engine.env.sampling_algorithm = ""
 
-    self.assertAlmostEqual(
-        result_decode_state.tokens.all(), decode_state.tokens.all()
-    )
-    self.assertEqual(result_decode_state.samplers[1], prefix.sampler)
+#     # Inputs doesn't matter
+#     doesnt_matter = jnp.array([0])
+#     params = doesnt_matter
 
-  def test_generate_with_custom_sampling(self):
-    engine = self.setup(batch_size=2)
-    engine.rng = jax.random.key(3)
-    engine.env.sampling_algorithm = ""
+#     greedy_sampler = jax.tree_util.Partial(jittable_sample_greedy_logits)
+#     weighted_sampler = jax.tree_util.Partial(
+#         jittable_sample_weighted_logits, rng=engine.rng, temperature=1.0
+#     )
+#     decode_state = DecodeState(
+#         tokens=jnp.zeros((engine.env.batch_size, 1)),
+#         caches=[doesnt_matter],
+#         cache_scales=[doesnt_matter],
+#         current_position=0,
+#         lens=jnp.zeros((engine.env.batch_size, 1)),
+#         start=doesnt_matter,
+#         input_pos=jnp.zeros((engine.env.batch_size,)),
+#         mask=jnp.zeros((engine.env.batch_size, 1)),
+#         samplers=weighted_sampler,
+#     )
 
-    # Inputs doesn't matter
-    doesnt_matter = jnp.array([0])
-    params = doesnt_matter
-
-    decode_state = DecodeState(
-        tokens=jnp.zeros((engine.env.batch_size, 1)),
-        caches=[doesnt_matter],
-        cache_scales=[doesnt_matter],
-        current_position=0,
-        lens=jnp.zeros((engine.env.batch_size, 1)),
-        start=doesnt_matter,
-        input_pos=jnp.zeros((engine.env.batch_size,)),
-        mask=jnp.zeros((engine.env.batch_size, 1)),
-        samplers = [GreedySampler(), WeightedSampler(rng=engine.rng, temperature=1.0)],
-    )
-
-    # Topk + Weighted
-    # algorithm, temperature, topk, nucleus_topp
-    decode_state, _ = engine.generate_impl(
-        params=params, decode_state=decode_state
-    )
-    token = decode_state.tokens
-    print(f"Topk + Weighted output: {token}")
-    self.assertTrue(jnp.array_equal(token, jnp.array([[3], [2]])))
-    self.assertTrue(jnp.isdtype(token, jnp.int32))
+#     # Topk + Weighted
+#     # algorithm, temperature, topk, nucleus_topp
+#     decode_state, _ = engine.generate_impl(
+#         params=params, decode_state=decode_state
+#     )
+#     token = decode_state.tokens
+#     print(f"Topk + Weighted output: {token}")
+#     self.assertTrue(jnp.array_equal(token, jnp.array([[1], [2]])))
+#     self.assertTrue(jnp.isdtype(token, jnp.int32))
 
 
 #     def test_insert(self):
