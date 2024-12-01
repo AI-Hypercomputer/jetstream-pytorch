@@ -24,6 +24,44 @@ import torch_xla2
 import torch_xla2.extra
 
 
+def test1():
+  """test jit cache size"""
+
+  @functools.partial(jax.jit, static_argnums=(2,))
+  # pylint: disable-next=all
+  def f(x, i, issum):
+    if issum:
+      return x + i
+
+    return x - i
+
+  x = jnp.ones((10,))
+  print(f(x, 0, True))
+  print("cache", f._cache_size())
+  print(f(x, 1, False))
+  print("cache", f._cache_size())
+
+  # pylint: disable-next=all
+  class A:
+
+    def __init__(self, a):
+      self.a = a
+
+    def incr(self):
+      """increase by 1"""
+      self.a += 1
+
+  @jax.jit
+  def f2(x):
+    a = A(x)
+    a.incr()
+    return a.a
+
+  print(f2(x))
+  print(f2(x))
+  print(f2(x))
+
+
 # pylint: disable-next=all
 def test2():
   """test insert cache"""
