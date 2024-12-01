@@ -53,32 +53,6 @@ P = jax.sharding.PartitionSpec
 Params = jax.Array
 PrefillInputs = jax.Array
 
-STRATEGY_MAP = {"greedy": 0, "weighted": 1, "top_p": 2, "top_k": 3}
-
-
-# class DefaultSampler(sampling_utils.BaseSampler):
-#     def __init__(self, rng, temperature, topk, nucleus_topp, algorithm):
-#         self.rng = rng
-#         self.temperature = temperature
-#         self.topk = topk
-#         self.nucleus_topp = nucleus_topp
-#         self.algorithm = algorithm
-
-#     def __call__(self, logits):
-#       return PyTorchEngine._sampling(logits, self.algorithm, self.rng, self.temperature, self.topk, self.nucleus_topp)
-
-#     # Define how to flatten the instance into leaves and auxiliary data
-#     def tree_flatten(self):
-#         children = (self.rng, self.temperature, self.topk, self.nucleus_topp, self.algorithm)  # Leaves to be flattened
-#         aux_data = ()  # Auxiliary data that does not need to be traced
-#         return children, aux_data
-
-#     # Define how to unflatten from leaves and auxiliary data
-#     @classmethod
-#     def tree_unflatten(cls, aux_data, children):
-#         rng, temperature, topk, nucleus_topp, algorithm = children
-#         return cls(rng, temperature, topk, nucleus_topp, algorithm)
-
 
 @struct.dataclass
 # pylint: disable-next=all
@@ -393,10 +367,6 @@ class PyTorchEngine(engine_api.Engine):
       )
     token = jnp.reshape(token, (1,))
     token_out = jnp.reshape(token, (1, 1))
-    # token = sampling(
-    #     logits=logits
-    # ).reshape(prefill_batch_size, 1)
-
     data = jnp.concatenate(
         [
             token_out,  # First token
@@ -881,6 +851,7 @@ class PyTorchEngine(engine_api.Engine):
       # fill mask later, now use flash attention
       mask = update_mask()
 
+    # Temporarily disabled becuase handling per request sampling is not ready yet.
     # next_token = self._custom_sampling(logits, decode_state.samplers)
     if decode_state.samplers:
       next_token = decode_state.samplers(logits)
