@@ -310,7 +310,7 @@ class PyTorchEngine(engine_api.Engine):
     else:
       raise TypeError(
           "Input tokens should be of type Jax Array, but receiving:"
-          " {prefill_inputs}"
+          f" {prefill_inputs} of type {type(prefill_inputs)}"
       )
     seq_len = padded_tokens.shape[0]
     input_indexes = jnp.arange(0, seq_len)
