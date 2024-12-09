@@ -27,6 +27,7 @@ flags.DEFINE_integer("override_batch_size", 32, "The batch size")
 flags.DEFINE_integer("max_input_length", 1024, "The batch size")
 flags.DEFINE_integer("max_output_length", 1024, "The batch size")
 flags.DEFINE_integer("port", 9000, "port to listen on")
+flags.DEFINE_integer("prometheus_port", 0, "prometheus metrics port")
 flags.DEFINE_integer("threads", 64, "number of worker threads in thread pool")
 flags.DEFINE_string(
     "benchmark_save_offline_result_to_file",
@@ -104,6 +105,11 @@ def serve():
   print(f"server_config: {server_config}")
 
   metrics_server_config: MetricsServerConfig | None = None
+  if config.prometheus_port != 0:
+    if 1 <= config.prometheus_port <= 65535:
+        metrics_server_config = MetricsServerConfig(port=config.prometheus_port)
+    else:
+        raise ValueError(f"Invalid port number: {config.prometheus_port}. Port must be between 1 and 65535.")
 
   # We separate credential from run so that we can unit test it with local credentials.
   # We would like to add grpc credentials for OSS.
