@@ -6,6 +6,16 @@ from typing import Optional
 
 
 @dataclasses.dataclass
+class RopeScalingArgs:
+  """Rope scaling configuration parameters."""
+
+  factor: float = 8.0
+  low_freq_factor: float = 1.0
+  high_freq_factor: float = 4.0
+  original_max_position_embeddings: int = 8192
+
+
+@dataclasses.dataclass
 class ModelArgs:
   """Model configuration parameters."""
 
@@ -29,6 +39,7 @@ class ModelArgs:
   device = "cpu"
 
   rope_theta: float = 10000.0
+  rope_scaling_args: RopeScalingArgs = None
 
 
 def get_arg(
