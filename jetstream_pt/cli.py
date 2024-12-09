@@ -105,7 +105,7 @@ def serve():
   print(f"server_config: {server_config}")
 
   metrics_server_config: MetricsServerConfig | None = None
-  if config.prometheus_port != 0:
+  if FLAGS.prometheus_port != 0:
     if 1 <= FLAGS.prometheus_port <= 65535:
         metrics_server_config = MetricsServerConfig(port=FLAGS.prometheus_port)
     else:
