@@ -171,12 +171,12 @@ class TransformerBlock(ModuleBase):
       return out
 
 
-def apply_scaling(freqs: torch.Tensor):
+def apply_scaling(freqs: torch.Tensor, config: model_args.RopeScalingArgs):
   # Values obtained from grid search
-  scale_factor = 8
-  low_freq_factor = 1
-  high_freq_factor = 4
-  old_context_len = 8192  # original llama3 length
+  scale_factor = config.factor
+  low_freq_factor = config.low_freq_factor
+  high_freq_factor = config.high_freq_factor
+  old_context_len = config.original_max_position_embeddings
 
   low_freq_wavelen = old_context_len / low_freq_factor
   high_freq_wavelen = old_context_len / high_freq_factor
@@ -197,12 +197,15 @@ def apply_scaling(freqs: torch.Tensor):
 
 
 def precompute_freqs_cis(
-    dim: int, end: int, theta: float = 10000.0, use_scaled: bool = False
+    dim: int,
+    end: int,
+    theta: float = 10000.0,
+    rope_scaling_config: model_args.RopeScalingArgs = None,
 ):
   freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
   t = torch.arange(end, device=freqs.device, dtype=torch.float32)
-  if use_scaled:
-    freqs = apply_scaling(freqs)
+  if rope_scaling_config is not None:
+    freqs = apply_scaling(freqs, rope_scaling_config)
   freqs = torch.outer(t, freqs)
   freqs_cis = torch.polar(torch.ones_like(freqs), freqs)  # complex64
   return freqs_cis
@@ -251,6 +254,7 @@ class Transformer(ModuleBase):
         self.params.dim // self.params.n_heads,
         self.params.max_seq_len * 2,
         theta=self.params.rope_theta,
+        rope_scaling_config=self.params.rope_scaling_args,
     )
 
     self.register_buffer("freqs_cis", freqs_cis)
