@@ -36,6 +36,8 @@ cd /jetstream-pytorch && \
 git checkout ${PYTORCH_JETSTREAM_VERSION} && \
 bash install_everything.sh
 
+RUN pip install -U jax[tpu]==0.4.34 -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+
 COPY jetstream_pytorch_server_entrypoint.sh /usr/bin/
 
 RUN chmod +x /usr/bin/jetstream_pytorch_server_entrypoint.sh
