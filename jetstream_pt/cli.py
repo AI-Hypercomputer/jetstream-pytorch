@@ -110,7 +110,8 @@ def serve():
       metrics_server_config = MetricsServerConfig(port=FLAGS.prometheus_port)
     else:
       raise ValueError(
-          f"Invalid port number: {FLAGS.prometheus_port}. Port must be between 1 and 65535."
+          f"Invalid port number: {FLAGS.prometheus_port}. "
+          + "Port must be between 1 and 65535."
       )
 
   # We separate credential from run so that we can unit test it with local credentials.

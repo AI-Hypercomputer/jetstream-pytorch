@@ -229,9 +229,15 @@ def ragged_mqa(
             num_scalar_prefetch=5,
             in_specs=in_specs,
             out_specs=[
-                pl.BlockSpec(index_map=q_index_map, block_shape=(None, time, head_dim)),
-                pl.BlockSpec(index_map=q_index_map, block_shape=(None, time, head_dim)),
-                pl.BlockSpec(index_map=q_index_map, block_shape=(None, time, head_dim)),
+                pl.BlockSpec(
+                    index_map=q_index_map, block_shape=(None, time, head_dim)
+                ),
+                pl.BlockSpec(
+                    index_map=q_index_map, block_shape=(None, time, head_dim)
+                ),
+                pl.BlockSpec(
+                    index_map=q_index_map, block_shape=(None, time, head_dim)
+                ),
             ],
             grid=(batch_size, seq_len // bk),
         ),
@@ -397,7 +403,10 @@ def ragged_mqa_reference(
     ks_bp = (None, 1, bk)
 
   in_specs = [
-      pl.BlockSpec(index_map=lambda b, i, *_: (b, 0, 0), block_shape=(None, time, head_dim)),  # q
+      pl.BlockSpec(
+          index_map=lambda b, i, *_: (b, 0, 0),
+          block_shape=(None, time, head_dim),
+      ),  # q
       pl.BlockSpec(index_map=kv_index_map, block_shape=kv_bp),  # k
       pl.BlockSpec(index_map=kv_index_map, block_shape=kv_bp),  # v
       pl.BlockSpec(index_map=kv_scale_index_map, block_shape=ks_bp),  # k_scaler
@@ -430,9 +439,18 @@ def ragged_mqa_reference(
           num_scalar_prefetch=6,
           in_specs=in_specs,
           out_specs=[
-              pl.BlockSpec(index_map=lambda b, *_: (b, 0, 0), block_shape=(None, time, head_dim)),
-              pl.BlockSpec(index_map=lambda b, *_: (b, 0, 0), block_shape=(None, time, head_dim)),
-              pl.BlockSpec(index_map=lambda b, *_: (b, 0, 0), block_shape=(None, time, head_dim)),
+              pl.BlockSpec(
+                  index_map=lambda b, *_: (b, 0, 0),
+                  block_shape=(None, time, head_dim),
+              ),
+              pl.BlockSpec(
+                  index_map=lambda b, *_: (b, 0, 0),
+                  block_shape=(None, time, head_dim),
+              ),
+              pl.BlockSpec(
+                  index_map=lambda b, *_: (b, 0, 0),
+                  block_shape=(None, time, head_dim),
+              ),
           ],
           grid=(batch_size, seq_len // bk),
       ),
