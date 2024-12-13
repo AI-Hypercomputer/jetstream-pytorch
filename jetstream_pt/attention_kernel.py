@@ -198,11 +198,11 @@ def ragged_mqa(
       ks_bp = (None, 1, bk)
 
     in_specs = [
-        pl.BlockSpec(q_index_map, q_bp),
-        pl.BlockSpec(kv_index_map, kv_bp),
-        pl.BlockSpec(kv_index_map, kv_bp),
-        pl.BlockSpec(scaler_index_map, ks_bp),
-        pl.BlockSpec(scaler_index_map, ks_bp),
+        pl.BlockSpec(index_map=q_index_map, block_shape=q_bp),
+        pl.BlockSpec(index_map=kv_index_map, block_shape=kv_bp),
+        pl.BlockSpec(index_map=kv_index_map, block_shape=kv_bp),
+        pl.BlockSpec(index_map=scaler_index_map, block_shape=ks_bp),
+        pl.BlockSpec(index_map=scaler_index_map, block_shape=ks_bp),
     ]
     inputs = (
         start,
@@ -229,9 +229,9 @@ def ragged_mqa(
             num_scalar_prefetch=5,
             in_specs=in_specs,
             out_specs=[
-                pl.BlockSpec(q_index_map, (None, time, head_dim)),
-                pl.BlockSpec(q_index_map, (None, time, head_dim)),
-                pl.BlockSpec(q_index_map, (None, time, head_dim)),
+                pl.BlockSpec(index_map=q_index_map, block_shape=(None, time, head_dim)),
+                pl.BlockSpec(index_map=q_index_map, block_shape=(None, time, head_dim)),
+                pl.BlockSpec(index_map=q_index_map, block_shape=(None, time, head_dim)),
             ],
             grid=(batch_size, seq_len // bk),
         ),
@@ -397,11 +397,11 @@ def ragged_mqa_reference(
     ks_bp = (None, 1, bk)
 
   in_specs = [
-      pl.BlockSpec(lambda b, i, *_: (b, 0, 0), (None, time, head_dim)),  # q
-      pl.BlockSpec(kv_index_map, kv_bp),  # k
-      pl.BlockSpec(kv_index_map, kv_bp),  # v
-      pl.BlockSpec(kv_scale_index_map, ks_bp),  # k_scaler
-      pl.BlockSpec(kv_scale_index_map, ks_bp),  # v_scaler
+      pl.BlockSpec(index_map=lambda b, i, *_: (b, 0, 0), block_shape=(None, time, head_dim)),  # q
+      pl.BlockSpec(index_map=kv_index_map, block_shape=kv_bp),  # k
+      pl.BlockSpec(index_map=kv_index_map, block_shape=kv_bp),  # v
+      pl.BlockSpec(index_map=kv_scale_index_map, block_shape=ks_bp),  # k_scaler
+      pl.BlockSpec(index_map=kv_scale_index_map, block_shape=ks_bp),  # v_scaler
   ]
 
   inputs = (
@@ -430,9 +430,9 @@ def ragged_mqa_reference(
           num_scalar_prefetch=6,
           in_specs=in_specs,
           out_specs=[
-              pl.BlockSpec(lambda b, *_: (b, 0, 0), (None, time, head_dim)),
-              pl.BlockSpec(lambda b, *_: (b, 0, 0), (None, time, head_dim)),
-              pl.BlockSpec(lambda b, *_: (b, 0, 0), (None, time, head_dim)),
+              pl.BlockSpec(index_map=lambda b, *_: (b, 0, 0), block_shape=(None, time, head_dim)),
+              pl.BlockSpec(index_map=lambda b, *_: (b, 0, 0), block_shape=(None, time, head_dim)),
+              pl.BlockSpec(index_map=lambda b, *_: (b, 0, 0), block_shape=(None, time, head_dim)),
           ],
           grid=(batch_size, seq_len // bk),
       ),
