@@ -40,7 +40,6 @@ flags.DEFINE_bool(
 flags.DEFINE_bool("enable_model_warmup", False, "enable model warmup")
 
 
-
 def shard_weights(env, weights, weight_shardings):
   """Shard weights according to weight_shardings"""
   sharded = {}
