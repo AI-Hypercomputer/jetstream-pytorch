@@ -44,6 +44,9 @@ flags.DEFINE_bool("enable_model_warmup", False, "enable model warmup")
 def shard_weights(env, weights, weight_shardings):
   """Shard weights according to weight_shardings"""
   sharded = {}
+  # Some output and embeddings weights might be tied: in this case untie them
+  if weights["output.weight"].device.type == "meta":
+    weights["output.weight"] = weights["tok_embeddings.weight"].clone()
   for key, val in weights.items():
     sharding = env.sharding_by_axis(weight_shardings.get(key, -1))
     with jax.default_device(jax.devices("cpu")[0]):

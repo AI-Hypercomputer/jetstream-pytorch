@@ -67,6 +67,12 @@ meta-llama/Meta-Llama-3-8B
 meta-llama/Meta-Llama-3-8B-Instruct
 meta-llama/Meta-Llama-3-70B
 meta-llama/Meta-Llama-3-70B-Instruct
+meta-llama/Llama-3.1-8B
+meta-llama/Llama-3.1-8B-Instruct
+meta-llama/Llama-3.2-1B
+meta-llama/Llama-3.2-1B-Instruct
+meta-llama/Llama-3.3-70B
+meta-llama/Llama-3.3-70B-Instruct
 google/gemma-2b
 google/gemma-2b-it
 google/gemma-7b

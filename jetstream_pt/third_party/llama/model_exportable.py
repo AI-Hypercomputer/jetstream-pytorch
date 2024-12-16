@@ -4,6 +4,7 @@
 from typing import Any, List, Optional
 import copy
 import jax
+import math
 import torch
 import torch.nn.functional as F
 import functools
@@ -170,12 +171,42 @@ class TransformerBlock(ModuleBase):
       return out
 
 
+def apply_scaling(freqs: torch.Tensor, config: model_args.RopeScalingArgs):
+  # Values obtained from grid search
+  scale_factor = config.factor
+  low_freq_factor = config.low_freq_factor
+  high_freq_factor = config.high_freq_factor
+  old_context_len = config.original_max_position_embeddings
+
+  low_freq_wavelen = old_context_len / low_freq_factor
+  high_freq_wavelen = old_context_len / high_freq_factor
+  new_freqs = []
+  for freq in freqs:
+    wavelen = 2 * math.pi / freq
+    if wavelen < high_freq_wavelen:
+      new_freqs.append(freq)
+    elif wavelen > low_freq_wavelen:
+      new_freqs.append(freq / scale_factor)
+    else:
+      assert low_freq_wavelen != high_freq_wavelen
+      smooth = (old_context_len / wavelen - low_freq_factor) / (
+          high_freq_factor - low_freq_factor
+      )
+      new_freqs.append((1 - smooth) * freq / scale_factor + smooth * freq)
+  return torch.tensor(new_freqs, dtype=freqs.dtype, device=freqs.device)
+
+
 def precompute_freqs_cis(
-    dim: int, end: int, theta: float = 10000.0
-) -> torch.Tensor:
+    dim: int,
+    end: int,
+    theta: float = 10000.0,
+    rope_scaling_config: model_args.RopeScalingArgs = None,
+):
   freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
-  t = torch.arange(end, device=freqs.device)  # type: ignore
-  freqs = torch.outer(t, freqs).float()  # type: ignore
+  t = torch.arange(end, device=freqs.device, dtype=torch.float32)
+  if rope_scaling_config is not None:
+    freqs = apply_scaling(freqs, rope_scaling_config)
+  freqs = torch.outer(t, freqs)
   freqs_cis = torch.polar(torch.ones_like(freqs), freqs)  # complex64
   return freqs_cis
 
@@ -223,6 +254,7 @@ class Transformer(ModuleBase):
         self.params.dim // self.params.n_heads,
         self.params.max_seq_len * 2,
         theta=self.params.rope_theta,
+        rope_scaling_config=self.params.rope_scaling_args,
     )
 
     self.register_buffer("freqs_cis", freqs_cis)
@@ -306,6 +338,12 @@ class Transformer(ModuleBase):
           "meta-llama/Meta-Llama-3-8B-Instruct": "llama-3-8b",
           "meta-llama/Meta-Llama-3-70B": "llama-3-70b",
           "meta-llama/Meta-Llama-3-70B-Instruct": "llama-3-70b",
+          "meta-llama/Llama-3.1-8B": "llama-3.1-8b",
+          "meta-llama/Llama-3.1-8B-Instruct": "llama-3.1-8b",
+          "meta-llama/Llama-3.2-1B": "llama-3.2-1b",
+          "meta-llama/Llama-3.2-1B-Instruct": "llama-3.2-1b",
+          "meta-llama/Llama-3.3-70B": "llama-3.3-70b",
+          "meta-llama/Llama-3.3-70B-Instruct": "llama-3.3-70b",
       }.get(model_id)
     assert name
     args = model_args.get_model_args(
