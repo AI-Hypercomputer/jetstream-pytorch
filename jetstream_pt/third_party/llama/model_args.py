@@ -114,6 +114,60 @@ def get_arg(
         "vocab_size": 128256,
         "rope_theta": 500000.0,
     }
+  elif model_name == "llama-3.1-8b":
+    data = {
+        "dim": 4096,
+        "vocab_size": 128256,
+        "multiple_of": 1024,
+        "ffn_dim_multiplier": 1.3,
+        "n_layers": 32,
+        "n_heads": 32,
+        "n_kv_heads": 8,
+        "norm_eps": 1e-05,
+        "rope_theta": 500000.0,
+        "rope_scaling_args": RopeScalingArgs(
+            factor=8.0,
+            low_freq_factor=1.0,
+            high_freq_factor=4.0,
+            original_max_position_embeddings=8192,
+        ),
+    }
+  elif model_name == "llama-3.2-1b":
+    data = {
+        "dim": 2048,
+        "vocab_size": 128256,
+        "multiple_of": 1024,
+        "ffn_dim_multiplier": 1.5,
+        "n_layers": 16,
+        "n_heads": 32,
+        "n_kv_heads": 8,
+        "norm_eps": 1e-05,
+        "rope_theta": 500000.0,
+        "rope_scaling_args": RopeScalingArgs(
+            factor=32.0,
+            low_freq_factor=1.0,
+            high_freq_factor=4.0,
+            original_max_position_embeddings=8192,
+        ),
+    }
+  elif model_name == "llama-3.3-70b":
+    data = {
+        "dim": 8192,
+        "vocab_size": 128256,
+        "multiple_of": 1024,
+        "ffn_dim_multiplier": 1.3,
+        "n_layers": 80,
+        "n_heads": 64,
+        "n_kv_heads": 8,
+        "norm_eps": 1e-05,
+        "rope_theta": 500000.0,
+        "rope_scaling_args": RopeScalingArgs(
+            factor=8.0,
+            low_freq_factor=1.0,
+            high_freq_factor=4.0,
+            original_max_position_embeddings=8192,
+        ),
+    }
 
   return ModelArgs(
       max_seq_len=seqlen,
