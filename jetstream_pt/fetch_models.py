@@ -215,7 +215,7 @@ def _hf_download(
         local_dir_use_symlinks=False,
         token=hf_token,
         allow_patterns=[
-            "model-?????-of-?????.safetensors",
+            "model*.safetensors",
             "*.json",
             "*.model",
         ],
