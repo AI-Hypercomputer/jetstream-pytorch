@@ -124,7 +124,7 @@ weights in HuggingFace format.
 
 ## Send one request
 
-Jetstream-pytorch uses gPRC for handling requests, the script below demonstrates how to
+Jetstream-pytorch uses gRPC for handling requests, the script below demonstrates how to
 send gRPC in Python. You can also use other gPRC clients.
 
 ```python
