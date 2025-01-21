@@ -93,6 +93,8 @@ model_id_to_class = {
     "google/gemma-7b-it": _gemma_7b,
     "mistralai/Mixtral-8x7B-v0.1": _mixtral_87,
     "mistralai/Mixtral-8x7B-Instruct-v0.1": _mixtral_87,
+    "deepseek-ai/DeepSeek-R1-Distill-Llama-8B": _llama3_1_8b,
+    "deepseek-ai/DeepSeek-R1-Distill-Llama-70B": _llama3_3_70b,
 }
 
 
