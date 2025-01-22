@@ -60,6 +60,9 @@ _llama2_13 = ModelInfo(llama_model.Transformer, 40, 40, 128, 1)
 _llama2_70 = ModelInfo(llama_model.Transformer, 80, 8, 128, 8)
 _llama3_8 = ModelInfo(llama_model.Transformer, 32, 8, 128, 4)
 _llama3_70 = _llama2_70
+_llama3_1_8b = _llama3_8
+_llama3_2_1b = ModelInfo(llama_model.Transformer, 16, 8, 64, 4)
+_llama3_3_70b = _llama2_70
 
 _mixtral_87 = ModelInfo(mixtral_model.Transformer, 32, 8, 128, 4)
 
@@ -78,6 +81,12 @@ model_id_to_class = {
     "meta-llama/Meta-Llama-3-8B-Instruct": _llama3_8,
     "meta-llama/Meta-Llama-3-70B": _llama3_70,
     "meta-llama/Meta-Llama-3-70B-Instruct": _llama3_70,
+    "meta-llama/Llama-3.1-8B": _llama3_1_8b,
+    "meta-llama/Llama-3.1-8B-Instruct": _llama3_1_8b,
+    "meta-llama/Llama-3.2-1B": _llama3_2_1b,
+    "meta-llama/Llama-3.2-1B-Instruct": _llama3_2_1b,
+    "meta-llama/Llama-3.3-70B": _llama3_3_70b,
+    "meta-llama/Llama-3.3-70B-Instruct": _llama3_3_70b,
     "google/gemma-2b": _gemma_2b,
     "google/gemma-2b-it": _gemma_2b,
     "google/gemma-7b": _gemma_7b,
@@ -159,6 +168,10 @@ def _load_weights(directory):
       for key in f.keys():
         state_dict[key] = f.get_tensor(key).to(torch.bfloat16)
   # Load the state_dict into the model
+  if not state_dict:
+    raise AssertionError(
+        f"Tried to load weights from {directory}, but couldn't find any."
+    )
   return state_dict
 
 
@@ -177,7 +190,8 @@ def instantiate_model_from_repo_id(
   """Create model instance by hf model id.+"""
   model_dir = _hf_dir(repo_id)
   if not FLAGS.internal_use_random_weights and (
-      not os.path.exists(model_dir) or not os.listdir(model_dir)
+      not os.path.exists(model_dir)
+      or not glob.glob(os.path.join(model_dir, "*.safetensors"))
   ):
     # no weights has been downloaded
     _hf_download(repo_id, model_dir, FLAGS.hf_token)
@@ -215,7 +229,7 @@ def _hf_download(
         local_dir_use_symlinks=False,
         token=hf_token,
         allow_patterns=[
-            "model-?????-of-?????.safetensors",
+            "model*.safetensors",
             "*.json",
             "*.model",
         ],

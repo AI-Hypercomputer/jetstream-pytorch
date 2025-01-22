@@ -33,7 +33,7 @@ Follow the steps in
 ## Get the jetstream-pytorch code
 ```bash
 git clone https://github.com/google/jetstream-pytorch.git
-git checkout jetstream-v0.2.3
+git checkout jetstream-v0.2.4
 ```
 
 (optional) Create a virtual env using `venv` or `conda` and activate it.
@@ -67,6 +67,12 @@ meta-llama/Meta-Llama-3-8B
 meta-llama/Meta-Llama-3-8B-Instruct
 meta-llama/Meta-Llama-3-70B
 meta-llama/Meta-Llama-3-70B-Instruct
+meta-llama/Llama-3.1-8B
+meta-llama/Llama-3.1-8B-Instruct
+meta-llama/Llama-3.2-1B
+meta-llama/Llama-3.2-1B-Instruct
+meta-llama/Llama-3.3-70B
+meta-llama/Llama-3.3-70B-Instruct
 google/gemma-2b
 google/gemma-2b-it
 google/gemma-7b
@@ -115,6 +121,42 @@ If you wish to use your own checkpoint, then, place them inside
 of the `checkpoints/<org>/<model>/hf_original` dir (or the corresponding subdir in `--working_dir`). For example,
 Llama3 checkpoints will be at `checkpoints/meta-llama/Llama-2-7b-hf/hf_original/*.safetensors`. You can replace these files with modified
 weights in HuggingFace format. 
+
+## Send one request
+
+Jetstream-pytorch uses gRPC for handling requests, the script below demonstrates how to
+send gRPC in Python. You can also use other gPRC clients.
+
+```python
+import requests
+import os
+import grpc
+
+from jetstream.core.proto import jetstream_pb2
+from jetstream.core.proto import jetstream_pb2_grpc
+
+prompt = "What are the top 5 languages?"
+
+channel = grpc.insecure_channel("localhost:8888")
+stub = jetstream_pb2_grpc.OrchestratorStub(channel)
+
+request = jetstream_pb2.DecodeRequest(
+    text_content=jetstream_pb2.DecodeRequest.TextContent(
+        text=prompt
+    ),
+    priority=0,
+    max_tokens=2000,
+)
+
+response = stub.Decode(request)
+output = []
+for resp in response:
+  output.extend(resp.stream_content.samples[0].text)
+
+text_output = "".join(output)
+print(f"Prompt: {prompt}")
+print(f"Response: {text_output}")
+```
 
 
 # Run the server with ray
