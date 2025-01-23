@@ -111,9 +111,8 @@ def serve():
   if FLAGS.prometheus_port != 0:
     if 1 <= FLAGS.prometheus_port <= 65535:
       metrics_server_config = MetricsServerConfig(
-        port=FLAGS.prometheus_port
-        model_name=FLAGS.model_name
-        )
+          port=FLAGS.prometheus_port, model_name=FLAGS.model_name
+      )
     else:
       raise ValueError(
           f"Invalid port number: {FLAGS.prometheus_port}. Port must be between 1 and 65535."
